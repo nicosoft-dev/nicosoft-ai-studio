@@ -141,3 +141,64 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# ──────────────────────────────────────────────────────────────
+# NicoSoft AI Studio specific
+# ──────────────────────────────────────────────────────────────
+
+# electron-vite build output (renderer/main/preload bundles)
+out/
+
+# electron-builder packaged artifacts + auto-update metadata
+dist/
+release/
+*.dmg
+*.exe
+*.exe.blockmap
+*.AppImage
+*.snap
+*.deb
+*.rpm
+*.pkg
+*.zip
+*.blockmap
+latest*.yml
+builder-debug.yml
+builder-effective-config.yaml
+
+# Native module build artifacts (better-sqlite3 etc.)
+build/Release/
+prebuilds/
+*.node
+
+# Local SQLite databases (dev / runtime data — never commit user data)
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/settings.json
+*.swp
+*.swo
+
+# Misc local
+.local/
+*.local
+tmp/
+.tmp/
