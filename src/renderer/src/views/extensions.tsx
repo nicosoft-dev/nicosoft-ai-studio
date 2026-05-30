@@ -1,0 +1,181 @@
+/* ============================================================
+   NicoSoft AI Studio — Extensions (MCP · Skills · Plugins)
+   UI framework with MOCK data only — no real connections.
+   MCP    = external tools / data
+   Skills = packaged workflows the model triggers
+   Plugins = bundles that install a whole set
+   ============================================================ */
+import { useState } from 'react'
+import type { ReactElement } from 'react'
+import { Icons } from '@/components/icons'
+import { Avatar, HealthDot } from '@/components/primitives'
+import { STUDIO_DATA } from '@/data/studio-data'
+import type { PluginBundle } from '@/types'
+
+/* — small flat switch — */
+function Toggle({ on, onClick }: { on: boolean; onClick: () => void }): ReactElement {
+  return (
+    <button className={"switch" + (on ? " on" : "")} onClick={onClick} role="switch" aria-checked={on}>
+      <span className="knob" />
+    </button>
+  );
+}
+
+/* — capability scope: All experts, or specific experts — */
+function ScopeChip({ scope }: { scope: 'all' | string[] }): ReactElement {
+  const { EXPERT_BY_ID } = STUDIO_DATA;
+  if (scope === "all") {
+    return <span className="scope-chip all"><Icons.users size={12} /> All experts</span>;
+  }
+  return (
+    <span className="scope-chip">
+      <span className="scope-avs">
+        {scope.map((id) => <Avatar key={id} expert={EXPERT_BY_ID[id]} size={18} />)}
+      </span>
+      {scope.map((id) => EXPERT_BY_ID[id].name).join(", ")}
+    </span>
+  );
+}
+
+function ExtTabHead({ help, action, onAdd }: { help: string; action: string; onAdd?: () => void }): ReactElement {
+  return (
+    <div className="ext-tabhead">
+      <span className="ext-help">{help}</span>
+      <button className="btn secondary sm" onClick={onAdd}><Icons.plus size={14} /> {action}</button>
+    </div>
+  );
+}
+
+/* ——— MCP ——— */
+function MCPTab(): ReactElement {
+  const { EXTENSIONS } = STUDIO_DATA;
+  return (
+    <div className="ext-tab">
+      <ExtTabHead help="External tools & data sources your experts can call." action="Add MCP server" />
+      <div className="ext-list">
+        {EXTENSIONS.mcp.map((m) => {
+          const ok = m.status === "connected";
+          const TI = m.transport === "stdio" ? Icons.terminal : Icons.link;
+          return (
+            <div className="ext-row" key={m.name}>
+              <span className="ext-lead"><TI size={16} /></span>
+              <div className="ext-main">
+                <div className="ext-line1">
+                  <span className="ext-name">{m.name}</span>
+                  <HealthDot status={ok ? "healthy" : "failing"} />
+                  <span className={"ext-status " + (ok ? "ok" : "err")}>
+                    {ok ? "connected" : "error · " + m.error}
+                  </span>
+                </div>
+                <div className="ext-line2 mono">{m.endpoint}</div>
+              </div>
+              <div className="ext-right">
+                <span className="ext-tools">{ok ? m.tools + " tools" : "—"}</span>
+                <ScopeChip scope={m.scope} />
+              </div>
+              <button className="icon-btn ext-more"><Icons.more size={16} /></button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ——— Skills ——— */
+function SkillsTab(): ReactElement {
+  const { EXTENSIONS } = STUDIO_DATA;
+  const [enabled, setEnabled] = useState(EXTENSIONS.skills.map((s) => s.enabled));
+  const toggle = (i: number): void => setEnabled((prev) => prev.map((v, j) => (j === i ? !v : v)));
+  return (
+    <div className="ext-tab">
+      <ExtTabHead help="Packaged workflows the model triggers on its own when relevant." action="Add skill" />
+      <div className="ext-list">
+        {EXTENSIONS.skills.map((s, i) => (
+          <div className={"ext-row" + (enabled[i] ? "" : " off")} key={s.name}>
+            <span className="ext-lead"><Icons.zap size={15} /></span>
+            <div className="ext-main">
+              <div className="ext-line1">
+                <span className="ext-name mono">{s.name}</span>
+                <span className="ext-source">{s.source}</span>
+              </div>
+              <div className="ext-line2">{s.desc}</div>
+            </div>
+            <div className="ext-right">
+              <ScopeChip scope={s.scope} />
+              <Toggle on={enabled[i]} onClick={() => toggle(i)} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ——— Plugins ——— */
+const BUNDLE_ICON: Record<PluginBundle['type'], string> = { skill: "zap", mcp: "terminal", role: "users" };
+function PluginsTab(): ReactElement {
+  const { EXTENSIONS } = STUDIO_DATA;
+  const [enabled, setEnabled] = useState(EXTENSIONS.plugins.map((p) => p.enabled));
+  const toggle = (i: number): void => setEnabled((prev) => prev.map((v, j) => (j === i ? !v : v)));
+  return (
+    <div className="ext-tab">
+      <ExtTabHead help="Bundles that install a whole set — skills, MCP servers and roles — at once." action="Browse plugins" />
+      <div className="ext-list">
+        {EXTENSIONS.plugins.map((p, i) => (
+          <div className={"ext-row plugin" + (enabled[i] ? "" : " off")} key={p.name}>
+            <span className="ext-lead"><Icons.box size={16} /></span>
+            <div className="ext-main">
+              <div className="ext-line1">
+                <span className="ext-name">{p.name}</span>
+                <span className="ext-source">{p.source}</span>
+              </div>
+              <div className="ext-line2">{p.desc}</div>
+              <div className="bundle-chips">
+                {p.bundles.map((b, j) => {
+                  const BI = Icons[BUNDLE_ICON[b.type]];
+                  return (
+                    <span className="bundle-chip" key={j}>
+                      <BI size={11} /><span className="bc-type">{b.type}</span>{b.name}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="ext-right">
+              <span className="ext-summary">{p.summary}</span>
+              <Toggle on={enabled[i]} onClick={() => toggle(i)} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function ExtensionsView(): ReactElement {
+  const { EXTENSIONS } = STUDIO_DATA;
+  const [tab, setTab] = useState("mcp");
+  const counts: Record<string, number> = { mcp: EXTENSIONS.mcp.length, skills: EXTENSIONS.skills.length, plugins: EXTENSIONS.plugins.length };
+  return (
+    <div className="main-col">
+      <div className="conv-header">
+        <span className="conv-title">Extensions</span>
+        <div className="studio-tabs segmented">
+          <button className={tab === "mcp" ? "active" : ""} onClick={() => setTab("mcp")}>MCP</button>
+          <button className={tab === "skills" ? "active" : ""} onClick={() => setTab("skills")}>Skills</button>
+          <button className={tab === "plugins" ? "active" : ""} onClick={() => setTab("plugins")}>Plugins</button>
+        </div>
+        <span className="conv-sub" style={{ marginLeft: "auto" }}>{counts[tab]} installed</span>
+      </div>
+      <div className="ext-body">
+        <div className="ext-inner">
+          {tab === "mcp" && <MCPTab />}
+          {tab === "skills" && <SkillsTab />}
+          {tab === "plugins" && <PluginsTab />}
+          <div className="ext-foot">Mock framework · connections are illustrative</div>
+        </div>
+      </div>
+    </div>
+  );
+}
