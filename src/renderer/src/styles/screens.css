@@ -367,7 +367,8 @@
    Settings
    ============================================================ */
 .settings-body { flex: 1; display: flex; min-height: 0; }
-.settings-nav { width: 210px; flex: 0 0 210px; background: var(--bg-1); border-right: 1px solid var(--border-1); padding: 14px 10px; }
+.settings-nav { width: 210px; flex: 0 0 210px; background: var(--bg-1); border-right: 1px solid var(--border-1); padding: 52px 10px 14px; -webkit-app-region: drag; }
+.settings-nav .sn-back, .settings-nav .sn-item { -webkit-app-region: no-drag; }
 .settings-nav .sn-back { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-3); padding: 7px 10px; border-radius: 6px; cursor: pointer; margin-bottom: 8px; }
 .settings-nav .sn-back:hover { background: var(--bg-2); color: var(--text-1); }
 .settings-nav .sn-item { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: 6px; font-size: 13px; color: var(--text-3); cursor: pointer; transition: background 0.1s, color 0.1s; }

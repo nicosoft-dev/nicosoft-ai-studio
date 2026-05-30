@@ -8,8 +8,11 @@ function createWindow(): void {
     minWidth: 1024,
     minHeight: 700,
     show: false,
-    // No native traffic-light controls (per design); custom window controls live in the topbar.
-    frame: false,
+    // macOS: keep native traffic lights but hide the title bar (content fills the window).
+    // The lights sit in the sidebar header strip (.sidebar-header in styles.css); drag regions
+    // are declared there and in .topbar via -webkit-app-region.
+    titleBarStyle: 'hidden',
+    trafficLightPosition: { x: 18, y: 19 },
     roundedCorners: true,
     backgroundColor: '#050507',
     webPreferences: {
@@ -35,7 +38,8 @@ function createWindow(): void {
   }
 }
 
-// Custom window controls (frameless window has no native buttons).
+// Reserved IPC for a custom window-control surface (native traffic lights are primary on
+// macOS; these back custom controls on platforms without native buttons).
 ipcMain.on('app:minimize', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
 ipcMain.on('app:close', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
 ipcMain.on('app:maximize', (e) => {

@@ -14,10 +14,6 @@ export function Topbar({ onCommand, onSettings }: { onCommand: () => void; onSet
   const { ENDPOINT_HEALTH } = STUDIO_DATA
   return (
     <div className="topbar">
-      <div className="app-name">
-        <span className="logo-mark">N</span>
-        NicoSoft AI Studio
-      </div>
       <div className="spacer" />
       <div className="health-cluster">
         {ENDPOINT_HEALTH.map((h) => (
@@ -172,6 +168,12 @@ export function Sidebar({
 
   return (
     <div className="sidebar">
+      <div className="sidebar-header">
+        <span className="app-name">
+          <span className="logo-mark">N</span>
+          NicoSoft AI Studio
+        </span>
+      </div>
       <div className="sidebar-scroll">
         <div className={"studio-nav-row" + (studioActive ? " active" : "")} onClick={onStudio}>
           <span className="sn-grid"><Icons.layoutGrid size={16} /></span>

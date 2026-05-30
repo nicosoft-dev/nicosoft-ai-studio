@@ -145,7 +145,6 @@ export default function App(): ReactElement {
 
   return (
     <div className="window">
-      <Topbar onCommand={() => setCmdk(true)} onSettings={openSettings} />
       {view === 'settings' ? (
         <SettingsView tab={settingsTab} onTab={setSettingsTab} onBack={() => setView('app')} />
       ) : (
@@ -166,7 +165,10 @@ export default function App(): ReactElement {
             onSelectConv={selectConv}
             onNewRole={() => setRoleDialog(true)}
           />
-          {view === 'studio' ? (
+          <div className="main-area">
+            <Topbar onCommand={() => setCmdk(true)} onSettings={openSettings} />
+            <div className="main-row">
+            {view === 'studio' ? (
             <StudioHome
               onOpenExpert={selectExpert}
               onOpenConv={selectConv}
@@ -214,7 +216,9 @@ export default function App(): ReactElement {
               />
             </div>
           )}
-          {view === 'app' && drawerOpen && <WorkspaceDrawer onClose={() => setDrawerOpen(false)} />}
+            {view === 'app' && drawerOpen && <WorkspaceDrawer onClose={() => setDrawerOpen(false)} />}
+          </div>
+          </div>
         </div>
       )}
 
