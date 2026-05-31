@@ -47,7 +47,9 @@ async function checkPermission(
   // runs unattended outside bypass mode (which already returned above). This is what makes
   // permissionMode 'default' actually gate writes/edits, not just bash-write commands.
   if (tool.isReadOnly(input)) return { allow: true, updatedInput: allowedInput }
-  const decision = await ctx.requestPermission({ toolName: tool.name, input, reason: askReason })
+  // Pass the turn signal so a turn-level abort (reactive compaction / cancel) unwedges a tool blocked
+  // on the user — the permission bridge denies + clears the prompt on abort instead of hanging.
+  const decision = await ctx.requestPermission({ toolName: tool.name, input, reason: askReason }, ctx.signal)
   return {
     allow: decision.allow,
     updatedInput: decision.updatedInput ?? allowedInput,

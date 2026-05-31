@@ -13,6 +13,7 @@ import type {
   AgentToolResults,
   AgentPermissionRequest,
   AgentPermissionResponse,
+  AgentPermissionCancel,
   AgentDone,
   AgentErrorDto
 } from '../main/ipc/contracts'
@@ -75,6 +76,7 @@ const api = {
     onAssistant: (cb: (d: AgentAssistant) => void): (() => void) => agentListen('agent:assistant', cb),
     onResults: (cb: (d: AgentToolResults) => void): (() => void) => agentListen('agent:results', cb),
     onPermission: (cb: (d: AgentPermissionRequest) => void): (() => void) => agentListen('agent:permission', cb),
+    onPermissionCancel: (cb: (d: AgentPermissionCancel) => void): (() => void) => agentListen('agent:permission:cancel', cb),
     onDone: (cb: (d: AgentDone) => void): (() => void) => agentListen('agent:done', cb),
     onError: (cb: (d: AgentErrorDto) => void): (() => void) => agentListen('agent:error', cb)
   }

@@ -105,6 +105,11 @@ export interface AgentPermissionResponse {
   allow: boolean
   updatedInput?: Record<string, unknown>
 }
+// Tells the renderer a pending prompt was cancelled by a run/turn abort — drop the now-moot dialog.
+export interface AgentPermissionCancel {
+  streamId: string
+  permissionId: string
+}
 export interface AgentDone {
   streamId: string
   reason: string

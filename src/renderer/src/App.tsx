@@ -14,6 +14,7 @@ import { ProjectsView } from '@/views/projects'
 import { ScheduledView } from '@/views/scheduled'
 import { ExpertDetail } from '@/views/expert'
 import { ConversationView, EmptyState, Composer } from '@/views/conversation'
+import { HexAgentView } from '@/views/hex'
 import { WorkspaceDrawer } from '@/views/workspace'
 
 const LS_KEY = 'nicosoft-studio-state-v1'
@@ -202,6 +203,8 @@ export default function App(): ReactElement {
               onOpenEndpoint={openEndpointsSettings}
               onDeleted={openStudio}
             />
+          ) : expert.id === 'hex' ? (
+            <HexAgentView expert={expert} onOpenSettings={openEndpointsSettings} />
           ) : conv ? (
             <ConversationView conv={conv} onOpenSettings={openSettings} />
           ) : (

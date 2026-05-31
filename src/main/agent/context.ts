@@ -23,8 +23,9 @@ export interface PermissionDecision {
 }
 
 // The approval hook. When a tool's checkPermissions returns 'ask', the loop calls this; the UI shows
-// an approval dialog and blocks on the user, while a headless script can auto-allow/deny.
-export type RequestPermission = (req: PermissionRequest) => Promise<PermissionDecision>
+// an approval dialog and blocks on the user, while a headless script can auto-allow/deny. The optional
+// signal lets the caller cancel a pending prompt (turn/run abort) so it denies instead of hanging.
+export type RequestPermission = (req: PermissionRequest, signal?: AbortSignal) => Promise<PermissionDecision>
 
 export interface TodoItem {
   content: string

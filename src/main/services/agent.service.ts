@@ -8,7 +8,7 @@ import { mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { ulid } from 'ulid'
-import type { AgentContext, PermissionDecision, PermissionRequest } from '../agent/context'
+import type { AgentContext, RequestPermission } from '../agent/context'
 import type { AgentLlmEvent } from '../agent/llm'
 import { runAgent, type AgentEvent } from '../agent/loop'
 import { CORE_TOOLS } from '../agent/registry'
@@ -21,7 +21,7 @@ import * as endpointRepo from '../repos/endpoint.repo'
 export interface AgentCallbacks {
   onStream: (e: AgentLlmEvent) => void // fine-grained deltas (text + tool_use input) for streaming UI
   onEvent: (e: AgentEvent) => void // completed assistant turns + tool_results
-  requestPermission: (req: PermissionRequest) => Promise<PermissionDecision> // bridged to the renderer
+  requestPermission: RequestPermission // bridged to the renderer (req, optional cancel signal)
 }
 
 export async function run(
@@ -42,6 +42,9 @@ export async function run(
   const sessionDir = join(homedir(), '.nsai', 'sessions', convId)
   await mkdir(join(sessionDir, 'tool-results'), { recursive: true })
   const transcript = createWriteStream(join(sessionDir, 'transcript.jsonl'), { flags: 'a' })
+  // Without an 'error' listener a failed write (disk full / perms) emits an unhandled 'error' that
+  // crashes the whole main process — for a logging side channel, swallow it.
+  transcript.on('error', () => {})
   const log = (obj: unknown): void => void transcript.write(JSON.stringify(obj) + '\n')
   log({ t: 'run', convId, cwd: input.cwd, model: input.model })
 
