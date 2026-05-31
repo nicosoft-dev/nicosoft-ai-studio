@@ -25,7 +25,12 @@ const MAX_CONTENT_CHARS = 500 // reject a "memory" longer than this (model rambl
 const RECALL_LLM_THRESHOLD = 15 // ≤ this many memories → inject all; above → LLM-filter for relevance
 const RECALL_TOKEN_BUDGET = 2000 // per-turn cap on injected memory tokens
 
-const EXTRACT_SYSTEM = `You extract durable, long-term memory from a conversation. Pull only facts or preferences worth remembering across future sessions — the user's stable traits, preferences, decisions, and context. Ignore transient chatter, task-specific details, and anything already obvious.
+// Sent as a single USER message (prepended to the transcript), NOT a system prompt: when the endpoint
+// routes through an OAuth-backed proxy the caller's system is replaced by the upstream's own identity,
+// which nudges the model into an assistant-style preamble ("I'll save your preferences…") around the
+// JSON. Keeping the instruction in the user turn makes extraction the explicit task; parseExtracted
+// still defends against any stray prose / code fence the model wraps the array in.
+const EXTRACT_INSTRUCTION = `You extract durable, long-term memory from a conversation. Pull only facts or preferences worth remembering across future sessions — the user's stable traits, preferences, decisions, and context. Ignore transient chatter, task-specific details, and anything already obvious.
 
 For each item, classify the layer:
 - "shared": a global fact/preference about the user, true regardless of which assistant they talk to (name, timezone, tech stack, communication style).
@@ -33,7 +38,7 @@ For each item, classify the layer:
 
 And the type: "fact" | "preference" | "learning".
 
-Return a JSON array (possibly empty). Each element: {"layer": "shared"|"role", "type": "fact"|"preference"|"learning", "content": "<one concise sentence>"}. Output JSON only, no prose.`
+Return a JSON array (possibly empty). Each element: {"layer": "shared"|"role", "type": "fact"|"preference"|"learning", "content": "<one concise sentence>"}. Output ONLY the JSON array — no preamble, no explanation, no markdown code fence.`
 
 // Module-level guard so the 60s idle-sweep timer can't stack a new sweep on a still-running one.
 let sweeping = false
@@ -72,10 +77,7 @@ export async function extract(ctx: ExtractContext, trigger: ExtractTrigger): Pro
         baseUrl: ep.baseUrl,
         apiKey: key,
         model,
-        messages: [
-          { role: 'system', content: EXTRACT_SYSTEM },
-          { role: 'user', content: transcript }
-        ]
+        messages: [{ role: 'user', content: `${EXTRACT_INSTRUCTION}\n\nConversation:\n${transcript}` }]
       },
       () => {} // non-streaming use
     )
@@ -203,18 +205,14 @@ async function llmFilter(input: RecallInput, pool: MemoryRow[]): Promise<MemoryR
 }
 
 function parseIndices(raw: string): number[] {
-  const text = raw
-    .trim()
-    .replace(/^```(?:json)?/i, '')
-    .replace(/```$/, '')
-    .trim()
-  try {
-    const arr = JSON.parse(text)
-    if (Array.isArray(arr)) return arr.filter((n): n is number => typeof n === 'number' && Number.isInteger(n))
-  } catch {
-    /* fall through to bare-integer extraction */
-  }
-  return (text.match(/\d+/g) ?? []).map(Number)
+  const arr = extractJsonArray(raw)
+  if (Array.isArray(arr)) return arr.filter((n): n is number => typeof n === 'number' && Number.isInteger(n))
+  // Malformed array — pull integers from the bracketed span only, so numbers in any prose preamble
+  // (e.g. "I found 3 relevant facts:") can't be miscounted as indices.
+  const start = raw.indexOf('[')
+  const end = raw.lastIndexOf(']')
+  const span = start >= 0 && end > start ? raw.slice(start, end + 1) : ''
+  return (span.match(/\d+/g) ?? []).map(Number)
 }
 
 // Heuristic for the explicit trigger — the user asking to be remembered.
@@ -229,18 +227,30 @@ interface Extracted {
   content: string
 }
 
-function parseExtracted(raw: string): Extracted[] {
-  const text = raw
-    .trim()
-    .replace(/^```(?:json)?/i, '')
-    .replace(/```$/, '')
-    .trim()
-  let arr: unknown
+// Pull the JSON memory array out of an LLM reply that may wrap it in a conversational preamble and/or a
+// ```json code fence (common when an OAuth-proxied model answers in assistant voice). Tries a clean
+// parse first, then falls back to the outermost [ … ] span.
+function extractJsonArray(raw: string): unknown {
+  const defenced = raw.replace(/```(?:json)?/gi, '').trim()
   try {
-    arr = JSON.parse(text)
+    return JSON.parse(defenced)
   } catch {
-    return []
+    /* not bare JSON — look for the array span below */
   }
+  const start = defenced.indexOf('[')
+  const end = defenced.lastIndexOf(']')
+  if (start >= 0 && end > start) {
+    try {
+      return JSON.parse(defenced.slice(start, end + 1))
+    } catch {
+      /* give up */
+    }
+  }
+  return null
+}
+
+function parseExtracted(raw: string): Extracted[] {
+  const arr = extractJsonArray(raw)
   if (!Array.isArray(arr)) return []
   const out: Extracted[] = []
   for (const e of arr) {

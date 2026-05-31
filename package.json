@@ -14,6 +14,7 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "e2e:smoke": "node e2e/smoke.mjs",
     "e2e:hex": "node e2e/hex-agent.mjs",
+    "e2e:title-memory": "node e2e/title-memory.mjs",
     "postinstall": "node scripts/ensure-electron.mjs"
   },
   "dependencies": {
