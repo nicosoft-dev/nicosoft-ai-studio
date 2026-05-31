@@ -91,7 +91,7 @@ function EndpointsPage({
             <span className="er-name">{ep.name}</span>
             <span className="er-proto">{ep.proto}</span>
             <span className={"er-status " + ep.status}>{ep.status}</span>
-            <span className="er-models">{ep.models} models</span>
+            <span className="er-models">{ep.models.length} models</span>
             <span className="er-key">key {ep.key}</span>
             <span className="er-actions">
               <button className="btn sm ghost" onClick={() => onEdit(ep)}>Edit</button>
@@ -124,6 +124,9 @@ function RoleBindRow({
   const epOpts = endpoints.map((ep) => ({ v: ep.name, l: ep.name }));
   const family = binding.family;
   const epName = (binding as RoleBinding & { endpoint?: string }).endpoint || (endpoints.find((e) => e.proto === family) || {}).name || endpoints[0].name;
+  const selectedEp = endpoints.find((e) => e.name === epName);
+  const modelOpts = (selectedEp?.models ?? []).map((m) => ({ v: m, l: m }));
+  const safeModelOpts = modelOpts.length > 0 ? modelOpts : [{ v: "", l: "— no models —" }];
 
   return (
     <div className="role-bind-row">
@@ -136,20 +139,12 @@ function RoleBindRow({
         <div className="rb-controls">
           <div style={{ width: 150 }}>
             <Dropdown options={epOpts} value={epName}
-              onChange={(v: string) => { const f = ((endpoints.find((e) => e.name === v) || {}).proto) as Family; onChange({ endpoint: v, family: f }); }} />
+              onChange={(v: string) => { const ep = endpoints.find((e) => e.name === v); onChange({ endpoint: v, family: ep?.proto as Family, model: ep?.models[0] ?? "" }); }} />
           </div>
-          {/* Model is a free-text slug: endpoints expose non-standard ids (e.g. nicosoft/claude-…),
-              so a fixed dropdown can't cover them. Same 34px height as the endpoint select. */}
+          {/* Model options are the selected endpoint's configured slug list (set in the endpoint
+              dialog). Switching endpoint repopulates them and resets to its first model. */}
           <div style={{ width: 168 }}>
-            <input
-              className="input mono"
-              type="text"
-              value={binding.model}
-              placeholder="provider/model-id"
-              spellCheck={false}
-              autoComplete="off"
-              onChange={(e) => onChange({ model: e.target.value })}
-            />
+            <Dropdown options={safeModelOpts} value={binding.model} onChange={(v: string) => onChange({ model: v })} />
           </div>
         </div>
       </div>

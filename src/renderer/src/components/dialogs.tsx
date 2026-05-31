@@ -32,14 +32,22 @@ export function EndpointDialog({
   const [apiKey, setApiKey] = useState("")
   const [showKey, setShowKey] = useState(false)
   const [tested, setTested] = useState(false)
+  const [models, setModels] = useState<string[]>(initial?.models ?? [])
+  const [modelDraft, setModelDraft] = useState("")
   const editing = !!initial
+
+  const addModel = (raw: string): void => {
+    const v = raw.trim()
+    if (v && !models.includes(v)) setModels([...models, v]) // duplicates ignored
+    setModelDraft("")
+  }
 
   const save = (): void => {
     const masked = apiKey ? "••••••" + apiKey.slice(-4) : (initial ? initial.key : "••••••0000")
     onSave({
       name: name || "Untitled", proto: proto as Family,
       status: editing ? initial!.status : "healthy",
-      models: tested ? 6 : (editing ? initial!.models : 6),
+      models,
       key: masked, baseURL,
     }, initial ?? null)
   }
@@ -81,9 +89,36 @@ export function EndpointDialog({
               </button>
             </div>
           </div>
+          <div>
+            <label className="field-label">
+              Models <span style={{ color: "var(--text-4)", fontWeight: 400 }}>· {models.length}</span>
+            </label>
+            <div className="model-tags" onClick={(e) => (e.currentTarget.querySelector(".mt-input") as HTMLInputElement | null)?.focus()}>
+              {models.map((m) => (
+                <span className="model-tag" key={m}>
+                  {m}
+                  <button className="mt-remove" title="Remove" onClick={() => setModels(models.filter((x) => x !== m))}>
+                    <Icons.x size={11} />
+                  </button>
+                </span>
+              ))}
+              <input
+                className="mt-input"
+                value={modelDraft}
+                onChange={(e) => setModelDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addModel(modelDraft); }
+                  else if (e.key === "Backspace" && !modelDraft && models.length > 0) setModels(models.slice(0, -1));
+                }}
+                placeholder={models.length > 0 ? "Add another…" : "provider/model-id, press Enter"}
+                spellCheck={false}
+                autoComplete="off"
+              />
+            </div>
+          </div>
           {tested && (
             <div className="test-success">
-              <Icons.check size={15} /> Connected · 6 models found
+              <Icons.check size={15} /> Connection OK
             </div>
           )}
         </div>

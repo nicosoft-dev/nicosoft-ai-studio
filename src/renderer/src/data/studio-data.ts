@@ -200,10 +200,10 @@ const ENDPOINT_HEALTH: EndpointHealth[] = [
 ]
 
 const ENDPOINTS: EndpointRow[] = [
-  { name: 'Anthropic', proto: 'anthropic', status: 'healthy', models: 2, key: '••••••7f2a' },
-  { name: 'OpenAI', proto: 'openai', status: 'healthy', models: 2, key: '••••••a91c' },
-  { name: 'Google Gemini', proto: 'gemini', status: 'healthy', models: 3, key: '••••••3d80' },
-  { name: 'My Gateway', proto: 'openai', status: 'degraded', models: 12, key: '••••••0c4e' }
+  { name: 'Anthropic', proto: 'anthropic', status: 'healthy', models: ['claude-haiku-4', 'claude-sonnet-4.6'], key: '••••••7f2a' },
+  { name: 'OpenAI', proto: 'openai', status: 'healthy', models: ['gpt-5-mini', 'gpt-5'], key: '••••••a91c' },
+  { name: 'Google Gemini', proto: 'gemini', status: 'healthy', models: ['gemini-2.5-flash', 'gemini-2.5-pro', 'imagen-4'], key: '••••••3d80' },
+  { name: 'My Gateway', proto: 'openai', status: 'degraded', models: ['nicosoft/claude-opus-4-7', 'nicosoft/gpt-5.4', 'nicosoft/claude-sonnet-4-6', 'nicosoft/gpt-5.4-mini'], key: '••••••0c4e' }
 ]
 
 const ROLE_BINDINGS: RoleBinding[] = [

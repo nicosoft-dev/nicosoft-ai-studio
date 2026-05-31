@@ -160,7 +160,7 @@ export interface EndpointRow {
   name: string
   proto: Family
   status: string
-  models: number
+  models: string[] // configured model slugs this endpoint serves; Roles binds to one of these
   key: string
   baseURL?: string
 }
