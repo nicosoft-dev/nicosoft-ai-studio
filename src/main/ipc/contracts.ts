@@ -31,13 +31,11 @@ export interface EndpointTestResult {
 }
 
 export interface ChatSendInput {
+  convId: string
+  roleId: string
   endpointId: string
   model: string
-  messages: {
-    role: 'system' | 'user' | 'assistant'
-    content: string
-    attachments?: { url: string; mime?: string }[] // image data URLs → adapter image blocks
-  }[]
+  systemPrompt: string // the role's system prompt; backend layers memories/summary/history beneath it
   // Resolved by the renderer's thinking engine; one of effort (OpenAI/Gemini-3) or budgetTokens
   // (Anthropic/Gemini-2.5). Omitted when the model can't think.
   thinking?: { effort?: 'minimal' | 'none' | 'low' | 'medium' | 'high' | 'xhigh'; budgetTokens?: number }

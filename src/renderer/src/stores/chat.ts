@@ -152,8 +152,8 @@ export const useChat = create<ChatState>((set, get) => {
       const cid = convId
       const userImages = (images ?? []).map((i) => ({ url: i.dataUrl, name: i.name }))
 
-      // Optimistic render FIRST (no empty-state flash, no wait on the DB), then persist the user
-      // message fire-and-forget. The streaming assistant placeholder fills in via onDelta/onDone.
+      // Optimistic render FIRST (no empty-state flash). Persisting the user turn + chat.send happen
+      // below inside one try; the streaming assistant placeholder fills in via onDelta/onDone.
       set((s) => {
         const prev = s.byConversation[cid] ?? []
         return {
@@ -169,13 +169,6 @@ export const useChat = create<ChatState>((set, get) => {
           error: { ...s.error, [cid]: null }
         }
       })
-      void window.api.conversations.append(cid, {
-        author: 'user',
-        expertId,
-        content: text,
-        attachments: userImages.map((i) => ({ url: i.url, name: i.name }))
-      })
-
       // First message of a fresh thread → generate a real title (Haiku→Sonnet→main model, in the
       // backend) and patch it into the history list when it lands. Async, never blocks the reply.
       if (isNew) {
@@ -189,19 +182,27 @@ export const useChat = create<ChatState>((set, get) => {
       }
 
       const expert = STUDIO_DATA.EXPERT_BY_ID[expertId]
-      const system = expert ? `You are ${expert.name}, ${expert.specialty.toLowerCase()}. ${expert.personality}.` : ''
-      const history = (get().byConversation[cid] ?? []).filter((m) => !(m.role === 'assistant' && m.streaming))
-      const messages = [
-        ...(system ? [{ role: 'system' as const, content: system }] : []),
-        ...history.map((m) => ({
-          role: m.role,
-          content: m.text,
-          ...(m.images && m.images.length ? { attachments: m.images.map((img) => ({ url: img.url })) } : {})
-        }))
-      ]
+      const systemPrompt = expert
+        ? `You are ${expert.name}, ${expert.specialty.toLowerCase()}. ${expert.personality}.`
+        : ''
 
       try {
-        const { streamId } = await window.api.chat.send({ endpointId, model, messages, thinking })
+        // Persist the user turn first — the backend assembles context by reading this conversation's
+        // messages from the DB, so it must be stored before chat.send. Both share this catch.
+        await window.api.conversations.append(cid, {
+          author: 'user',
+          expertId,
+          content: text,
+          attachments: userImages.map((i) => ({ url: i.url, name: i.name }))
+        })
+        const { streamId } = await window.api.chat.send({
+          convId: cid,
+          roleId: expertId,
+          endpointId,
+          model,
+          systemPrompt,
+          thinking
+        })
         streamMeta.set(streamId, { convId: cid, expertId, endpointId, model })
       } catch (e) {
         set((s) => {

@@ -22,6 +22,8 @@ const MIN_MESSAGES = 2 // skip empty / one-line threads
 const DEDUP_THRESHOLD = 0.6 // Jaccard above this → same memory, update in place
 const MAX_TRANSCRIPT_CHARS = 12_000 // feed only the tail of a long conversation to the extractor
 const MAX_CONTENT_CHARS = 500 // reject a "memory" longer than this (model rambled)
+const RECALL_LLM_THRESHOLD = 15 // ≤ this many memories → inject all; above → LLM-filter for relevance
+const RECALL_TOKEN_BUDGET = 2000 // per-turn cap on injected memory tokens
 
 const EXTRACT_SYSTEM = `You extract durable, long-term memory from a conversation. Pull only facts or preferences worth remembering across future sessions — the user's stable traits, preferences, decisions, and context. Ignore transient chatter, task-specific details, and anything already obvious.
 
@@ -139,6 +141,80 @@ export async function runIdleSweep(): Promise<void> {
   } finally {
     sweeping = false
   }
+}
+
+export interface RecallInput {
+  convId: string
+  roleId: string
+  endpointId: string
+  model: string
+}
+
+// Recall the memories to inject for this turn: shared + this role's own, two-stage — inject all when
+// few, else LLM-filter by relevance to the recent conversation; then cap to the per-turn token budget
+// (newest first). Best-effort: on any LLM failure, fall back to the unfiltered pool.
+export async function recall(input: RecallInput): Promise<MemoryRow[]> {
+  const pool = memoryRepo.listForRole(input.roleId) // shared + role, newest first
+  if (!pool.length) return []
+  const selected = pool.length > RECALL_LLM_THRESHOLD ? ((await llmFilter(input, pool)) ?? pool) : pool
+  return capByBudget(selected)
+}
+
+function capByBudget(memories: MemoryRow[]): MemoryRow[] {
+  const out: MemoryRow[] = []
+  let total = 0
+  for (const m of memories) {
+    if (out.length && total + m.tokens > RECALL_TOKEN_BUDGET) break // always keep at least the newest
+    out.push(m)
+    total += m.tokens
+  }
+  return out
+}
+
+// Ask a small model which memories are relevant to the recent conversation. Uses short 1-based indices
+// (not ids) in the prompt — cheap, and no id round-trip. Returns null on failure so recall falls back
+// to the unfiltered pool.
+async function llmFilter(input: RecallInput, pool: MemoryRow[]): Promise<MemoryRow[] | null> {
+  const ep = endpointRepo.getById(input.endpointId)
+  if (!ep) return null
+  const key = keychain.getApiKey(input.endpointId)
+  if (!key) return null
+  const model = pickSmallModel(ep.protocol, ep.availableModels, input.model)
+  const recent = convRepo
+    .listByConversation(input.convId)
+    .slice(-6)
+    .map((m) => `${m.author === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+    .join('\n')
+    .slice(-2000)
+  const indexed = pool.map((m, i) => `${i + 1}. ${m.content}`).join('\n')
+  const prompt = `From the numbered facts below, return a JSON array of the index numbers relevant to the current conversation. Include only genuinely relevant facts; return [] if none.\n\nConversation:\n${recent}\n\nFacts:\n${indexed}`
+  try {
+    const result = await llmChat(
+      { protocol: ep.protocol, baseUrl: ep.baseUrl, apiKey: key, model, messages: [{ role: 'user', content: prompt }] },
+      () => {}
+    )
+    const picked = parseIndices(result.text)
+      .map((i) => pool[i - 1])
+      .filter((m): m is MemoryRow => !!m)
+    return picked.length ? picked : null
+  } catch {
+    return null
+  }
+}
+
+function parseIndices(raw: string): number[] {
+  const text = raw
+    .trim()
+    .replace(/^```(?:json)?/i, '')
+    .replace(/```$/, '')
+    .trim()
+  try {
+    const arr = JSON.parse(text)
+    if (Array.isArray(arr)) return arr.filter((n): n is number => typeof n === 'number' && Number.isInteger(n))
+  } catch {
+    /* fall through to bare-integer extraction */
+  }
+  return (text.match(/\d+/g) ?? []).map(Number)
 }
 
 // Heuristic for the explicit trigger — the user asking to be remembered.
