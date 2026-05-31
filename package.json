@@ -19,6 +19,7 @@
     "@fontsource/jetbrains-mono": "^5.1.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "ulid": "^3.0.2",
     "zustand": "^5.0.2"
   },
   "devDependencies": {

@@ -1,0 +1,136 @@
+// Anthropic Messages API adapter (POST /v1/messages, stream). System turns are hoisted to the
+// top-level `system` string; messages keep only user/assistant. SSE usage spans two events:
+// message_start (input_tokens) and message_delta (output_tokens); text is in content_block_delta.
+
+import type { ChatAttachment, ChatFn, ChatMessage, ChatRequest, ChatResult, OnDelta } from './types'
+import { iterSSE, openStream, parseJSON, toLlmError } from './_shared'
+
+const PROVIDER = 'anthropic'
+const MAX_TOKENS = 4096
+
+interface TextBlock {
+  type: 'text'
+  text: string
+}
+interface ImageSourceBase64 {
+  type: 'base64'
+  media_type: string
+  data: string
+}
+interface ImageSourceUrl {
+  type: 'url'
+  url: string
+}
+interface ImageBlock {
+  type: 'image'
+  source: ImageSourceBase64 | ImageSourceUrl
+}
+type ContentBlock = TextBlock | ImageBlock
+
+interface AnthropicMessage {
+  role: 'user' | 'assistant'
+  content: ContentBlock[]
+}
+
+interface MessagesBody {
+  model: string
+  messages: AnthropicMessage[]
+  max_tokens: number
+  stream: true
+  system?: string
+}
+
+// Turn a single attachment into an Anthropic image block. data: URLs are split into base64 source;
+// remote URLs use the url source form.
+function imageBlock(att: ChatAttachment): ImageBlock {
+  const m = /^data:([^;]+);base64,(.*)$/s.exec(att.url)
+  if (m) {
+    return { type: 'image', source: { type: 'base64', media_type: m[1], data: m[2] } }
+  }
+  if (att.url.startsWith('data:') && att.mime) {
+    // Non-base64 data URL fallback: take everything after the first comma as the payload.
+    const comma = att.url.indexOf(',')
+    return { type: 'image', source: { type: 'base64', media_type: att.mime, data: att.url.slice(comma + 1) } }
+  }
+  return { type: 'image', source: { type: 'url', url: att.url } }
+}
+
+// Convert non-system messages to Anthropic message blocks (text + image content).
+function toMessages(messages: ChatMessage[]): AnthropicMessage[] {
+  const out: AnthropicMessage[] = []
+  for (const m of messages) {
+    if (m.role === 'system') continue
+    const content: ContentBlock[] = []
+    for (const att of m.attachments ?? []) content.push(imageBlock(att))
+    if (m.content) content.push({ type: 'text', text: m.content })
+    if (content.length === 0) content.push({ type: 'text', text: '' })
+    out.push({ role: m.role, content })
+  }
+  return out
+}
+
+function toSystem(messages: ChatMessage[]): string | undefined {
+  const parts = messages.filter((m) => m.role === 'system' && m.content).map((m) => m.content)
+  return parts.length > 0 ? parts.join('\n\n') : undefined
+}
+
+function buildBody(req: ChatRequest): MessagesBody {
+  const body: MessagesBody = {
+    model: req.model,
+    messages: toMessages(req.messages),
+    max_tokens: MAX_TOKENS,
+    stream: true,
+  }
+  const system = toSystem(req.messages)
+  if (system) body.system = system
+  return body
+}
+
+interface AnthropicEvent {
+  type?: string
+  delta?: { text?: string }
+  message?: { usage?: { input_tokens?: number; output_tokens?: number } }
+  usage?: { input_tokens?: number; output_tokens?: number }
+}
+
+export const chatAnthropic: ChatFn = async (req: ChatRequest, onDelta: OnDelta): Promise<ChatResult> => {
+  const url = `${req.baseUrl.replace(/\/$/, '')}/v1/messages`
+  const reader = await openStream(PROVIDER, url, {
+    method: 'POST',
+    headers: {
+      'x-api-key': req.apiKey,
+      'anthropic-version': '2023-06-01',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(buildBody(req)),
+    signal: req.signal,
+  })
+
+  let text = ''
+  let inTokens = 0
+  let outTokens = 0
+
+  try {
+    for await (const payload of iterSSE(reader)) {
+      const ev = parseJSON(payload) as AnthropicEvent | null
+      if (!ev || typeof ev.type !== 'string') continue
+      if (ev.type === 'content_block_delta') {
+        const d = ev.delta?.text
+        if (typeof d === 'string' && d.length > 0) {
+          text += d
+          onDelta({ text: d })
+        }
+      } else if (ev.type === 'message_start') {
+        const u = ev.message?.usage
+        if (u && typeof u.input_tokens === 'number') inTokens = u.input_tokens
+        if (u && typeof u.output_tokens === 'number') outTokens = u.output_tokens
+      } else if (ev.type === 'message_delta') {
+        if (ev.usage && typeof ev.usage.output_tokens === 'number') outTokens = ev.usage.output_tokens
+      }
+    }
+  } catch (err) {
+    throw toLlmError(PROVIDER, err)
+  }
+
+  return { text, usage: { inTokens, outTokens }, model: req.model }
+}

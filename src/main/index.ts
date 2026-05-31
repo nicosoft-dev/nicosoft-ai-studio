@@ -1,5 +1,7 @@
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
+import { getDb } from './db/connection'
+import { registerIpc } from './ipc/register'
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -49,6 +51,8 @@ ipcMain.on('app:maximize', (e) => {
 })
 
 app.whenReady().then(() => {
+  getDb() // open SQLite + run migrations (idempotent) before any IPC handler can hit it
+  registerIpc()
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
