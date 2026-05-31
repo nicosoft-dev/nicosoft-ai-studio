@@ -12,4 +12,5 @@ export function registerRoleHandlers(): void {
   ipcMain.handle('roles:state:set', (_e, roleId: string, patch: { enabled?: boolean; selfLearningEnabled?: boolean }) =>
     rolesService.setState(roleId, patch)
   )
+  ipcMain.handle('roles:remove', (_e, roleId: string) => rolesService.remove(roleId))
 }

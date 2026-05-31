@@ -1,4 +1,7 @@
 import * as roleRepo from '../repos/role.repo'
+import * as memoryRepo from '../repos/memory.repo'
+import * as convRepo from '../repos/conversation.repo'
+import { transaction } from '../db/connection'
 import type { RoleBindingDto, RoleBindingInput, RoleStateDto } from '../ipc/contracts'
 
 // Business layer for role bindings (endpoint/model/thinking) + per-role state (enabled / self-learning).
@@ -41,4 +44,20 @@ export function setState(
   return s
     ? toStateDto(s)
     : { roleId, enabled: patch.enabled ?? true, selfLearningEnabled: patch.selfLearningEnabled ?? true }
+}
+
+// Delete a role and cascade its data atomically: role-layer memories + the role's conversations
+// (messages, summaries, extraction_state cascade via FK) + bindings + state + the custom-role row.
+// Shared memory is global and intentionally kept.
+export function remove(roleId: string): void {
+  // Only custom roles can be deleted — never cascade-delete a built-in role's conversations/memory,
+  // even if an IPC caller asks. Built-ins aren't in custom_roles, so getCustom gates them out.
+  if (!roleRepo.getCustom(roleId)) return
+  transaction(() => {
+    memoryRepo.removeByRole(roleId)
+    convRepo.removeByRole(roleId)
+    roleRepo.removeBinding(roleId)
+    roleRepo.removeState(roleId)
+    roleRepo.removeCustom(roleId)
+  })
 }

@@ -73,3 +73,18 @@ export function closeDb(): void {
   instance?.close()
   instance = null
 }
+
+// Run fn inside a transaction; commit on success, roll back on throw. For multi-table operations that
+// must be atomic — e.g. deleting a role and cascading its memories + conversations.
+export function transaction<T>(fn: () => T): T {
+  const db = getDb()
+  db.exec('BEGIN')
+  try {
+    const result = fn()
+    db.exec('COMMIT')
+    return result
+  } catch (e) {
+    db.exec('ROLLBACK')
+    throw e
+  }
+}

@@ -149,6 +149,12 @@ export function remove(id: string): void {
   getDb().prepare('DELETE FROM conversations WHERE id = ?').run(id)
 }
 
+// Delete every conversation a role owns; their messages, summaries, and extraction_state rows cascade
+// via FK. Used when a role is deleted.
+export function removeByRole(roleId: string): void {
+  getDb().prepare('DELETE FROM conversations WHERE primary_role_id = ?').run(roleId)
+}
+
 // --- messages ---
 
 export function append(conversationId: string, input: MessageAppendInput): MessageRow {

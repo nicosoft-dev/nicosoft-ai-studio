@@ -109,7 +109,7 @@ export function RoleRow({
       )}
       {confirm && (
         <ConfirmDialog title={`Delete ${expert.name}?`}
-          body={`This removes the ${expert.name} role and its bindings. Past conversations stay in your History. This can't be undone.`}
+          body={`This removes ${expert.name}, its conversations, and what it learned about you. Shared memory is kept. This can't be undone.`}
           confirmLabel="Delete role" danger
           onConfirm={() => roles.remove(expert.id)} onClose={() => setConfirm(false)} />
       )}

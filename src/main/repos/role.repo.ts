@@ -136,6 +136,10 @@ export function listBindings(): RoleBinding[] {
   return rows.map(mapBinding)
 }
 
+export function removeBinding(roleId: string): void {
+  getDb().prepare('DELETE FROM role_bindings WHERE role_id = ?').run(roleId)
+}
+
 // --- states ---
 
 export function getState(roleId: string): RoleState | null {
@@ -168,6 +172,10 @@ export function setState(
 export function listStates(): RoleState[] {
   const rows = getDb().prepare('SELECT * FROM role_states').all() as unknown as RoleStateRaw[]
   return rows.map(mapState)
+}
+
+export function removeState(roleId: string): void {
+  getDb().prepare('DELETE FROM role_states WHERE role_id = ?').run(roleId)
 }
 
 // --- custom roles ---
@@ -258,4 +266,11 @@ export function listCustom(): CustomRoleRow[] {
     .prepare('SELECT * FROM custom_roles ORDER BY created_at ASC')
     .all() as unknown as CustomRoleRaw[]
   return rows.map(mapCustom)
+}
+
+export function getCustom(id: string): CustomRoleRow | null {
+  const row = getDb().prepare('SELECT * FROM custom_roles WHERE id = ?').get(id) as unknown as
+    | CustomRoleRaw
+    | undefined
+  return row ? mapCustom(row) : null
 }

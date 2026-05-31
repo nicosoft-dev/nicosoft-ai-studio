@@ -110,7 +110,8 @@ const api = {
     setState: (
       roleId: string,
       patch: { enabled?: boolean; selfLearningEnabled?: boolean }
-    ): Promise<RoleStateDto> => ipcRenderer.invoke('roles:state:set', roleId, patch)
+    ): Promise<RoleStateDto> => ipcRenderer.invoke('roles:state:set', roleId, patch),
+    remove: (roleId: string): Promise<void> => ipcRenderer.invoke('roles:remove', roleId)
   },
 
   conversations: {

@@ -265,7 +265,7 @@ export function ExpertDetail({
             <div className="detail-section">
               <div className="ds-head"><span className="ds-title">Danger zone</span></div>
               <div className="detail-card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14 }}>
-                <span style={{ fontSize: 13, color: "var(--text-3)" }}>Delete this custom role. Past conversations stay in History.</span>
+                <span style={{ fontSize: 13, color: "var(--text-3)" }}>Delete this custom role, its conversations, and its role memory. Shared memory is kept.</span>
                 <button className="btn danger sm" onClick={() => setConfirm(true)}><Icons.trash size={14} /> Delete role</button>
               </div>
             </div>
@@ -274,7 +274,7 @@ export function ExpertDetail({
       </div>
       {confirm && (
         <ConfirmDialog title={`Delete ${e.name}?`}
-          body={`This removes the ${e.name} role and its bindings. Past conversations stay in your History. This can't be undone.`}
+          body={`This removes ${e.name}, its conversations, and what it learned about you. Shared memory is kept. This can't be undone.`}
           confirmLabel="Delete role" danger
           onConfirm={() => { roles.remove(expertId); onDeleted && onDeleted(); }} onClose={() => setConfirm(false)} />
       )}
