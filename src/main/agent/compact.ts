@@ -16,8 +16,9 @@ const COMPACTABLE_TOOLS = new Set(['Read', 'Bash', 'Grep', 'Glob', 'Edit', 'Writ
 const CLEARED_MARKER = '[old tool result content cleared to save context]'
 const KEEP_RECENT_RESULTS = 5
 
-// nsai injects a system prompt that estimateTokens() can't see (~2300 tokens empirically). Reserve a
-// fixed amount so the estimate isn't blind to it (especially right after compaction / on turn 1).
+// A gateway or platform may inject a system prompt that estimateTokens() can't see (~2300 tokens
+// observed). Reserve a fixed amount so the estimate isn't blind to it (especially right after
+// compaction / on turn 1). Harmless against a raw endpoint that injects nothing — just extra margin.
 export const SYSTEM_PROMPT_RESERVE = 3_000
 
 // === Layer 2: microcompact ===
