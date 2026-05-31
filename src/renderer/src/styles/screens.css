@@ -329,15 +329,16 @@
 .overlay.top { align-items: flex-start; padding-top: 110px; }
 
 .dialog {
-  width: 480px; max-width: 100%; background: var(--bg-1);
+  width: 480px; max-width: 100%; max-height: 90vh; background: var(--bg-1);
   border: 1px solid var(--border-2); border-radius: var(--r-xl);
   box-shadow: var(--shadow-float); animation: dialog-in 0.16s both; overflow: hidden;
+  display: flex; flex-direction: column;
 }
 .dialog.wide { width: 560px; }
-.dialog-head { display: flex; align-items: center; padding: 16px 18px; border-bottom: 1px solid var(--border-1); }
+.dialog-head { display: flex; align-items: center; padding: 16px 18px; border-bottom: 1px solid var(--border-1); flex: none; }
 .dialog-head .dh-title { font-size: 16px; color: var(--text-1); font-weight: 500; letter-spacing: -0.01em; flex: 1; }
-.dialog-body { padding: 18px; display: flex; flex-direction: column; gap: 15px; }
-.dialog-foot { display: flex; align-items: center; gap: 9px; padding: 14px 18px; border-top: 1px solid var(--border-1); }
+.dialog-body { padding: 18px; display: flex; flex-direction: column; gap: 15px; overflow-y: auto; flex: 1; min-height: 0; }
+.dialog-foot { display: flex; align-items: center; gap: 9px; padding: 14px 18px; border-top: 1px solid var(--border-1); flex: none; }
 .dialog-foot .df-spacer { flex: 1; }
 
 /* command palette */

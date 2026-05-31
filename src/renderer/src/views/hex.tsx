@@ -11,6 +11,7 @@ import { AttachmentStrip } from '@/components/attachment-strip'
 import { ImageViewer, type ViewerImage } from '@/components/image-viewer'
 import { Icons } from '@/components/icons'
 import { ModelPicker, ThinkingPicker } from '@/components/composer-controls'
+import { EmptyState } from '@/components/empty-state'
 import { PathBar } from '@/components/path-bar'
 import { Avatar, NameChip } from '@/components/primitives'
 import { ToolBubble } from '@/components/tool-bubble'
@@ -142,9 +143,13 @@ export function HexAgentView({ expert, onOpenSettings }: { expert: Expert; onOpe
     <div className="main-col">
       <div className="msg-list" ref={listRef}>
         <div className="msg-inner">
-          {hex.messages.map((m) => (
-            <HexSegment key={m.id} msg={m} expert={expert} onOpenImage={openImage} />
-          ))}
+          {hex.messages.length === 0 ? (
+            <EmptyState expert={expert} onChip={setValue} />
+          ) : (
+            hex.messages.map((m) => (
+              <HexSegment key={m.id} msg={m} expert={expert} onOpenImage={openImage} />
+            ))
+          )}
           {hex.error ? (
             <div className="inline-notice">
               <span className="n-icon">

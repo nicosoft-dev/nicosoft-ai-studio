@@ -8,8 +8,8 @@ import { Icons } from '@/components/icons'
 import { AttachmentStrip } from '@/components/attachment-strip'
 import { ImageViewer, type ViewerImage } from '@/components/image-viewer'
 import { ModelPicker, ThinkingPicker } from '@/components/composer-controls'
+import { EmptyState } from '@/components/empty-state'
 import { PathBar } from '@/components/path-bar'
-import { STUDIO_DATA } from '@/data/studio-data'
 import { useWorkspace } from '@/stores/workspace'
 import { Avatar, NameChip } from '@/components/primitives'
 import { useChat, type ChatMessage } from '@/stores/chat'
@@ -190,30 +190,6 @@ function Composer({
               </button>
             )}
           </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/* — Empty / new-conversation state — */
-function EmptyState({ expert, onChip }: { expert: Expert; onChip: (c: string) => void }): ReactElement {
-  const { GREETINGS } = STUDIO_DATA
-  const g = GREETINGS[expert.id] || GREETINGS.iris
-  return (
-    <div className="empty-state">
-      <div className="empty-inner">
-        <div className="big-avatar">
-          <Avatar expert={expert} size={48} />
-        </div>
-        <div className="es-name">{expert.name}</div>
-        <div className="es-greet">{g.greeting}</div>
-        <div className="example-chips">
-          {g.chips.map((c, i) => (
-            <button className="example-chip" key={i} onClick={() => onChip(c)}>
-              {c}
-            </button>
-          ))}
         </div>
       </div>
     </div>
