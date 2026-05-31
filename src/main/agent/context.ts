@@ -31,6 +31,11 @@ export interface TodoItem {
   status: 'pending' | 'in_progress' | 'completed'
 }
 
+// For the Task tool: run an isolated sub-agent loop and return its final text. runAgent injects this
+// into the context tools see; the sub-agent gets a fresh readFileState/todos and no Task tool, so
+// recursion is bounded to one level.
+export type SpawnSubAgent = (input: { description: string; prompt: string }) => Promise<string>
+
 export interface AgentContext {
   cwd: string // confined project root; every tool path must resolve under this
   signal: AbortSignal // cancellation — threaded into bash spawns and sub-agents
@@ -38,4 +43,5 @@ export interface AgentContext {
   permissionMode: PermissionMode
   requestPermission: RequestPermission
   todos: TodoItem[] // the agent's working todo list (TodoWrite replaces it); UI renders it in H4
+  spawnSubAgent?: SpawnSubAgent // set by runAgent for the Task tool; undefined inside a sub-agent
 }

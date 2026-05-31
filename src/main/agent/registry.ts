@@ -10,6 +10,7 @@ import { grepTool } from './tools/grep'
 import { lsTool } from './tools/ls'
 import { multiEditTool } from './tools/multiedit'
 import { readTool } from './tools/read'
+import { taskTool } from './tools/task'
 import { todoTool } from './tools/todo'
 import { writeTool } from './tools/write'
 
@@ -23,4 +24,5 @@ export const CORE_TOOLS: readonly Tool[] = [
   grepTool,
   bashTool,
   todoTool,
+  taskTool,
 ] as unknown as Tool[]
