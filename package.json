@@ -12,6 +12,8 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "e2e:smoke": "node e2e/smoke.mjs",
+    "e2e:hex": "node e2e/hex-agent.mjs",
     "postinstall": "node scripts/ensure-electron.mjs"
   },
   "dependencies": {
@@ -33,6 +35,7 @@
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^42.3.0",
     "electron-vite": "^5.0.0",
+    "playwright": "^1.60.0",
     "typescript": "^6.0.3",
     "vite": "^7.0.0"
   }
