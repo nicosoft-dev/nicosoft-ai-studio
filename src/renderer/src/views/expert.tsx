@@ -2,10 +2,12 @@
    NicoSoft AI Studio — Expert detail page
    Profile · model binding · memory (3 layers) · equipped · recents
    ============================================================ */
-import { useState } from 'react'
-import type { Dispatch, ReactElement, SetStateAction } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { ReactElement } from 'react'
 import { STUDIO_DATA } from '@/data/studio-data'
+import { useMemory } from '@/stores/memory'
 import type { Expert, MemoryItem } from '@/types'
+import type { MemoryDto } from '@/lib/api'
 import { Icons } from '@/components/icons'
 import { useRoles } from '@/stores/roles'
 import { Avatar } from '@/components/primitives'
@@ -139,16 +141,20 @@ function EquippedSection({ expertId }: { expertId: string }): ReactElement {
   );
 }
 
-function MemorySection({ expertId }: { expertId: string }): ReactElement {
-  const { MEMORY } = STUDIO_DATA
-  const [shared, setShared] = useState(MEMORY.shared);
-  const [role, setRole] = useState((MEMORY.byExpert[expertId] || {}).role || []);
-  const [collab, setCollab] = useState((MEMORY.byExpert[expertId] || {}).collab || []);
-  const [learning, setLearning] = useState(MEMORY.selfLearning.perExpert[expertId] !== false);
+const toMemItem = (m: MemoryDto): MemoryItem => ({ id: m.id, text: m.content })
 
-  const mkEdit = (set: Dispatch<SetStateAction<MemoryItem[]>>) => (id: string, text: string): void => set((p) => p.map((m) => (m.id === id ? { ...m, text } : m)));
-  const mkDel = (set: Dispatch<SetStateAction<MemoryItem[]>>) => (id: string): void => set((p) => p.filter((m) => m.id !== id));
-  const empty = shared.length + role.length + collab.length === 0;
+function MemorySection({ expertId }: { expertId: string }): ReactElement {
+  const mem = useMemory()
+  useEffect(() => {
+    void mem.load()
+  }, [mem.load])
+  const shared = useMemo(() => mem.memories.filter((m) => m.layer === 'shared').map(toMemItem), [mem.memories])
+  const role = useMemo(
+    () => mem.memories.filter((m) => m.layer === 'role' && m.roleId === expertId).map(toMemItem),
+    [mem.memories, expertId]
+  )
+  const learning = mem.selfLearning[expertId] !== false
+  const empty = shared.length + role.length === 0
 
   return (
     <div className="detail-section">
@@ -156,20 +162,19 @@ function MemorySection({ expertId }: { expertId: string }): ReactElement {
         <span className="ds-title">Memory <span className="ds-sub">— what this expert remembers about you</span></span>
         <label className="learn-toggle">
           <span>Self-learning</span>
-          <MemToggle on={learning} onClick={() => setLearning((s) => !s)} />
+          <MemToggle on={learning} onClick={() => void mem.setSelfLearning(expertId, !learning)} />
         </label>
       </div>
       {empty ? (
         <div className="detail-empty">Nothing remembered yet — memories form as you chat.</div>
       ) : (
         <div className="mem-layers">
-          <MemoryLayer layer="SHARED" items={shared} onEdit={mkEdit(setShared)} onDelete={mkDel(setShared)} />
-          <MemoryLayer layer="ROLE" items={role} onEdit={mkEdit(setRole)} onDelete={mkDel(setRole)} />
-          <MemoryLayer layer="COLLAB" items={collab} onEdit={mkEdit(setCollab)} onDelete={mkDel(setCollab)} />
+          <MemoryLayer layer="SHARED" items={shared} onEdit={(id, t) => void mem.update(id, t)} onDelete={(id) => void mem.remove(id)} />
+          <MemoryLayer layer="ROLE" items={role} onEdit={(id, t) => void mem.update(id, t)} onDelete={(id) => void mem.remove(id)} />
         </div>
       )}
     </div>
-  );
+  )
 }
 
 export function ExpertDetail({

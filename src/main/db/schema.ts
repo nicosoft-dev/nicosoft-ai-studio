@@ -203,6 +203,7 @@ CREATE TABLE IF NOT EXISTS extraction_state (
   conversation_id TEXT PRIMARY KEY,               -- memory-extraction concurrency control (replaces Redis)
   lock_until      TEXT,
   turn_counter    INTEGER NOT NULL DEFAULT 0,
-  idle_due        TEXT
+  idle_due        TEXT,
+  FOREIGN KEY (conversation_id) REFERENCES conversations (id) ON DELETE CASCADE
 );
 `

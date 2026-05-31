@@ -1,0 +1,213 @@
+import * as memoryRepo from '../repos/memory.repo'
+import * as extractionRepo from '../repos/extraction.repo'
+import * as convRepo from '../repos/conversation.repo'
+import * as endpointRepo from '../repos/endpoint.repo'
+import * as roleRepo from '../repos/role.repo'
+import * as keychain from '../keychain/keychain'
+import { chat as llmChat } from '../llm/client'
+import { pickSmallModel } from './model-select'
+import type { MemoryLayer, MemoryType, MemorySource, MemoryRow } from '../repos/memory.repo'
+
+// Memory extraction. A small/fast model (within the conversation's own endpoint) pulls durable
+// facts/preferences from a conversation and tags each as `shared` (global, cross-role) or `role`
+// (specific to the current role). New items are deduped against existing memory (Jaccard > 0.6 →
+// update instead of create). Source priority: explicit > user > auto. Concurrency: a per-conversation
+// CAS lock keeps at most one extraction in flight. Everything here is best-effort — failures are
+// swallowed so a bad extraction never wedges the chat flow.
+
+const POST_TURN_EVERY = 3 // an auto extraction every N assistant turns
+const IDLE_DELAY_MS = 5 * 60 * 1000 // idle trigger fires this long after the last turn
+const LOCK_TTL_MS = 30 * 1000 // a single extraction may hold the lock at most this long
+const MIN_MESSAGES = 2 // skip empty / one-line threads
+const DEDUP_THRESHOLD = 0.6 // Jaccard above this → same memory, update in place
+const MAX_TRANSCRIPT_CHARS = 12_000 // feed only the tail of a long conversation to the extractor
+const MAX_CONTENT_CHARS = 500 // reject a "memory" longer than this (model rambled)
+
+const EXTRACT_SYSTEM = `You extract durable, long-term memory from a conversation. Pull only facts or preferences worth remembering across future sessions — the user's stable traits, preferences, decisions, and context. Ignore transient chatter, task-specific details, and anything already obvious.
+
+For each item, classify the layer:
+- "shared": a global fact/preference about the user, true regardless of which assistant they talk to (name, timezone, tech stack, communication style).
+- "role": specific to THIS assistant's domain — only relevant when talking to this particular role.
+
+And the type: "fact" | "preference" | "learning".
+
+Return a JSON array (possibly empty). Each element: {"layer": "shared"|"role", "type": "fact"|"preference"|"learning", "content": "<one concise sentence>"}. Output JSON only, no prose.`
+
+// Module-level guard so the 60s idle-sweep timer can't stack a new sweep on a still-running one.
+let sweeping = false
+
+export type ExtractTrigger = 'auto' | 'explicit' | 'user'
+
+export interface ExtractContext {
+  convId: string
+  roleId: string
+  endpointId: string
+  model: string
+}
+
+// Run an extraction now. Coalesced by a per-conversation CAS lock; never throws.
+export async function extract(ctx: ExtractContext, trigger: ExtractTrigger): Promise<void> {
+  const now = new Date().toISOString()
+  const until = new Date(Date.now() + LOCK_TTL_MS).toISOString()
+  if (!extractionRepo.tryLock(ctx.convId, until, now)) return // another extraction already in flight
+  try {
+    const messages = convRepo.listByConversation(ctx.convId)
+    if (messages.length < MIN_MESSAGES) return
+    const ep = endpointRepo.getById(ctx.endpointId)
+    if (!ep) return
+    const key = keychain.getApiKey(ctx.endpointId)
+    if (!key) return
+    const model = pickSmallModel(ep.protocol, ep.availableModels, ctx.model)
+    // Explicit "remember…" intent overrides the role's self-learning switch — the user asked directly.
+    const selfLearning = trigger === 'explicit' || (roleRepo.getState(ctx.roleId)?.selfLearningEnabled ?? true)
+
+    let transcript = messages.map((m) => `${m.author === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n')
+    if (transcript.length > MAX_TRANSCRIPT_CHARS) transcript = transcript.slice(-MAX_TRANSCRIPT_CHARS)
+
+    const result = await llmChat(
+      {
+        protocol: ep.protocol,
+        baseUrl: ep.baseUrl,
+        apiKey: key,
+        model,
+        messages: [
+          { role: 'system', content: EXTRACT_SYSTEM },
+          { role: 'user', content: transcript }
+        ]
+      },
+      () => {} // non-streaming use
+    )
+
+    const items = parseExtracted(result.text)
+    if (!items.length) return
+    const source: MemorySource = trigger === 'explicit' ? 'explicit' : trigger === 'user' ? 'user' : 'auto'
+    const pool = memoryRepo.listForRole(ctx.roleId) // dedup pool: shared + this role's own
+
+    for (const it of items) {
+      // self-learning off → keep only global shared memory; drop role-specific items
+      if (it.layer === 'role' && !selfLearning) continue
+      const roleId = it.layer === 'role' ? ctx.roleId : null
+      const tokens = Math.ceil(it.content.length / 4)
+      const dup = findDup(it.content, pool, it.layer, roleId)
+      if (dup) {
+        // Refresh the content when it actually changed (knowledge evolves) but never downgrade the
+        // source rank — keep the higher of the two so an explicit/user memory isn't relabelled auto.
+        if (it.content !== dup.content) {
+          const keptSource = sourceRank(source) >= sourceRank(dup.source) ? source : dup.source
+          memoryRepo.update(dup.id, { content: it.content, tokens, source: keptSource })
+        }
+      } else {
+        pool.push(memoryRepo.create({ layer: it.layer, roleId, type: it.type, content: it.content, source, tokens }))
+      }
+    }
+  } catch {
+    // best-effort: swallow LLM / parse errors
+  } finally {
+    extractionRepo.unlock(ctx.convId)
+  }
+}
+
+// Called after each assistant turn. Bumps the turn counter, (re)schedules the idle trigger, and fires
+// an extraction immediately on an explicit "remember…" cue, else every POST_TURN_EVERY turns.
+export async function onTurn(ctx: ExtractContext): Promise<void> {
+  const turn = extractionRepo.incrTurn(ctx.convId)
+  extractionRepo.setIdleDue(ctx.convId, new Date(Date.now() + IDLE_DELAY_MS).toISOString())
+  const messages = convRepo.listByConversation(ctx.convId)
+  const lastUser = [...messages].reverse().find((m) => m.author === 'user')
+  if (lastUser && isExplicit(lastUser.content)) await extract(ctx, 'explicit')
+  else if (turn % POST_TURN_EVERY === 0) await extract(ctx, 'auto')
+}
+
+// Idle sweep: extract for every conversation whose idle timer elapsed. Self-resolves each
+// conversation's role + endpoint/model from its primary role binding. Driven by a main-process timer.
+export async function runIdleSweep(): Promise<void> {
+  if (sweeping) return // a previous sweep is still running (slow LLM) — don't stack another
+  sweeping = true
+  try {
+    const now = new Date().toISOString()
+    for (const convId of extractionRepo.listDue(now)) {
+      extractionRepo.clearIdle(convId, now) // only clears the due we just listed, not a fresh re-arm
+      const conv = convRepo.getById(convId)
+      if (!conv?.primaryRoleId) continue
+      const binding = roleRepo.getBinding(conv.primaryRoleId)
+      if (!binding?.endpointId || !binding.model) continue
+      await extract(
+        { convId, roleId: conv.primaryRoleId, endpointId: binding.endpointId, model: binding.model },
+        'auto'
+      )
+    }
+  } finally {
+    sweeping = false
+  }
+}
+
+// Heuristic for the explicit trigger — the user asking to be remembered.
+const EXPLICIT_RE = /\b(remember|note that|keep in mind|for future reference|don't forget|make a note)\b/i
+export function isExplicit(text: string): boolean {
+  return EXPLICIT_RE.test(text)
+}
+
+interface Extracted {
+  layer: MemoryLayer
+  type: MemoryType
+  content: string
+}
+
+function parseExtracted(raw: string): Extracted[] {
+  const text = raw
+    .trim()
+    .replace(/^```(?:json)?/i, '')
+    .replace(/```$/, '')
+    .trim()
+  let arr: unknown
+  try {
+    arr = JSON.parse(text)
+  } catch {
+    return []
+  }
+  if (!Array.isArray(arr)) return []
+  const out: Extracted[] = []
+  for (const e of arr) {
+    if (!e || typeof e !== 'object') continue
+    const o = e as Record<string, unknown>
+    const layer = o.layer === 'role' ? 'role' : o.layer === 'shared' ? 'shared' : null
+    const type =
+      o.type === 'fact' || o.type === 'preference' || o.type === 'learning' ? (o.type as MemoryType) : 'fact'
+    const content = typeof o.content === 'string' ? o.content.trim() : ''
+    if (!layer || !content || content.length > MAX_CONTENT_CHARS) continue
+    out.push({ layer, type, content })
+  }
+  return out
+}
+
+function sourceRank(s: MemorySource): number {
+  return s === 'explicit' ? 3 : s === 'user' ? 2 : 1
+}
+
+function tokenize(s: string): Set<string> {
+  return new Set(
+    s
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .split(/\s+/)
+      .filter(Boolean)
+  )
+}
+
+// Jaccard similarity over word sets — cheap, language-agnostic near-duplicate detection.
+function jaccard(a: string, b: string): number {
+  const sa = tokenize(a)
+  const sb = tokenize(b)
+  if (!sa.size || !sb.size) return 0
+  let inter = 0
+  for (const w of sa) if (sb.has(w)) inter++
+  return inter / (sa.size + sb.size - inter)
+}
+
+function findDup(content: string, pool: MemoryRow[], layer: MemoryLayer, roleId: string | null): MemoryRow | null {
+  for (const m of pool) {
+    if (m.layer !== layer || m.roleId !== roleId) continue
+    if (jaccard(content, m.content) > DEDUP_THRESHOLD) return m
+  }
+  return null
+}

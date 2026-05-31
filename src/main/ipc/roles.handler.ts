@@ -9,7 +9,7 @@ export function registerRoleHandlers(): void {
     rolesService.setBinding(roleId, input)
   )
   ipcMain.handle('roles:states:list', () => rolesService.listStates())
-  ipcMain.handle('roles:state:set', (_e, roleId: string, state: { enabled: boolean; selfLearningEnabled: boolean }) =>
-    rolesService.setState(roleId, state)
+  ipcMain.handle('roles:state:set', (_e, roleId: string, patch: { enabled?: boolean; selfLearningEnabled?: boolean }) =>
+    rolesService.setState(roleId, patch)
   )
 }

@@ -2,6 +2,7 @@ import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { getDb } from './db/connection'
 import { registerIpc } from './ipc/register'
+import { runIdleSweep } from './services/memory.service'
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -54,6 +55,8 @@ app.whenReady().then(() => {
   getDb() // open SQLite + run migrations (idempotent) before any IPC handler can hit it
   registerIpc()
   createWindow()
+  // Idle memory-extraction sweep: every minute, extract for conversations whose idle timer elapsed.
+  setInterval(() => void runIdleSweep().catch(() => {}), 60_000)
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

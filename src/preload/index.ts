@@ -23,7 +23,11 @@ import type {
   ConversationCreateDto,
   ConversationTitleInput,
   MessageDto,
-  MessageAppendDto
+  MessageAppendDto,
+  MemoryDto,
+  MemoryAddInput,
+  MemoryUpdateInput,
+  MemoryOnTurnInput
 } from '../main/ipc/contracts'
 
 // Typed bridge exposed to the renderer as `window.api`. Window controls (Batch 0) + Batch 1
@@ -103,8 +107,8 @@ const api = {
     listStates: (): Promise<RoleStateDto[]> => ipcRenderer.invoke('roles:states:list'),
     setState: (
       roleId: string,
-      state: { enabled: boolean; selfLearningEnabled: boolean }
-    ): Promise<RoleStateDto> => ipcRenderer.invoke('roles:state:set', roleId, state)
+      patch: { enabled?: boolean; selfLearningEnabled?: boolean }
+    ): Promise<RoleStateDto> => ipcRenderer.invoke('roles:state:set', roleId, patch)
   },
 
   conversations: {
@@ -119,6 +123,13 @@ const api = {
     title: (input: ConversationTitleInput): Promise<string> =>
       ipcRenderer.invoke('conversations:title', input),
     remove: (convId: string): Promise<void> => ipcRenderer.invoke('conversations:remove', convId)
+  },
+  memory: {
+    list: (): Promise<MemoryDto[]> => ipcRenderer.invoke('memory:list'),
+    add: (input: MemoryAddInput): Promise<MemoryDto> => ipcRenderer.invoke('memory:add', input),
+    update: (input: MemoryUpdateInput): Promise<void> => ipcRenderer.invoke('memory:update', input),
+    remove: (id: string): Promise<void> => ipcRenderer.invoke('memory:remove', id),
+    onTurn: (ctx: MemoryOnTurnInput): Promise<void> => ipcRenderer.invoke('memory:onTurn', ctx)
   }
 }
 

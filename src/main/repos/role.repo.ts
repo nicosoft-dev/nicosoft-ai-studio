@@ -145,16 +145,24 @@ export function getState(roleId: string): RoleState | null {
   return row ? mapState(row) : null
 }
 
+// Patch semantics: only the provided flags are written. On first insert, omitted columns use the
+// schema defaults (both 1); on update, omitted columns keep their current value (COALESCE). Lets
+// `enabled` and `self_learning_enabled` be set independently instead of clobbering each other.
 export function setState(
   roleId: string,
-  state: { enabled: boolean; selfLearningEnabled: boolean }
+  patch: { enabled?: boolean; selfLearningEnabled?: boolean }
 ): void {
+  const enabled = patch.enabled === undefined ? null : patch.enabled ? 1 : 0
+  const selfLearning = patch.selfLearningEnabled === undefined ? null : patch.selfLearningEnabled ? 1 : 0
   getDb()
     .prepare(
-      `INSERT INTO role_states (role_id, enabled, self_learning_enabled) VALUES (?, ?, ?)
-       ON CONFLICT(role_id) DO UPDATE SET enabled = excluded.enabled, self_learning_enabled = excluded.self_learning_enabled`
+      `INSERT INTO role_states (role_id, enabled, self_learning_enabled)
+       VALUES (?, COALESCE(?, 1), COALESCE(?, 1))
+       ON CONFLICT(role_id) DO UPDATE SET
+         enabled = COALESCE(?, enabled),
+         self_learning_enabled = COALESCE(?, self_learning_enabled)`
     )
-    .run(roleId, state.enabled ? 1 : 0, state.selfLearningEnabled ? 1 : 0)
+    .run(roleId, enabled, selfLearning, enabled, selfLearning)
 }
 
 export function listStates(): RoleState[] {

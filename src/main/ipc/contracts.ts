@@ -193,3 +193,33 @@ export interface ConversationTitleInput {
   endpointId: string // the conversation's own endpoint — title generation stays on the same provider
   model: string // the conversation's main model — fallback when the endpoint has no smaller sibling
 }
+
+// === Memory (shared/role long-term memory) ===
+export interface MemoryDto {
+  id: string
+  layer: string // shared | role | collab
+  roleId: string | null
+  type: string // fact | preference | learning
+  content: string
+  source: string // explicit | user | auto
+  tokens: number
+  createdAt: string
+  updatedAt: string
+}
+export interface MemoryAddInput {
+  layer: string // shared | role
+  roleId?: string
+  type?: string
+  content: string
+}
+export interface MemoryUpdateInput {
+  id: string
+  content: string
+}
+// Context for the post-turn extraction trigger — fired by the renderer after each assistant reply.
+export interface MemoryOnTurnInput {
+  convId: string
+  roleId: string
+  endpointId: string
+  model: string
+}

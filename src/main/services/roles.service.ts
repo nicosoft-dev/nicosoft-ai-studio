@@ -34,8 +34,11 @@ export function listStates(): RoleStateDto[] {
 
 export function setState(
   roleId: string,
-  state: { enabled: boolean; selfLearningEnabled: boolean }
+  patch: { enabled?: boolean; selfLearningEnabled?: boolean }
 ): RoleStateDto {
-  roleRepo.setState(roleId, state)
-  return { roleId, enabled: state.enabled, selfLearningEnabled: state.selfLearningEnabled }
+  roleRepo.setState(roleId, patch)
+  const s = roleRepo.getState(roleId)
+  return s
+    ? toStateDto(s)
+    : { roleId, enabled: patch.enabled ?? true, selfLearningEnabled: patch.selfLearningEnabled ?? true }
 }

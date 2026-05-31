@@ -41,7 +41,7 @@ interface ChatState {
 }
 
 const uid = (): string => globalThis.crypto.randomUUID()
-const streamMeta = new Map<string, { convId: string; expertId: string; model: string }>()
+const streamMeta = new Map<string, { convId: string; expertId: string; endpointId: string; model: string }>()
 let creating = false // sync guard: blocks a double-create when a fresh thread's first message fires twice fast
 let listening = false
 
@@ -81,6 +81,13 @@ export const useChat = create<ChatState>((set, get) => {
       void window.api.conversations
         .append(meta.convId, { author: 'expert', expertId: meta.expertId, model: meta.model, content: d.text })
         .then(() => get().loadConversations())
+      // Post-turn memory trigger (post-turn cadence + explicit cue resolved in the backend).
+      void window.api.memory.onTurn({
+        convId: meta.convId,
+        roleId: meta.expertId,
+        endpointId: meta.endpointId,
+        model: meta.model
+      })
     })
     api.onError((d) => {
       const meta = streamMeta.get(d.streamId)
@@ -195,7 +202,7 @@ export const useChat = create<ChatState>((set, get) => {
 
       try {
         const { streamId } = await window.api.chat.send({ endpointId, model, messages, thinking })
-        streamMeta.set(streamId, { convId: cid, expertId, model })
+        streamMeta.set(streamId, { convId: cid, expertId, endpointId, model })
       } catch (e) {
         set((s) => {
           const msgs = (s.byConversation[cid] ?? []).filter((m) => !(m.role === 'assistant' && m.streaming))

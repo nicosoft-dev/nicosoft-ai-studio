@@ -2,13 +2,15 @@
    NicoSoft AI Studio — Memory (per-expert + global)
    Three layers: SHARED · ROLE · COLLAB. All local to this device.
    ============================================================ */
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ReactElement } from 'react'
 import { Icons } from '@/components/icons'
 import { Avatar } from '@/components/primitives'
 import { STUDIO_DATA } from '@/data/studio-data'
 import { Dropdown } from '@/views/profile'
-import type { MemoryData, MemoryItem as MemoryItemData } from '@/types'
+import { useMemory } from '@/stores/memory'
+import type { MemoryItem as MemoryItemData } from '@/types'
+import type { MemoryDto } from '@/lib/api'
 
 type LayerKey = 'SHARED' | 'ROLE' | 'COLLAB'
 
@@ -125,14 +127,15 @@ export function MemToggle({ on, onClick }: { on: boolean; onClick: () => void })
   )
 }
 
-export function flattenMemory(MEMORY: MemoryData): FlatEntry[] {
-  const out: FlatEntry[] = []
-  MEMORY.shared.forEach((m) => out.push({ uid: 'shared:' + m.id, scope: 'shared', layer: 'SHARED', text: m.text }))
-  Object.entries(MEMORY.byExpert).forEach(([eid, layers]) => {
-    ;(layers.role || []).forEach((m) => out.push({ uid: eid + ':' + m.id, scope: eid, layer: 'ROLE', text: m.text }))
-    ;(layers.collab || []).forEach((m) => out.push({ uid: eid + ':' + m.id, scope: eid, layer: 'COLLAB', text: m.text }))
-  })
-  return out
+// Flatten the backend memory list into UI rows. shared → SHARED (scope 'shared'); role → ROLE (scope =
+// roleId); collab → COLLAB. uid is the real memory id, used directly for update/remove.
+function toEntries(memories: MemoryDto[]): FlatEntry[] {
+  return memories.map((m) => ({
+    uid: m.id,
+    scope: m.layer === 'shared' ? 'shared' : (m.roleId ?? 'shared'),
+    layer: m.layer === 'shared' ? 'SHARED' : m.layer === 'collab' ? 'COLLAB' : 'ROLE',
+    text: m.content
+  }))
 }
 
 /* — one row in the global memory list (shows which expert it belongs to) — */
@@ -196,12 +199,23 @@ function GlobalMemRow({
 }
 
 export function MemorySettings(): ReactElement {
-  const { MEMORY, EXPERTS } = STUDIO_DATA
-  const [entries, setEntries] = useState<FlatEntry[]>(() => flattenMemory(MEMORY))
-  const [master, setMaster] = useState(MEMORY.selfLearning.master)
-  const [perExpert, setPerExpert] = useState(MEMORY.selfLearning.perExpert)
+  const { EXPERTS } = STUDIO_DATA
+  const mem = useMemory()
+  useEffect(() => {
+    void mem.load()
+  }, [mem.load])
+  const entries = useMemo(() => toEntries(mem.memories), [mem.memories])
   const [fExpert, setFExpert] = useState('all')
   const [fLayer, setFLayer] = useState('all')
+
+  // Per-expert self-learning comes from role_states (default on when absent). Master is derived: on iff
+  // every expert has it on; toggling master flips them all.
+  const perExpert = mem.selfLearning
+  const master = EXPERTS.every((e) => perExpert[e.id] !== false)
+  const toggleMaster = (): void => {
+    const next = !master
+    EXPERTS.forEach((e) => void mem.setSelfLearning(e.id, next))
+  }
 
   const expertOpts = [{ v: 'all', l: 'All experts' }, ...EXPERTS.map((e) => ({ v: e.id, l: e.name }))]
   const layers = ['all', 'SHARED', 'ROLE', 'COLLAB']
@@ -211,9 +225,6 @@ export function MemorySettings(): ReactElement {
     if (fExpert !== 'all' && !(e.scope === fExpert || e.scope === 'shared')) return false
     return true
   })
-  const editEntry = (uid: string, text: string): void =>
-    setEntries((p) => p.map((e) => (e.uid === uid ? { ...e, text } : e)))
-  const delEntry = (uid: string): void => setEntries((p) => p.filter((e) => e.uid !== uid))
 
   return (
     <div className="sc-wrap">
@@ -231,19 +242,20 @@ export function MemorySettings(): ReactElement {
             <div className="mss-title">Self-learning</div>
             <div className="mss-sub">Let experts remember useful context from your conversations.</div>
           </div>
-          <MemToggle on={master} onClick={() => setMaster((s) => !s)} />
+          <MemToggle on={master} onClick={toggleMaster} />
         </div>
-        {master && (
-          <div className="mem-self-grid">
-            {EXPERTS.map((e) => (
-              <div className="mse-row" key={e.id}>
-                <Avatar expert={e} size={20} />
-                <span className="mse-name">{e.name}</span>
-                <MemToggle on={!!perExpert[e.id]} onClick={() => setPerExpert((p) => ({ ...p, [e.id]: !p[e.id] }))} />
-              </div>
-            ))}
-          </div>
-        )}
+        <div className="mem-self-grid">
+          {EXPERTS.map((e) => (
+            <div className="mse-row" key={e.id}>
+              <Avatar expert={e} size={20} />
+              <span className="mse-name">{e.name}</span>
+              <MemToggle
+                on={perExpert[e.id] !== false}
+                onClick={() => void mem.setSelfLearning(e.id, perExpert[e.id] === false)}
+              />
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* filters */}
@@ -270,10 +282,15 @@ export function MemorySettings(): ReactElement {
       {/* list */}
       <div className="mem-global-list">
         {filtered.length === 0 ? (
-          <div className="mem-empty">No memories match this filter.</div>
+          <div className="mem-empty">No memories yet — they form as you chat.</div>
         ) : (
           filtered.map((e) => (
-            <GlobalMemRow key={e.uid} entry={e} onEdit={(t) => editEntry(e.uid, t)} onDelete={() => delEntry(e.uid)} />
+            <GlobalMemRow
+              key={e.uid}
+              entry={e}
+              onEdit={(t) => void mem.update(e.uid, t)}
+              onDelete={() => void mem.remove(e.uid)}
+            />
           ))
         )}
       </div>
