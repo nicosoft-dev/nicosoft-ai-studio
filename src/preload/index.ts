@@ -15,7 +15,10 @@ import type {
   AgentPermissionResponse,
   AgentPermissionCancel,
   AgentDone,
-  AgentErrorDto
+  AgentErrorDto,
+  RoleBindingDto,
+  RoleBindingInput,
+  RoleStateDto
 } from '../main/ipc/contracts'
 
 // Typed bridge exposed to the renderer as `window.api`. Window controls (Batch 0) + Batch 1
@@ -83,7 +86,20 @@ const api = {
 
   project: {
     pick: (): Promise<string | null> => ipcRenderer.invoke('project:pick'),
-    branch: (cwd: string): Promise<string | null> => ipcRenderer.invoke('project:branch', cwd)
+    branch: (cwd: string): Promise<string | null> => ipcRenderer.invoke('project:branch', cwd),
+    branches: (cwd: string): Promise<string[]> => ipcRenderer.invoke('project:branches', cwd),
+    checkout: (cwd: string, branch: string): Promise<boolean> => ipcRenderer.invoke('project:checkout', cwd, branch)
+  },
+
+  roles: {
+    listBindings: (): Promise<RoleBindingDto[]> => ipcRenderer.invoke('roles:bindings:list'),
+    setBinding: (roleId: string, input: RoleBindingInput): Promise<RoleBindingDto> =>
+      ipcRenderer.invoke('roles:binding:set', roleId, input),
+    listStates: (): Promise<RoleStateDto[]> => ipcRenderer.invoke('roles:states:list'),
+    setState: (
+      roleId: string,
+      state: { enabled: boolean; selfLearningEnabled: boolean }
+    ): Promise<RoleStateDto> => ipcRenderer.invoke('roles:state:set', roleId, state)
   }
 }
 

@@ -24,8 +24,12 @@ export async function send(
       baseUrl: ep.baseUrl,
       apiKey: key,
       model: input.model,
-      messages: input.messages,
-      reasoning: input.reasoning,
+      messages: input.messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+        attachments: m.attachments?.map((a) => ({ type: 'image' as const, url: a.url, mime: a.mime }))
+      })),
+      thinking: input.thinking,
       signal
     },
     (d) => onDelta(d.text)

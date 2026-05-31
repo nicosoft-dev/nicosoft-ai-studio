@@ -1,190 +1,193 @@
 /* ============================================================
-   NicoSoft AI Studio — conversation pane + composer + states
+   NicoSoft AI Studio — regular role conversation (real streaming via chat store)
+   Composer (model + thinking + path + image attachments) · ChatView · EmptyState
    ============================================================ */
-import { useState, useEffect, useRef } from 'react'
-import type { CSSProperties, ReactElement } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { ChangeEvent, ClipboardEvent as ReactClipboardEvent, CSSProperties, ReactElement } from 'react'
 import { Icons } from '@/components/icons'
+import { AttachmentStrip } from '@/components/attachment-strip'
+import { ImageViewer, type ViewerImage } from '@/components/image-viewer'
+import { ModelPicker, ThinkingPicker } from '@/components/composer-controls'
+import { PathBar } from '@/components/path-bar'
 import { STUDIO_DATA } from '@/data/studio-data'
-import { useRoles } from '@/stores/roles'
-import { Avatar, Segment, DispatchBadge } from '@/components/primitives'
-import type { Conversation, Expert } from '@/types'
+import { useWorkspace } from '@/stores/workspace'
+import { Avatar, NameChip } from '@/components/primitives'
+import { useChat, type ChatMessage } from '@/stores/chat'
+import { useRoleBinding } from '@/lib/use-role-binding'
+import { fileToImage, imagesFromClipboard, type ImageAttachment } from '@/lib/image'
+import { getThinkingCapability, resolveThinking, type ThinkingDepth } from '@/lib/thinking'
+import type { Expert } from '@/types'
 
-/* — Models that expose a reasoning / thinking-depth control — */
-const REASONING_MODELS = new Set(["claude-sonnet-4.6", "claude-opus-4", "gpt-5", "gpt-5-pro"])
-const COMPOSER_MODELS: Record<string, string[]> = {
-  anthropic: ["claude-haiku-4", "claude-sonnet-4.6", "claude-opus-4"],
-  openai: ["gpt-5-mini", "gpt-5", "gpt-5-pro"],
-  gemini: ["gemini-2.5-flash", "gemini-2.5-pro", "imagen-4"],
+/* — One message in the list (user or assistant), with optional images — */
+function ChatSegment({
+  msg,
+  expert,
+  onOpenImage
+}: {
+  msg: ChatMessage
+  expert: Expert
+  onOpenImage: (items: ViewerImage[], index: number) => void
+}): ReactElement {
+  const isUser = msg.role === 'user'
+  return (
+    <div className={'segment' + (isUser ? ' user' : '')} style={{ '--seg-color': isUser ? 'var(--border-2)' : expert.color } as CSSProperties}>
+      <div className="seg-head">
+        <Avatar expert={isUser ? null : expert} you={isUser} size={28} streaming={msg.streaming} />
+        <div className="seg-meta">
+          <NameChip expert={isUser ? null : expert} neutral={isUser} />
+        </div>
+      </div>
+      <div className={'seg-body' + (isUser ? ' primary' : '')}>
+        {msg.text ? <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{msg.text}</p> : null}
+        {msg.images && msg.images.length > 0 ? (
+          <div className="msg-images">
+            {msg.images.map((img, i) => (
+              <img
+                key={i}
+                className="msg-img-thumb"
+                src={img.url}
+                alt={img.name}
+                onClick={() => onOpenImage(msg.images!.map((x) => ({ url: x.url, name: x.name })), i)}
+              />
+            ))}
+          </div>
+        ) : null}
+        {msg.streaming && !msg.text ? <span className="caret" /> : null}
+      </div>
+    </div>
+  )
 }
 
-interface Attachment {
-  type: 'image' | 'file'
-  name: string
-}
-
-/* — Composer (nsai-style stacked layout, Studio's own dark tokens) — */
+/* — Composer: real model/thinking pickers, path bar, image paste, streams via the chat store — */
 function Composer({
   expert,
-  onMention,
-  noEndpoint,
-  onOpenSettings,
-  streaming,
-  onStop
+  value,
+  setValue,
+  onOpenSettings
 }: {
   expert: Expert
-  onMention?: (id: string) => void
-  noEndpoint?: boolean
+  value: string
+  setValue: (v: string) => void
   onOpenSettings?: () => void
-  streaming?: boolean
-  onStop?: () => void
 }): ReactElement {
-  const { EXPERTS } = STUDIO_DATA
-  const roles = useRoles()
-  const [focused, setFocused] = useState(false)
-  const [value, setValue] = useState("")
-  const [showMention, setShowMention] = useState(false)
-  const [attachments, setAttachments] = useState<Attachment[]>([])
-  const [model, setModel] = useState(expert.model || "")
-  const [modelMenu, setModelMenu] = useState(false)
-  const [reasoning, setReasoning] = useState("Medium")
+  const chat = useChat()
+  const b = useRoleBinding(expert)
+  const cwd = useWorkspace((s) => s.cwdByExpert[expert.id] ?? '')
+  const setCwd = useWorkspace((s) => s.setCwd)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
+  const [attach, setAttach] = useState<ImageAttachment[]>([])
 
-  useEffect(() => { setModel(expert.model || ""); setAttachments([]); setValue(""); }, [expert.id])
-
-  const supportsReasoning = REASONING_MODELS.has(model)
-  const modelOpts = (expert.family ? COMPOSER_MODELS[expert.family] : undefined) || []
-
-  // token counter (mock) — amber past ~85%
-  const usedK = 32.1, maxK = 200
-  const tokenPct = usedK / maxK
-  const tokenAmber = tokenPct > 0.85
+  const streaming = chat.streaming[expert.id] ?? false
+  const messages = chat.byExpert[expert.id] ?? []
+  const usedTokens = messages.reduce((s, m) => s + m.text.length, 0) / 4 + value.length / 4
+  const tokenAmber = b.contextLength > 0 && usedTokens / b.contextLength > 0.85
+  const selectedEp = b.endpoints.find((e) => e.id === b.endpointId)
+  const noEndpoint = b.loaded && (b.endpoints.length === 0 || !selectedEp || !selectedEp.enabled || !selectedEp.hasKey || !b.model)
+  const ready = b.loaded && !noEndpoint
+  const effectiveDepth = (b.depth || 'medium') as ThinkingDepth
 
   const grow = (): void => {
     const ta = taRef.current
-    if (ta) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 140) + "px"; }
-  }
-  const onChange = (e: React.ChangeEvent<HTMLTextAreaElement>): void => {
-    setValue(e.target.value)
-    setShowMention(e.target.value.endsWith("@"))
-    grow()
-  }
-  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault()
-      if (value.trim() || attachments.length) { setValue(""); setAttachments([]); setTimeout(grow, 0); }
+    if (ta) {
+      ta.style.height = 'auto'
+      ta.style.height = Math.min(ta.scrollHeight, 140) + 'px'
     }
   }
-  const pickMention = (id: string): void => { setShowMention(false); setValue(""); onMention && onMention(id); }
-  const addAttachment = (): void => {
-    const isImg = attachments.length % 2 === 0
-    setAttachments((p) => [...p, isImg
-      ? { type: "image", name: "screenshot.png" }
-      : { type: "file", name: "design-brief.pdf" }])
+  const addFiles = async (files: File[]): Promise<void> => {
+    const imgs = (await Promise.all(files.map(fileToImage))).filter((x): x is ImageAttachment => x !== null)
+    if (imgs.length) setAttach((p) => [...p, ...imgs])
   }
-  const removeAttachment = (i: number): void => setAttachments((p) => p.filter((_, j) => j !== i))
+  const onPaste = (e: ReactClipboardEvent<HTMLTextAreaElement>): void => {
+    const files = imagesFromClipboard(e.clipboardData?.items ?? null)
+    if (files.length === 0) return // no images → let the text paste through
+    e.preventDefault()
+    void addFiles(files)
+  }
+  const onPickFiles = (e: ChangeEvent<HTMLInputElement>): void => {
+    const files = Array.from(e.target.files ?? [])
+    e.target.value = ''
+    void addFiles(files)
+  }
 
-  const disabled = noEndpoint
-  const canSend = !disabled && (value.trim() || attachments.length)
+  const send = (): void => {
+    const text = value.trim()
+    if ((!text && attach.length === 0) || !ready || streaming) return
+    setValue('')
+    setTimeout(grow, 0)
+    const images = attach.map((a) => ({ dataUrl: a.dataUrl, mime: a.mime, name: a.name }))
+    setAttach([])
+    const thinking = resolveThinking(getThinkingCapability(b.family, b.model), effectiveDepth) ?? undefined
+    void chat.send({
+      expertId: expert.id,
+      endpointId: b.endpointId,
+      model: b.model,
+      thinking,
+      text,
+      images: images.length ? images : undefined
+    })
+  }
 
   return (
     <div className="input-dock">
       <div className="input-dock-inner">
-        {noEndpoint && (
+        {noEndpoint ? (
           <div className="dock-banner">
-            <Icons.plug size={15} style={{ color: "var(--text-3)" }} />
-            <span>Add an AI endpoint to start chatting</span>
-            <span className="db-arrow" onClick={onOpenSettings}>Open settings <Icons.arrowRight size={13} /></span>
-          </div>
-        )}
-        <div className={"composer2" + (focused ? " focused" : "") + (disabled ? " disabled" : "")}>
-          {/* mention popover */}
-          {showMention && !disabled && (
-            <div className="mention-pop">
-              <div className="mp-head">Mention an expert</div>
-              {EXPERTS.filter((e) => !e.coordinator && !roles.isDisabled(e.id) && !roles.isDeleted(e.id)).map((e) => (
-                <div className="mention-row" key={e.id} onMouseDown={() => pickMention(e.id)}>
-                  <Avatar expert={e} size={24} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="mr-name">{e.name}</div>
-                    <div className="mr-spec">{e.specialty}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* TOP TOOLBAR */}
-          <div className="cmp-toolbar">
-            <div className="cmp-model" onClick={() => !disabled && setModelMenu((s) => !s)}>
-              <Icons.sparkle size={13} />
-              <span className="cmp-model-id">{model || "no model"}</span>
-              <Icons.chevronDown size={12} />
-              {modelMenu && (
-                <>
-                  <div className="menu-backdrop" onClick={(e) => { e.stopPropagation(); setModelMenu(false); }} />
-                  <div className="row-menu cmp-model-menu" onClick={(e) => e.stopPropagation()}>
-                    {modelOpts.map((m) => (
-                      <div key={m} className={"rm-item" + (m === model ? " active" : "")} onClick={() => { setModel(m); setModelMenu(false); }}>
-                        <span className="cmp-mono">{m}</span>{m === model && <Icons.check size={13} />}
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-
-            {supportsReasoning && (
-              <div className="cmp-reasoning">
-                <span className="cmp-reason-label">Thinking</span>
-                <div className="segmented sm">
-                  {["Low", "Medium", "High"].map((r) => (
-                    <button key={r} className={reasoning === r ? "active" : ""} onClick={() => setReasoning(r)}>{r}</button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <span className={"cmp-tokens" + (tokenAmber ? " amber" : "")}>
-              {usedK}K / {maxK}K tokens
+            <Icons.plug size={15} style={{ color: 'var(--text-3)' }} />
+            <span>Bind an endpoint with a key and model to chat with {expert.name}</span>
+            <span className="db-arrow" onClick={onOpenSettings}>
+              Open settings <Icons.arrowRight size={13} />
             </span>
           </div>
-
-          {/* ATTACHMENT STRIP */}
-          {attachments.length > 0 && (
-            <div className="cmp-attach-strip">
-              {attachments.map((a, i) => (
-                a.type === "image" ? (
-                  <div className="cmp-att-img" key={i}>
-                    <div className="cmp-att-thumb"><Icons.image size={18} /></div>
-                    <button className="cmp-att-x" onClick={() => removeAttachment(i)}><Icons.x size={11} /></button>
-                  </div>
-                ) : (
-                  <div className="cmp-att-file" key={i}>
-                    <Icons.file size={14} style={{ color: "var(--text-3)" }} />
-                    <span className="cmp-att-name">{a.name}</span>
-                    <button className="cmp-att-x inline" onClick={() => removeAttachment(i)}><Icons.x size={11} /></button>
-                  </div>
-                )
-              ))}
-            </div>
-          )}
-
-          {/* TEXTAREA */}
-          <textarea ref={taRef} className="cmp-textarea" rows={1} value={value} disabled={disabled}
+        ) : null}
+        <PathBar cwd={cwd} onPick={(dir) => setCwd(expert.id, dir)} />
+        <div className={'composer2' + (ready ? '' : ' disabled')}>
+          <div className="cmp-toolbar">
+            <ModelPicker models={b.models} value={b.model} onChange={b.onModel} disabled={!ready} />
+            <ThinkingPicker family={b.family} model={b.model} depth={effectiveDepth} onChange={b.onDepth} disabled={!ready} />
+            {b.contextLength > 0 ? (
+              <span className={'cmp-tokens' + (tokenAmber ? ' amber' : '')}>
+                {(usedTokens / 1000).toFixed(1)}K / {Math.round(b.contextLength / 1000)}K
+              </span>
+            ) : null}
+          </div>
+          <AttachmentStrip items={attach} onRemove={(id) => setAttach((p) => p.filter((a) => a.id !== id))} />
+          <textarea
+            ref={taRef}
+            className="cmp-textarea"
+            rows={1}
+            value={value}
             placeholder={`Ask ${expert.name} — Enter to send, Shift+Enter for newline`}
-            onChange={onChange} onKeyDown={onKeyDown}
-            onFocus={() => setFocused(true)} onBlur={() => { setFocused(false); setShowMention(false); }} />
-
-          {/* BOTTOM ROW */}
+            onChange={(e) => {
+              setValue(e.target.value)
+              grow()
+            }}
+            onPaste={onPaste}
+            onKeyDown={(e) => {
+              // Enter sends, Shift+Enter newlines; never submit mid-IME-composition (CJK candidate
+              // selection) — nativeEvent.isComposing / keyCode 229 (older Firefox) flag it.
+              const native = e.nativeEvent as KeyboardEvent
+              if (e.key === 'Enter' && !e.shiftKey && !native.isComposing && native.keyCode !== 229) {
+                e.preventDefault()
+                send()
+              }
+            }}
+            disabled={!ready}
+          />
           <div className="cmp-bottom">
-            <button className="icon-btn" title="Attach" disabled={disabled} onClick={addAttachment}>
+            <button className="icon-btn" title="Attach image" disabled={!ready} onClick={() => fileInputRef.current?.click()}>
               <Icons.paperclip size={16} />
             </button>
+            <input ref={fileInputRef} type="file" accept="image/*" multiple hidden onChange={onPickFiles} />
             <div className="tb-spacer" />
             {streaming ? (
-              <button className="cmp-stop" onClick={onStop}><span className="stop-sq" /> Stop</button>
+              <button className="cmp-stop" onClick={() => chat.stop(expert.id)}>
+                <span className="stop-sq" /> Stop
+              </button>
             ) : (
-              <button className="cmp-send" disabled={!canSend}>Send <Icons.arrowUp size={14} /></button>
+              <button className="cmp-send" disabled={(!value.trim() && attach.length === 0) || !ready} onClick={send}>
+                Send <Icons.arrowUp size={14} />
+              </button>
             )}
           </div>
         </div>
@@ -194,18 +197,22 @@ function Composer({
 }
 
 /* — Empty / new-conversation state — */
-function EmptyState({ expert, onChip }: { expert: Expert; onChip?: (c: string) => void }): ReactElement {
+function EmptyState({ expert, onChip }: { expert: Expert; onChip: (c: string) => void }): ReactElement {
   const { GREETINGS } = STUDIO_DATA
   const g = GREETINGS[expert.id] || GREETINGS.iris
   return (
     <div className="empty-state">
       <div className="empty-inner">
-        <div className="big-avatar"><Avatar expert={expert} size={48} /></div>
+        <div className="big-avatar">
+          <Avatar expert={expert} size={48} />
+        </div>
         <div className="es-name">{expert.name}</div>
         <div className="es-greet">{g.greeting}</div>
         <div className="example-chips">
           {g.chips.map((c, i) => (
-            <button className="example-chip" key={i} onClick={() => onChip && onChip(c)}>{c}</button>
+            <button className="example-chip" key={i} onClick={() => onChip(c)}>
+              {c}
+            </button>
           ))}
         </div>
       </div>
@@ -213,55 +220,52 @@ function EmptyState({ expert, onChip }: { expert: Expert; onChip?: (c: string) =
   )
 }
 
-/* — Loading skeleton (message-segment shaped) — */
-function SkeletonSegment(): ReactElement {
-  return (
-    <div className="segment" style={{ "--seg-color": "var(--border-2)" } as CSSProperties}>
-      <div className="seg-head">
-        <div className="avatar" style={{ width: 28, height: 28, animation: "skel 1.4s ease-in-out infinite" }} />
-        <div className="skel-line" style={{ width: 90, marginBottom: 0 }} />
-      </div>
-      <div className="seg-body">
-        <div className="skel-line" style={{ width: "94%" }} />
-        <div className="skel-line" style={{ width: "88%" }} />
-        <div className="skel-line" style={{ width: "60%" }} />
-      </div>
-    </div>
-  )
-}
-
-/* — The full conversation view — */
-function ConversationView({
-  conv,
-  onOpenSettings
-}: {
-  conv: Conversation
-  onOpenSettings?: () => void
-}): ReactElement {
-  const { EXPERT_BY_ID } = STUDIO_DATA
-  const expert = EXPERT_BY_ID[conv.expert]
+/* — The full conversation view for a non-Hex role — */
+export function ChatView({ expert, onOpenSettings }: { expert: Expert; onOpenSettings?: () => void }): ReactElement {
+  const chat = useChat()
+  const messages = chat.byExpert[expert.id] ?? []
+  const error = chat.error[expert.id]
   const listRef = useRef<HTMLDivElement>(null)
-  const streaming = conv.loading || conv.segments.some((s) => s.streaming)
+  const [value, setValue] = useState('')
+  const [viewer, setViewer] = useState<{ items: ViewerImage[]; index: number } | null>(null)
+
+  useEffect(() => {
+    const el = listRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [messages])
+
+  const openImage = (items: ViewerImage[], index: number): void => setViewer({ items, index })
 
   return (
     <div className="main-col">
       <div className="msg-list" ref={listRef}>
         <div className="msg-inner">
-          {conv.collab && conv.dispatch && <DispatchBadge chain={conv.dispatch} />}
-          {conv.segments.map((seg, i) => <Segment key={i} seg={seg} />)}
-          {conv.loading && <SkeletonSegment />}
-          {conv.notice && (
-            <div className="inline-notice">
-              <span className="n-icon"><Icons.alert size={17} /></span>
-              <span className="n-text"><strong>Your API key for Anthropic is invalid (401).</strong> Requests to {expert.name} will fail until you update it.</span>
-              <button className="btn sm secondary" onClick={onOpenSettings}>Open settings</button>
-            </div>
+          {messages.length === 0 ? (
+            <EmptyState expert={expert} onChip={setValue} />
+          ) : (
+            messages.map((m) => <ChatSegment key={m.id} msg={m} expert={expert} onOpenImage={openImage} />)
           )}
+          {error ? (
+            <div className="inline-notice">
+              <span className="n-icon">
+                <Icons.alert size={17} />
+              </span>
+              <span className="n-text">
+                <strong>{error}</strong>
+              </span>
+            </div>
+          ) : null}
         </div>
       </div>
-      <Composer expert={expert} noEndpoint={expert.unconfigured} streaming={streaming} onStop={() => {}} onOpenSettings={onOpenSettings} />
+      <Composer expert={expert} value={value} setValue={setValue} onOpenSettings={onOpenSettings} />
+      {viewer ? (
+        <ImageViewer
+          items={viewer.items}
+          index={viewer.index}
+          onClose={() => setViewer(null)}
+          onStep={(d) => setViewer((v) => (v ? { ...v, index: (v.index + d + v.items.length) % v.items.length } : v))}
+        />
+      ) : null}
     </div>
   )
 }
-
-export { ConversationView, Composer, EmptyState, SkeletonSegment }

@@ -13,7 +13,7 @@ import { ExtensionsView } from '@/views/extensions'
 import { ProjectsView } from '@/views/projects'
 import { ScheduledView } from '@/views/scheduled'
 import { ExpertDetail } from '@/views/expert'
-import { ConversationView, EmptyState, Composer } from '@/views/conversation'
+import { ChatView } from '@/views/conversation'
 import { HexAgentView } from '@/views/hex'
 import { WorkspaceDrawer } from '@/views/workspace'
 
@@ -126,7 +126,6 @@ export default function App(): ReactElement {
     setView('settings')
   }
 
-  const conv = activeConv ? CONVERSATIONS[activeConv] : null
   const expert = EXPERT_BY_ID[activeExpert] || EXPERT_BY_ID.iris
   const navView = ['studio', 'extensions', 'projects', 'scheduled'].includes(view)
 
@@ -205,18 +204,8 @@ export default function App(): ReactElement {
             />
           ) : expert.id === 'hex' ? (
             <HexAgentView expert={expert} onOpenSettings={openEndpointsSettings} />
-          ) : conv ? (
-            <ConversationView conv={conv} onOpenSettings={openSettings} />
           ) : (
-            <div className="main-col">
-              <EmptyState expert={expert} onChip={() => {}} />
-              <Composer
-                expert={expert}
-                noEndpoint={expert.unconfigured}
-                onMention={(id: string) => selectExpert(id)}
-                onOpenSettings={openEndpointsSettings}
-              />
-            </div>
+            <ChatView expert={expert} onOpenSettings={openEndpointsSettings} />
           )}
             {view === 'app' && drawerOpen && <WorkspaceDrawer onClose={() => setDrawerOpen(false)} />}
           </div>

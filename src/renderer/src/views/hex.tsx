@@ -5,54 +5,31 @@
 // (tool bubble, diff, approval, cwd bar) live in styles/agent.css.
 
 import { useEffect, useRef, useState } from 'react'
-import type { CSSProperties, ReactElement } from 'react'
+import type { ChangeEvent, ClipboardEvent as ReactClipboardEvent, CSSProperties, ReactElement } from 'react'
 import { ApprovalDialog } from '@/components/approval-dialog'
+import { AttachmentStrip } from '@/components/attachment-strip'
+import { ImageViewer, type ViewerImage } from '@/components/image-viewer'
 import { Icons } from '@/components/icons'
+import { ModelPicker, ThinkingPicker } from '@/components/composer-controls'
+import { PathBar } from '@/components/path-bar'
 import { Avatar, NameChip } from '@/components/primitives'
 import { ToolBubble } from '@/components/tool-bubble'
 import { useHex, type HexMessage } from '@/stores/hex'
+import { useWorkspace } from '@/stores/workspace'
+import { fileToImage, imagesFromClipboard, type ImageAttachment } from '@/lib/image'
+import { useRoleBinding } from '@/lib/use-role-binding'
+import { getThinkingCapability, resolveThinking, type ThinkingDepth } from '@/lib/thinking'
 import type { Expert } from '@/types'
 
-// Project-path selector — Claude-style chip row (Local · folder · branch) above the composer. No
-// icon / divider / worktree (per the design). Clicking opens a native folder picker.
-function PathBar(): ReactElement {
-  const cwd = useHex((s) => s.cwd)
-  const setCwd = useHex((s) => s.setCwd)
-  const [branch, setBranch] = useState<string | null>(null)
-  useEffect(() => {
-    let alive = true
-    if (!cwd) {
-      setBranch(null)
-      return
-    }
-    void window.api.project.branch(cwd).then((b) => {
-      if (alive) setBranch(b)
-    })
-    return () => {
-      alive = false
-    }
-  }, [cwd])
-  const pick = async (): Promise<void> => {
-    const dir = await window.api.project.pick()
-    if (dir) setCwd(dir)
-  }
-  const name = cwd ? (cwd.split('/').filter(Boolean).pop() ?? cwd) : null
-  return (
-    <button className="path-bar" onClick={() => void pick()} title={cwd || 'Choose a project folder'}>
-      {name ? (
-        <>
-          <span className="path-chip">Local</span>
-          <span className="path-chip">{name}</span>
-          {branch ? <span className="path-chip">{branch}</span> : null}
-        </>
-      ) : (
-        <span className="path-chip muted">Choose a project folder…</span>
-      )}
-    </button>
-  )
-}
-
-function HexSegment({ msg, expert }: { msg: HexMessage; expert: Expert }): ReactElement {
+function HexSegment({
+  msg,
+  expert,
+  onOpenImage
+}: {
+  msg: HexMessage
+  expert: Expert
+  onOpenImage: (items: ViewerImage[], index: number) => void
+}): ReactElement {
   const isUser = msg.role === 'user'
   return (
     <div className={'segment' + (isUser ? ' user' : '')} style={{ '--seg-color': isUser ? 'var(--border-2)' : expert.color } as CSSProperties}>
@@ -64,6 +41,19 @@ function HexSegment({ msg, expert }: { msg: HexMessage; expert: Expert }): React
       </div>
       <div className={'seg-body' + (isUser ? ' primary' : '')}>
         {msg.text ? <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{msg.text}</p> : null}
+        {msg.images && msg.images.length > 0 ? (
+          <div className="msg-images">
+            {msg.images.map((img, i) => (
+              <img
+                key={i}
+                className="msg-img-thumb"
+                src={img.url}
+                alt={img.name}
+                onClick={() => onOpenImage(msg.images!.map((x) => ({ url: x.url, name: x.name })), i)}
+              />
+            ))}
+          </div>
+        ) : null}
         {msg.tools.map((t) => (
           <ToolBubble key={t.id} tool={t} />
         ))}
@@ -75,39 +65,77 @@ function HexSegment({ msg, expert }: { msg: HexMessage; expert: Expert }): React
 
 export function HexAgentView({ expert, onOpenSettings }: { expert: Expert; onOpenSettings?: () => void }): ReactElement {
   const hex = useHex()
+  const b = useRoleBinding(expert)
+  const cwd = useWorkspace((s) => s.cwdByExpert[expert.id] ?? '')
+  const setCwd = useWorkspace((s) => s.setCwd)
   const listRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [value, setValue] = useState('')
-  const [endpoint, setEndpoint] = useState<{ id: string; model: string } | null>(null)
-  const [noEndpoint, setNoEndpoint] = useState(false)
-
-  // Hex's loop speaks the Anthropic protocol — resolve the first enabled, keyed Anthropic endpoint.
-  useEffect(() => {
-    let alive = true
-    void window.api.endpoints.list().then((eps) => {
-      if (!alive) return
-      // Hex's loop speaks the Anthropic Messages protocol — pick the first enabled, keyed endpoint on
-      // that protocol (any provider's Anthropic-compatible endpoint, e.g. a gateway) and use its
-      // configured model. The model itself can be anything the endpoint serves.
-      const ep = eps.find((e) => e.enabled && e.hasKey && e.protocol === 'anthropic')
-      const model = ep?.defaultModel || ep?.availableModels?.[0]
-      if (ep && model) setEndpoint({ id: ep.id, model })
-      else setNoEndpoint(true)
-    })
-    return () => {
-      alive = false
-    }
-  }, [])
+  const [attach, setAttach] = useState<ImageAttachment[]>([])
+  const [viewer, setViewer] = useState<{ items: ViewerImage[]; index: number } | null>(null)
 
   useEffect(() => {
     const el = listRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [hex.messages, hex.streaming])
 
+  // Hex's loop speaks the Anthropic Messages protocol — it needs this role's bound endpoint to be an
+  // enabled, keyed Anthropic endpoint, a model, and a project folder. Anything missing → a banner.
+  const selectedEp = b.endpoints.find((e) => e.id === b.endpointId)
+  const endpointReady = !!selectedEp && selectedEp.enabled && selectedEp.protocol === 'anthropic' && selectedEp.hasKey && !!b.model
+  const banner = !b.loaded
+    ? null
+    : b.endpoints.length === 0
+      ? 'Add an AI endpoint to run Hex'
+      : !selectedEp || selectedEp.protocol !== 'anthropic'
+        ? 'Hex needs an Anthropic-protocol endpoint — bind one in its profile'
+        : !selectedEp.hasKey
+          ? 'Add an API key to this endpoint to run Hex'
+          : !b.model
+            ? 'Select a model to run Hex'
+            : !cwd
+              ? 'Choose a project folder for Hex to work in'
+              : null
+  // The cwd banner is a folder prompt (folder icon, no settings link); the rest are endpoint problems.
+  const bannerIsFolder = banner !== null && endpointReady && !cwd
+  const ready = b.loaded && banner === null
+
+  // Hex defaults to medium thinking (a coding agent benefits from it); the picker writes the binding.
+  const effectiveDepth = (b.depth || 'medium') as ThinkingDepth
+
+  const addFiles = async (files: File[]): Promise<void> => {
+    const imgs = (await Promise.all(files.map(fileToImage))).filter((x): x is ImageAttachment => x !== null)
+    if (imgs.length) setAttach((p) => [...p, ...imgs])
+  }
+  const onPaste = (e: ReactClipboardEvent<HTMLTextAreaElement>): void => {
+    const files = imagesFromClipboard(e.clipboardData?.items ?? null)
+    if (files.length === 0) return // no images → let the normal text paste through
+    e.preventDefault()
+    void addFiles(files)
+  }
+  const onPickFiles = (e: ChangeEvent<HTMLInputElement>): void => {
+    const files = Array.from(e.target.files ?? [])
+    e.target.value = ''
+    void addFiles(files)
+  }
+  const openImage = (items: ViewerImage[], index: number): void => setViewer({ items, index })
+
   const send = (): void => {
     const prompt = value.trim()
-    if (!prompt || !endpoint || hex.streaming) return
+    if ((!prompt && attach.length === 0) || !ready || hex.streaming) return
     setValue('')
-    void hex.run({ endpointId: endpoint.id, model: endpoint.model, prompt })
+    const images = attach.map((a) => ({ dataUrl: a.dataUrl, mime: a.mime, name: a.name }))
+    setAttach([])
+    const thinking = resolveThinking(getThinkingCapability(b.family, b.model), effectiveDepth) ?? undefined
+    void hex.run({
+      endpointId: b.endpointId,
+      model: b.model,
+      prompt,
+      thinking,
+      cwd,
+      images: images.length ? images : undefined,
+      contextWindow: b.contextLength || undefined
+    })
   }
 
   return (
@@ -115,7 +143,7 @@ export function HexAgentView({ expert, onOpenSettings }: { expert: Expert; onOpe
       <div className="msg-list" ref={listRef}>
         <div className="msg-inner">
           {hex.messages.map((m) => (
-            <HexSegment key={m.id} msg={m} expert={expert} />
+            <HexSegment key={m.id} msg={m} expert={expert} onOpenImage={openImage} />
           ))}
           {hex.error ? (
             <div className="inline-notice">
@@ -132,23 +160,35 @@ export function HexAgentView({ expert, onOpenSettings }: { expert: Expert; onOpe
 
       <div className="input-dock">
         <div className="input-dock-inner">
-          {noEndpoint ? (
+          {banner ? (
             <div className="dock-banner">
-              <Icons.plug size={15} style={{ color: 'var(--text-3)' }} />
-              <span>Configure an endpoint and model to run Hex</span>
-              <span className="db-arrow" onClick={onOpenSettings}>
-                Open settings <Icons.arrowRight size={13} />
-              </span>
+              {bannerIsFolder ? (
+                <Icons.folder size={15} style={{ color: 'var(--text-3)' }} />
+              ) : (
+                <Icons.plug size={15} style={{ color: 'var(--text-3)' }} />
+              )}
+              <span>{banner}</span>
+              {bannerIsFolder ? null : (
+                <span className="db-arrow" onClick={onOpenSettings}>
+                  Open settings <Icons.arrowRight size={13} />
+                </span>
+              )}
             </div>
           ) : null}
-          <PathBar />
-          <div className="composer2">
+          <PathBar cwd={cwd} onPick={(dir) => setCwd(expert.id, dir)} />
+          <div className={'composer2' + (ready ? '' : ' disabled')}>
+            <div className="cmp-toolbar">
+              <ModelPicker models={b.models} value={b.model} onChange={b.onModel} disabled={!endpointReady} />
+              <ThinkingPicker family={b.family} model={b.model} depth={effectiveDepth} onChange={b.onDepth} disabled={!endpointReady} />
+            </div>
+            <AttachmentStrip items={attach} onRemove={(id) => setAttach((p) => p.filter((a) => a.id !== id))} />
             <textarea
               className="cmp-textarea"
               rows={1}
               value={value}
               placeholder={`Ask ${expert.name} to build, fix, or investigate — Enter to send`}
               onChange={(e) => setValue(e.target.value)}
+              onPaste={onPaste}
               onKeyDown={(e) => {
                 // Enter sends, Shift+Enter newlines; never submit mid-IME-composition (CJK candidate
                 // selection) — nativeEvent.isComposing / keyCode 229 (older Firefox) flag it.
@@ -158,16 +198,20 @@ export function HexAgentView({ expert, onOpenSettings }: { expert: Expert; onOpe
                   send()
                 }
               }}
-              disabled={noEndpoint}
+              disabled={!ready}
             />
             <div className="cmp-bottom">
+              <button className="icon-btn" title="Attach image" disabled={!ready} onClick={() => fileInputRef.current?.click()}>
+                <Icons.paperclip size={16} />
+              </button>
+              <input ref={fileInputRef} type="file" accept="image/*" multiple hidden onChange={onPickFiles} />
               <div className="tb-spacer" />
               {hex.streaming ? (
                 <button className="cmp-stop" onClick={hex.stop}>
                   <span className="stop-sq" /> Stop
                 </button>
               ) : (
-                <button className="cmp-send" disabled={!value.trim() || noEndpoint || !endpoint} onClick={send}>
+                <button className="cmp-send" disabled={(!value.trim() && attach.length === 0) || !ready} onClick={send}>
                   Send <Icons.arrowUp size={14} />
                 </button>
               )}
@@ -181,6 +225,15 @@ export function HexAgentView({ expert, onOpenSettings }: { expert: Expert; onOpe
           prompt={hex.permission}
           onAllow={() => hex.respondPermission(true)}
           onDeny={() => hex.respondPermission(false)}
+        />
+      ) : null}
+
+      {viewer ? (
+        <ImageViewer
+          items={viewer.items}
+          index={viewer.index}
+          onClose={() => setViewer(null)}
+          onStep={(d) => setViewer((v) => (v ? { ...v, index: (v.index + d + v.items.length) % v.items.length } : v))}
         />
       ) : null}
     </div>

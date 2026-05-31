@@ -4,6 +4,7 @@
 
 import { z } from 'zod'
 import { LlmError } from '../llm/types'
+import type { ThinkingParam } from '../llm/types'
 import {
   autocompact,
   autocompactThreshold,
@@ -39,6 +40,7 @@ export interface RunAgentParams {
   maxTokens?: number
   maxTurns?: number
   contextWindow?: number // model's context window, drives the autocompact threshold (default 200K)
+  thinking?: ThinkingParam // extended thinking (budgetTokens), forwarded to every model call this run
   smallModel?: string // model for WebFetch extraction; defaults to the main model
   searchModel?: string // model for WebSearch's server web_search call; defaults to the main model
   onStream?: (e: AgentLlmEvent) => void // forwarded straight from the LLM call (text + tool deltas)
@@ -201,7 +203,7 @@ export async function* runAgent(
       // Stream the turn: each tool_use block is yielded as it finishes, so execution starts
       // immediately (read-only tools batch in parallel) instead of waiting for the whole message.
       const gen = callWithTools(
-        { baseUrl, apiKey, model, system, messages, tools: toolSchemas, maxTokens, signal: ctx.signal },
+        { baseUrl, apiKey, model, system, messages, tools: toolSchemas, maxTokens, thinking: params.thinking, signal: ctx.signal },
         params.onStream,
       )
       for (;;) {

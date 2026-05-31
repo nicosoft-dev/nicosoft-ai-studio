@@ -25,6 +25,7 @@ interface Content {
 interface GeminiBody {
   contents: Content[]
   systemInstruction?: { parts: TextPart[] }
+  generationConfig?: { thinkingConfig: { thinkingBudget: number } }
 }
 
 // Build an inlineData part from an attachment. Gemini wants raw base64 (no data: prefix) plus mime.
@@ -69,6 +70,10 @@ function buildBody(req: ChatRequest): GeminiBody {
   const body: GeminiBody = { contents: toContents(req.messages) }
   const sys = toSystemInstruction(req.messages)
   if (sys) body.systemInstruction = sys
+  const budget = req.thinking?.budgetTokens
+  if (typeof budget === 'number' && budget > 0) {
+    body.generationConfig = { thinkingConfig: { thinkingBudget: budget } }
+  }
   return body
 }
 

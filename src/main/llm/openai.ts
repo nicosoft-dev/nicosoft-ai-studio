@@ -28,7 +28,7 @@ interface ResponsesBody {
   stream: true
   store: false
   instructions?: string
-  reasoning?: { effort: 'low' | 'medium' | 'high' }
+  reasoning?: { effort: 'minimal' | 'none' | 'low' | 'medium' | 'high' | 'xhigh' }
 }
 
 // Build `input` items from messages. System messages are not emitted here (hoisted to instructions).
@@ -68,7 +68,7 @@ function buildBody(req: ChatRequest): ResponsesBody {
   }
   const instructions = toInstructions(req.messages)
   if (instructions) body.instructions = instructions
-  if (req.reasoning) body.reasoning = { effort: req.reasoning }
+  if (req.thinking?.effort) body.reasoning = { effort: req.thinking.effort }
   return body
 }
 

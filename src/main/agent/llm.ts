@@ -4,6 +4,7 @@
 // Reuses the shared SSE plumbing. See docs/nicosoft-studio/12-hex-coding-agent.md §2.4.
 
 import { iterSSE, openStream, parseJSON, toLlmError } from '../llm/_shared'
+import type { ThinkingParam } from '../llm/types'
 import type {
   AgentMessage,
   AnyToolSchema,
@@ -25,7 +26,19 @@ export interface AgentLlmRequest {
   messages: AgentMessage[]
   tools: AnyToolSchema[]
   maxTokens: number
+  thinking?: ThinkingParam // Anthropic extended thinking (budgetTokens); lifts max_tokens above budget
   signal?: AbortSignal
+}
+
+// The /v1/messages request body the agent sends (tools + optional extended thinking).
+interface AgentMessagesBody {
+  model: string
+  max_tokens: number
+  system: string
+  messages: AgentMessage[]
+  tools: AnyToolSchema[]
+  stream: true
+  thinking?: { type: 'enabled'; budget_tokens: number }
 }
 
 // Text/tool-call lifecycle events surfaced to the caller for UI progress (not the loop's data path —
@@ -42,7 +55,7 @@ interface StreamEvent {
     usage?: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number }
   }
   content_block?: { type?: string; text?: string; id?: string; name?: string; [key: string]: unknown }
-  delta?: { type?: string; text?: string; partial_json?: string; stop_reason?: string }
+  delta?: { type?: string; text?: string; partial_json?: string; stop_reason?: string; thinking?: string; signature?: string }
   usage?: { output_tokens?: number }
 }
 
@@ -61,13 +74,19 @@ export async function* callWithTools(
   onEvent?: (e: AgentLlmEvent) => void,
 ): AsyncGenerator<ToolUseBlock, AssistantTurn, void> {
   const url = `${req.baseUrl.replace(/\/$/, '')}/v1/messages`
-  const body = {
+  const body: AgentMessagesBody = {
     model: req.model,
     max_tokens: req.maxTokens,
     system: req.system,
     messages: req.messages,
     tools: req.tools,
     stream: true,
+  }
+  // Extended thinking: budget_tokens must be < max_tokens; lift max_tokens to leave room for output.
+  const budget = req.thinking?.budgetTokens
+  if (typeof budget === 'number' && budget > 0) {
+    body.thinking = { type: 'enabled', budget_tokens: budget }
+    if (req.maxTokens <= budget) body.max_tokens = budget + req.maxTokens
   }
   const reader = await openStream(PROVIDER, url, {
     method: 'POST',
@@ -133,6 +152,10 @@ export async function* callWithTools(
             typeof d.partial_json === 'string'
           ) {
             blk.json += d.partial_json // accumulate server_tool_use input (not surfaced to the loop)
+          } else if (d?.type === 'thinking_delta' && blk?.type === 'server' && typeof d.thinking === 'string') {
+            blk.raw.thinking = ((blk.raw.thinking as string) ?? '') + d.thinking // extended-thinking text
+          } else if (d?.type === 'signature_delta' && blk?.type === 'server' && typeof d.signature === 'string') {
+            blk.raw.signature = ((blk.raw.signature as string) ?? '') + d.signature // thinking block signature
           }
           break
         }

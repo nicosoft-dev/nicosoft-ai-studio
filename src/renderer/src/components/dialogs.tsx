@@ -7,7 +7,8 @@ import { Icons } from '@/components/icons'
 import { Avatar } from '@/components/primitives'
 import { STUDIO_DATA } from '@/data/studio-data'
 import { useRoles } from '@/stores/roles'
-import type { EndpointRow, Expert, Family } from '@/types'
+import type { Expert } from '@/types'
+import type { EndpointDto, EndpointInput, ModelInfo } from '@/lib/api'
 
 /* — Add / Edit endpoint dialog (controlled) — */
 const PROTO_BASE: Record<string, string> = {
@@ -17,39 +18,77 @@ const PROTO_BASE: Record<string, string> = {
   custom: "https://",
 }
 
+type Proto = EndpointDto['protocol']
+
+// Draft row with a stable key so removing a middle row doesn't shuffle the controlled inputs
+// (focus / IME / number intermediate state). Stripped back to ModelInfo on save.
+type ModelDraft = ModelInfo & { _k: string }
+const mkDraft = (m?: ModelInfo): ModelDraft => ({
+  slug: m?.slug ?? '',
+  contextLength: m?.contextLength ?? 0,
+  _k: crypto.randomUUID()
+})
+
 export function EndpointDialog({
   initial,
   onClose,
   onSave
 }: {
-  initial?: EndpointRow | null
+  initial?: EndpointDto | null
   onClose: () => void
-  onSave: (row: EndpointRow, initial: EndpointRow | null) => void
+  onSave: (input: EndpointInput, id: string | null) => void
 }): ReactElement {
-  const [name, setName] = useState(initial ? initial.name : "")
-  const [proto, setProto] = useState<Family | 'custom'>(initial ? initial.proto : "openai")
-  const [baseURL, setBaseURL] = useState(initial ? (initial.baseURL || PROTO_BASE[initial.proto ?? 'openai']) : PROTO_BASE.openai)
+  const [name, setName] = useState(initial?.name ?? "")
+  const [proto, setProto] = useState<Proto>(initial?.protocol ?? "openai")
+  const [baseURL, setBaseURL] = useState(initial?.baseUrl || PROTO_BASE[initial?.protocol ?? 'openai'])
   const [apiKey, setApiKey] = useState("")
   const [showKey, setShowKey] = useState(false)
-  const [tested, setTested] = useState(false)
-  const [models, setModels] = useState<string[]>(initial?.models ?? [])
-  const [modelDraft, setModelDraft] = useState("")
+  const [models, setModels] = useState<ModelDraft[]>(
+    initial?.availableModels && initial.availableModels.length > 0
+      ? initial.availableModels.map((m) => mkDraft(m))
+      : [mkDraft()]
+  )
+  const [testState, setTestState] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle')
+  const [testMsg, setTestMsg] = useState("")
   const editing = !!initial
 
-  const addModel = (raw: string): void => {
-    const v = raw.trim()
-    if (v && !models.includes(v)) setModels([...models, v]) // duplicates ignored
-    setModelDraft("")
-  }
+  const updateModel = (k: string, patch: Partial<ModelInfo>): void =>
+    setModels((ms) => ms.map((m) => (m._k === k ? { ...m, ...patch } : m)))
+  const addRow = (): void => setModels((ms) => [...ms, mkDraft()])
+  const removeRow = (k: string): void => setModels((ms) => (ms.length > 1 ? ms.filter((m) => m._k !== k) : ms))
 
   const save = (): void => {
-    const masked = apiKey ? "••••••" + apiKey.slice(-4) : (initial ? initial.key : "••••••0000")
-    onSave({
-      name: name || "Untitled", proto: proto as Family,
-      status: editing ? initial!.status : "healthy",
-      models,
-      key: masked, baseURL,
-    }, initial ?? null)
+    const cleaned = models
+      .map((m) => ({ slug: m.slug.trim(), contextLength: m.contextLength || 0 }))
+      .filter((m) => m.slug)
+    onSave(
+      {
+        name: name || "Untitled",
+        protocol: proto,
+        baseUrl: baseURL,
+        availableModels: cleaned,
+        defaultModel: cleaned[0]?.slug ?? null,
+        enabled: true,
+        ...(apiKey ? { apiKey } : {})
+      },
+      initial?.id ?? null
+    )
+  }
+
+  const test = async (): Promise<void> => {
+    if (!initial) {
+      setTestState('fail')
+      setTestMsg('Save the endpoint first, then test the connection.')
+      return
+    }
+    setTestState('testing')
+    setTestMsg('')
+    const r = await window.api.endpoints.test(initial.id)
+    if (r.ok) setTestState('ok')
+    else {
+      setTestState('fail')
+      setTestMsg(r.error?.message ?? 'Connection failed')
+    }
   }
 
   return (
@@ -67,9 +106,9 @@ export function EndpointDialog({
           <div>
             <label className="field-label">Protocol</label>
             <div className="segmented">
-              {["openai", "anthropic", "gemini", "custom"].map((p) => (
+              {(["openai", "anthropic", "gemini", "custom"] as const).map((p) => (
                 <button key={p} className={proto === p ? "active" : ""}
-                  onClick={() => { setProto(p as Family | 'custom'); setBaseURL(PROTO_BASE[p]); }}>
+                  onClick={() => { setProto(p); setBaseURL(PROTO_BASE[p]); }}>
                   {p === "openai" ? "OpenAI" : p === "anthropic" ? "Anthropic" : p === "gemini" ? "Gemini" : "Custom"}
                 </button>
               ))}
@@ -91,39 +130,52 @@ export function EndpointDialog({
           </div>
           <div>
             <label className="field-label">
-              Models <span style={{ color: "var(--text-4)", fontWeight: 400 }}>· {models.length}</span>
+              Models <span style={{ color: "var(--text-4)", fontWeight: 400 }}>· {models.filter((m) => m.slug.trim()).length}</span>
             </label>
-            <div className="model-tags" onClick={(e) => (e.currentTarget.querySelector(".mt-input") as HTMLInputElement | null)?.focus()}>
+            <div className="model-rows">
+              <div className="model-row head">
+                <span className="mr-h mr-slug">Model slug</span>
+                <span className="mr-h mr-ctx">Context (tokens)</span>
+                <span className="mr-h-sp" />
+              </div>
               {models.map((m) => (
-                <span className="model-tag" key={m}>
-                  {m}
-                  <button className="mt-remove" title="Remove" onClick={() => setModels(models.filter((x) => x !== m))}>
-                    <Icons.x size={11} />
+                <div className="model-row" key={m._k}>
+                  <input
+                    className="input mono mr-slug"
+                    value={m.slug}
+                    placeholder="provider/model-id"
+                    onChange={(e) => updateModel(m._k, { slug: e.target.value })}
+                    spellCheck={false}
+                    autoComplete="off"
+                  />
+                  <input
+                    className="input mono mr-ctx"
+                    type="number"
+                    min={0}
+                    value={m.contextLength || ''}
+                    placeholder="200000"
+                    onChange={(e) => {
+                      const n = Math.floor(e.target.valueAsNumber)
+                      updateModel(m._k, { contextLength: Number.isFinite(n) && n > 0 ? n : 0 })
+                    }}
+                  />
+                  <button className="mr-del" title="Remove" onClick={() => removeRow(m._k)} disabled={models.length <= 1}>
+                    <Icons.x size={13} />
                   </button>
-                </span>
+                </div>
               ))}
-              <input
-                className="mt-input"
-                value={modelDraft}
-                onChange={(e) => setModelDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addModel(modelDraft); }
-                  else if (e.key === "Backspace" && !modelDraft && models.length > 0) setModels(models.slice(0, -1));
-                }}
-                placeholder={models.length > 0 ? "Add another…" : "provider/model-id, press Enter"}
-                spellCheck={false}
-                autoComplete="off"
-              />
+              <button className="mr-add" onClick={addRow}>
+                <Icons.plus size={14} /> Add model
+              </button>
             </div>
           </div>
-          {tested && (
-            <div className="test-success">
-              <Icons.check size={15} /> Connection OK
-            </div>
-          )}
+          {testState === 'ok' && <div className="test-success"><Icons.check size={15} /> Connection OK</div>}
+          {testState === 'fail' && <div className="rb-needs"><Icons.alert size={14} /> {testMsg}</div>}
         </div>
         <div className="dialog-foot">
-          <button className="btn secondary sm" onClick={() => setTested(true)}>Test connection</button>
+          <button className="btn secondary sm" onClick={() => void test()} disabled={testState === 'testing'}>
+            {testState === 'testing' ? 'Testing…' : 'Test connection'}
+          </button>
           <div className="df-spacer" />
           <button className="btn ghost sm" onClick={onClose}>Cancel</button>
           <button className="btn primary sm" onClick={save}>Save</button>

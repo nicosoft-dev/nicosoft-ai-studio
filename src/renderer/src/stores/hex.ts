@@ -4,6 +4,7 @@
 // approval surfaces as `permission` until the user answers. One run at a time.
 
 import { create } from 'zustand'
+import type { EffortLevel } from '@/lib/thinking'
 
 export interface HexToolCall {
   id: string
@@ -16,6 +17,7 @@ export interface HexMessage {
   id: string
   role: 'user' | 'assistant'
   text: string
+  images?: { url: string; name: string }[] // user-attached images (data URLs), shown in the bubble
   tools: HexToolCall[]
   streaming?: boolean
 }
@@ -27,14 +29,20 @@ export interface PermissionPrompt {
 }
 
 interface HexState {
-  cwd: string
   messages: HexMessage[]
   streaming: boolean
   streamId: string | null
   permission: PermissionPrompt | null
   error: string | null
-  setCwd: (cwd: string) => void
-  run: (opts: { endpointId: string; model: string; prompt: string }) => Promise<void>
+  run: (opts: {
+    endpointId: string
+    model: string
+    prompt: string
+    thinking?: { effort?: EffortLevel; budgetTokens?: number }
+    cwd: string
+    images?: { dataUrl: string; mime: string; name: string }[]
+    contextWindow?: number
+  }) => Promise<void>
   respondPermission: (allow: boolean) => void
   stop: () => void
   reset: () => void
@@ -48,24 +56,24 @@ const teardown = (): void => {
 }
 
 export const useHex = create<HexState>((set, get) => ({
-  cwd: '',
   messages: [],
   streaming: false,
   streamId: null,
   permission: null,
   error: null,
 
-  setCwd: (cwd) => set({ cwd }),
-
-  run: async ({ endpointId, model, prompt }) => {
-    const cwd = get().cwd
+  run: async ({ endpointId, model, prompt, thinking, cwd, images, contextWindow }) => {
     if (!cwd) {
       set({ error: 'Set a working directory before running Hex.' })
       return
     }
     teardown()
+    const userImages = (images ?? []).map((i) => ({ url: i.dataUrl, name: i.name }))
     set((s) => ({
-      messages: [...s.messages, { id: uid(), role: 'user', text: prompt, tools: [] }],
+      messages: [
+        ...s.messages,
+        { id: uid(), role: 'user', text: prompt, images: userImages.length ? userImages : undefined, tools: [] }
+      ],
       streaming: true,
       error: null,
       permission: null,
@@ -154,7 +162,15 @@ export const useHex = create<HexState>((set, get) => ({
       }),
     )
 
-    const { streamId } = await api.run({ endpointId, model, prompt, cwd })
+    const { streamId } = await api.run({
+      endpointId,
+      model,
+      prompt,
+      cwd,
+      thinking,
+      contextWindow,
+      images: images?.map((i) => ({ dataUrl: i.dataUrl, mime: i.mime }))
+    })
     set({ streamId })
   },
 

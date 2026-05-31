@@ -2,7 +2,7 @@
    NicoSoft AI Studio — Settings
    Profile · Memory · Endpoints · Roles · General · Privacy · About
    ============================================================ */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { CSSProperties, ReactElement } from 'react'
 import { Icons } from '@/components/icons'
 import { Avatar, HealthDot } from '@/components/primitives'
@@ -11,7 +11,10 @@ import { useRoles } from '@/stores/roles'
 import { EndpointDialog } from '@/components/dialogs'
 import { ProfilePage, Dropdown } from '@/views/profile'
 import { MemorySettings } from '@/views/memory'
-import type { Expert, EndpointRow, Family, RoleBinding } from '@/types'
+import type { Expert } from '@/types'
+import type { EndpointDto, EndpointInput } from '@/lib/api'
+import { THINKING_OPTIONS } from '@/lib/thinking'
+import { useRoleBinding, FAMILY_LABEL } from '@/lib/use-role-binding'
 
 const SETTINGS_NAV: { id: string; label: string; icon: string }[] = [
   { id: "profile",   label: "Profile",   icon: "user" },
@@ -75,30 +78,33 @@ function EndpointsPage({
   onEdit,
   onDelete
 }: {
-  endpoints: EndpointRow[]
+  endpoints: EndpointDto[]
   onAdd: () => void
-  onEdit: (ep: EndpointRow) => void
-  onDelete: (name: string) => void
+  onEdit: (ep: EndpointDto) => void
+  onDelete: (id: string) => void
 }): ReactElement {
   return (
     <div className="sc-wrap">
       <div className="settings-title">Endpoints</div>
       <div className="settings-desc">Connect AI providers. Each endpoint exposes one or more models that your experts run on.</div>
       <div className="endpoint-list">
-        {endpoints.map((ep) => (
-          <div className="endpoint-row" key={ep.name}>
-            <span className="er-health"><HealthDot status={ep.status} /></span>
-            <span className="er-name">{ep.name}</span>
-            <span className="er-proto">{ep.proto}</span>
-            <span className={"er-status " + ep.status}>{ep.status}</span>
-            <span className="er-models">{ep.models.length} models</span>
-            <span className="er-key">key {ep.key}</span>
-            <span className="er-actions">
-              <button className="btn sm ghost" onClick={() => onEdit(ep)}>Edit</button>
-              <EndpointRowMenu onEdit={() => onEdit(ep)} onDelete={() => onDelete(ep.name)} />
-            </span>
-          </div>
-        ))}
+        {endpoints.map((ep) => {
+          const health = ep.enabled ? 'healthy' : 'idle'
+          return (
+            <div className="endpoint-row" key={ep.id}>
+              <span className="er-health"><HealthDot status={health} /></span>
+              <span className="er-name">{ep.name}</span>
+              <span className="er-proto">{ep.protocol}</span>
+              <span className={"er-status " + health}>{ep.enabled ? 'enabled' : 'disabled'}</span>
+              <span className="er-models">{ep.availableModels.length} models</span>
+              <span className="er-key">{ep.hasKey ? 'key set' : 'no key'}</span>
+              <span className="er-actions">
+                <button className="btn sm ghost" onClick={() => onEdit(ep)}>Edit</button>
+                <EndpointRowMenu onEdit={() => onEdit(ep)} onDelete={() => onDelete(ep.id)} />
+              </span>
+            </div>
+          )
+        })}
         {endpoints.length === 0 && <div className="endpoint-row" style={{ color: "var(--text-4)", fontSize: 13 }}>No endpoints configured yet.</div>}
         <div className="add-endpoint-row" onClick={onAdd}>
           <Icons.plus size={15} /> Add endpoint
@@ -108,26 +114,9 @@ function EndpointsPage({
   );
 }
 
-/* — Roles binding table (interactive) — */
-function RoleBindRow({
-  expert,
-  binding,
-  endpoints,
-  onChange
-}: {
-  expert: Expert
-  binding: RoleBinding
-  endpoints: EndpointRow[]
-  onChange: (patch: Partial<RoleBinding> & { endpoint?: string }) => void
-}): ReactElement {
-  const familyLabel: Record<string, string> = { anthropic: "Anthropic", openai: "OpenAI", gemini: "Gemini" };
-  const epOpts = endpoints.map((ep) => ({ v: ep.name, l: ep.name }));
-  const family = binding.family;
-  const epName = (binding as RoleBinding & { endpoint?: string }).endpoint || (endpoints.find((e) => e.proto === family) || {}).name || endpoints[0].name;
-  const selectedEp = endpoints.find((e) => e.name === epName);
-  const modelOpts = (selectedEp?.models ?? []).map((m) => ({ v: m, l: m }));
-  const safeModelOpts = modelOpts.length > 0 ? modelOpts : [{ v: "", l: "— no models —" }];
-
+/* — Roles binding table (interactive, persisted) — */
+function RoleBindRow({ expert }: { expert: Expert }): ReactElement {
+  const b = useRoleBinding(expert);
   return (
     <div className="role-bind-row">
       <div className="rb-role">
@@ -135,29 +124,43 @@ function RoleBindRow({
         <span className="rb-name">{expert.name}</span>
       </div>
       <div className="rb-binding">
-        <span className={"proto-chip " + family}><span className="pc-dot" /> {familyLabel[family as string]}</span>
+        <span className={"proto-chip " + (b.family ?? 'openai')}><span className="pc-dot" /> {FAMILY_LABEL[b.family ?? 'openai']}</span>
         <div className="rb-controls">
           <div style={{ width: 150 }}>
-            <Dropdown options={epOpts} value={epName}
-              onChange={(v: string) => { const ep = endpoints.find((e) => e.name === v); onChange({ endpoint: v, family: ep?.proto as Family, model: ep?.models[0] ?? "" }); }} />
+            <Dropdown options={b.endpoints.map((e) => ({ v: e.id, l: e.name }))} value={b.endpointId} onChange={b.onEndpoint} />
           </div>
           {/* Model options are the selected endpoint's configured slug list (set in the endpoint
               dialog). Switching endpoint repopulates them and resets to its first model. */}
           <div style={{ width: 168 }}>
-            <Dropdown options={safeModelOpts} value={binding.model} onChange={(v: string) => onChange({ model: v })} />
+            <Dropdown
+              options={(b.models.length ? b.models : ['']).map((m) => ({ v: m, l: m || '— no models —' }))}
+              value={b.model}
+              onChange={b.onModel}
+            />
           </div>
+          {b.depths.length > 0 && (
+            <div style={{ width: 150 }}>
+              <Dropdown
+                options={[
+                  { v: '', l: 'Default thinking' },
+                  ...THINKING_OPTIONS.filter((t) => b.depths.includes(t.value)).map((t) => ({ v: t.value, l: t.label }))
+                ]}
+                value={b.depth}
+                onChange={b.onDepth}
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function RolesPage({ endpoints, onAddEndpoint }: { endpoints: EndpointRow[]; onAddEndpoint: () => void }): ReactElement {
-  const { ROLE_BINDINGS, EXPERT_BY_ID, EXPERTS } = STUDIO_DATA;
+function RolesPage({ onAddEndpoint }: { onAddEndpoint: () => void }): ReactElement {
+  const { EXPERTS } = STUDIO_DATA;
   const roles = useRoles();
-  const [bindings, setBindings] = useState<RoleBinding[]>(ROLE_BINDINGS);
+  const bindable = EXPERTS.filter((e) => !e.unconfigured && !roles.isDeleted(e.id));
   const ci = EXPERTS.find((e) => e.unconfigured && !roles.isDeleted(e.id));
-  const update = (id: string, patch: Partial<RoleBinding>): void => setBindings((p) => p.map((b) => (b.id === id ? { ...b, ...patch } : b)));
 
   return (
     <div className="sc-wrap">
@@ -173,8 +176,8 @@ function RolesPage({ endpoints, onAddEndpoint }: { endpoints: EndpointRow[]; onA
           <span className="th-role">Expert</span>
           <span className="th-binding">Endpoint &amp; model</span>
         </div>
-        {bindings.map((b) => (
-          <RoleBindRow key={b.id} expert={EXPERT_BY_ID[b.id]} binding={b} endpoints={endpoints} onChange={(patch) => update(b.id, patch)} />
+        {bindable.map((e) => (
+          <RoleBindRow key={e.id} expert={e} />
         ))}
         {/* unconfigured custom role */}
         {ci && (
@@ -223,19 +226,18 @@ export function SettingsView({
   onTab: (tab: string) => void
   onBack: () => void
 }): ReactElement {
-  const { ENDPOINTS } = STUDIO_DATA;
-  const [endpoints, setEndpoints] = useState<EndpointRow[]>(ENDPOINTS);
-  const [dialog, setDialog] = useState<{ editing: EndpointRow | null } | null>(null); // { editing: ep | null }
+  const [endpoints, setEndpoints] = useState<EndpointDto[]>([]);
+  const [dialog, setDialog] = useState<{ editing: EndpointDto | null } | null>(null);
+
+  const reload = (): void => { void window.api.endpoints.list().then(setEndpoints); };
+  useEffect(() => { reload(); }, []);
 
   const openAdd = (): void => setDialog({ editing: null });
-  const openEdit = (ep: EndpointRow): void => setDialog({ editing: ep });
-  const del = (name: string): void => setEndpoints((p) => p.filter((e) => e.name !== name));
-  const save = (ep: EndpointRow, initial: EndpointRow | null): void => {
-    setEndpoints((p) => {
-      if (initial) return p.map((x) => (x.name === initial.name ? { ...x, ...ep } : x));
-      return [...p, ep];
-    });
-    setDialog(null);
+  const openEdit = (ep: EndpointDto): void => setDialog({ editing: ep });
+  const del = (id: string): void => { void window.api.endpoints.remove(id).then(reload); };
+  const save = (input: EndpointInput, id: string | null): void => {
+    const p = id ? window.api.endpoints.update(id, input) : window.api.endpoints.add(input);
+    void p.then(() => { reload(); setDialog(null); });
   };
 
   return (
@@ -245,7 +247,7 @@ export function SettingsView({
         {tab === "profile" && <ProfilePage />}
         {tab === "memory" && <MemorySettings />}
         {tab === "endpoints" && <EndpointsPage endpoints={endpoints} onAdd={openAdd} onEdit={openEdit} onDelete={del} />}
-        {tab === "roles" && <RolesPage endpoints={endpoints} onAddEndpoint={openAdd} />}
+        {tab === "roles" && <RolesPage onAddEndpoint={openAdd} />}
         {(tab === "general" || tab === "privacy" || tab === "about") && <GenericSettingsPage id={tab} />}
       </div>
       {dialog && <EndpointDialog initial={dialog.editing} onClose={() => setDialog(null)} onSave={save} />}

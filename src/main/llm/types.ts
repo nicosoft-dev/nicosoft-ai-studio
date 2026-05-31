@@ -37,13 +37,21 @@ export interface ChatMessage {
   attachments?: ChatAttachment[]
 }
 
+// Resolved thinking directive. The renderer's thinking engine (renderer/src/lib/thinking.ts) picks
+// exactly one shape per request: effort (OpenAI Responses / Gemini-3 reasoning models) or budgetTokens
+// (Anthropic extended thinking / Gemini 2.5). Absent = no thinking. Adapters translate it natively.
+export interface ThinkingParam {
+  effort?: 'minimal' | 'none' | 'low' | 'medium' | 'high' | 'xhigh'
+  budgetTokens?: number
+}
+
 export interface ChatRequest {
   protocol: Protocol
   baseUrl: string
   apiKey: string
   model: string
   messages: ChatMessage[]
-  reasoning?: 'low' | 'medium' | 'high' // only sent for models that support it
+  thinking?: ThinkingParam // only sent for models that support it (resolved by the thinking engine)
   signal?: AbortSignal
 }
 

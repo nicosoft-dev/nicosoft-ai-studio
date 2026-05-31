@@ -5,15 +5,15 @@
 import { useState } from 'react'
 import type { Dispatch, ReactElement, SetStateAction } from 'react'
 import { STUDIO_DATA } from '@/data/studio-data'
-import type { Expert, MemoryItem, RoleBinding } from '@/types'
+import type { Expert, MemoryItem } from '@/types'
 import { Icons } from '@/components/icons'
 import { useRoles } from '@/stores/roles'
 import { Avatar } from '@/components/primitives'
 import { Dropdown } from '@/views/profile'
 import { ConfirmDialog } from '@/components/dialogs'
 import { MemToggle, MemoryLayer } from '@/views/memory'
-
-type ConfigurableFamily = 'anthropic' | 'openai' | 'gemini'
+import { THINKING_OPTIONS } from '@/lib/thinking'
+import { useRoleBinding, FAMILY_LABEL } from '@/lib/use-role-binding'
 
 interface EquippedItem {
   type: 'mcp' | 'skill'
@@ -21,29 +21,11 @@ interface EquippedItem {
   all?: boolean
 }
 
-function InlineBinding({
-  expert,
-  binding,
-  onOpenEndpoint
-}: {
-  expert: Expert
-  binding: RoleBinding | undefined
-  onOpenEndpoint: () => void
-}): ReactElement {
-  const { ENDPOINTS } = STUDIO_DATA
-  const familyLabel: Record<ConfigurableFamily, string> = { anthropic: "Anthropic", openai: "OpenAI", gemini: "Gemini" }
-  const modelsByFamily: Record<ConfigurableFamily, string[]> = {
-    anthropic: ["claude-haiku-4", "claude-sonnet-4.6", "claude-opus-4"],
-    openai: ["gpt-5-mini", "gpt-5", "gpt-5-pro"],
-    gemini: ["gemini-2.5-flash", "gemini-2.5-pro", "imagen-4"],
-  };
-  const endpointOpts = ENDPOINTS.map((ep) => ({ v: ep.name, l: ep.name }))
-  const [endpoint, setEndpoint] = useState(() => {
-    const ep = ENDPOINTS.find((x) => x.proto === (binding && binding.family));
-    return ep ? ep.name : ENDPOINTS[0].name;
-  });
-  const family = (ENDPOINTS.find((x) => x.name === endpoint)?.proto || "anthropic") as ConfigurableFamily
-  const [model, setModel] = useState((binding && binding.model) || modelsByFamily[family][0]);
+// Model binding for a role — endpoints + persisted RoleBinding via useRoleBinding (shared with the
+// Roles settings table). endpoint/model come from the bound endpoint; the default thinking depth is
+// dynamic by (family, model). Every change persists through roles:binding:set inside the hook.
+function InlineBinding({ expert, onOpenEndpoint }: { expert: Expert; onOpenEndpoint: () => void }): ReactElement {
+  const b = useRoleBinding(expert)
 
   if (expert.unconfigured) {
     return (
@@ -51,22 +33,48 @@ function InlineBinding({
         <div className="rb-needs"><Icons.alert size={15} /> No endpoint bound — this role can't run yet.</div>
         <button className="btn primary sm" onClick={onOpenEndpoint}><Icons.plus size={14} /> Add endpoint</button>
       </div>
-    );
+    )
+  }
+  if (!b.loaded) return <div className="detail-card binding-card" style={{ minHeight: 48 }} />
+  if (b.endpoints.length === 0) {
+    return (
+      <div className="detail-card unconfigured">
+        <div className="rb-needs"><Icons.alert size={15} /> No endpoint configured — add one to bind this role.</div>
+        <button className="btn primary sm" onClick={onOpenEndpoint}><Icons.plus size={14} /> Add endpoint</button>
+      </div>
+    )
   }
   return (
     <div className="detail-card binding-card">
-      <span className={"proto-chip " + family}><span className="pc-dot" /> {familyLabel[family]}</span>
+      <span className={'proto-chip ' + (b.family ?? 'openai')}><span className="pc-dot" /> {FAMILY_LABEL[b.family ?? 'openai']}</span>
       <div className="bind-selects">
         <div style={{ width: 200 }}>
-          <Dropdown options={endpointOpts} value={endpoint}
-            onChange={(v: string) => { setEndpoint(v); const f = ENDPOINTS.find((x) => x.name === v)?.proto as ConfigurableFamily | undefined; if (f && modelsByFamily[f]) setModel(modelsByFamily[f][0]); }} icon="plug" />
+          <Dropdown options={b.endpoints.map((e) => ({ v: e.id, l: e.name }))} value={b.endpointId} onChange={b.onEndpoint} icon="plug" />
         </div>
         <div style={{ width: 200 }}>
-          <Dropdown options={modelsByFamily[family].map((m) => ({ v: m, l: m }))} value={model} onChange={setModel} icon="sparkle" />
+          <Dropdown
+            options={(b.models.length ? b.models : ['']).map((m) => ({ v: m, l: m || '— no models —' }))}
+            value={b.model}
+            onChange={b.onModel}
+            icon="sparkle"
+          />
         </div>
+        {b.depths.length > 0 && (
+          <div style={{ width: 174 }}>
+            <Dropdown
+              options={[
+                { v: '', l: 'Default thinking' },
+                ...THINKING_OPTIONS.filter((t) => b.depths.includes(t.value)).map((t) => ({ v: t.value, l: t.label }))
+              ]}
+              value={b.depth}
+              onChange={b.onDepth}
+              icon="zap"
+            />
+          </div>
+        )}
       </div>
     </div>
-  );
+  )
 }
 
 function EquippedSection({ expertId }: { expertId: string }): ReactElement {
@@ -177,11 +185,10 @@ export function ExpertDetail({
   onOpenEndpoint: () => void
   onDeleted?: () => void
 }): ReactElement {
-  const { EXPERT_BY_ID, ROLE_BINDINGS, HISTORY } = STUDIO_DATA
+  const { EXPERT_BY_ID, HISTORY } = STUDIO_DATA
   const roles = useRoles();
   const [confirm, setConfirm] = useState(false);
   const e = EXPERT_BY_ID[expertId];
-  const binding = ROLE_BINDINGS.find((b) => b.id === expertId);
   const recents = HISTORY.flatMap((g) => g.items.filter((it) => it.expert === expertId).map((it) => ({ ...it, group: g.group })));
   const roleDisabled = roles.isDisabled(expertId);
 
@@ -220,7 +227,7 @@ export function ExpertDetail({
           {/* model binding */}
           <div className="detail-section">
             <div className="ds-head"><span className="ds-title">Model</span><span className="ds-hint">endpoint &amp; model this role runs on</span></div>
-            <InlineBinding expert={e} binding={binding} onOpenEndpoint={onOpenEndpoint} />
+            <InlineBinding expert={e} onOpenEndpoint={onOpenEndpoint} />
           </div>
 
           {/* memory */}

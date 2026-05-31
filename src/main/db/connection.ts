@@ -1,15 +1,66 @@
 import { DatabaseSync } from 'node:sqlite'
 import { app } from 'electron'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { copyFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs'
 import { runMigrations } from './migrate'
 
-// Single DatabaseSync instance for the main process. node:sqlite (Electron 42 / Node 24) — no
-// native build step. Synchronous API is fine in the main process (it never blocks the renderer).
+// Single DatabaseSync instance for the main process. ALL app data (settings, endpoints, roles, chats,
+// memory, …) lives under ~/.nsai — the same root as the Hex session transcripts — not Electron's
+// default userData dir.
 let instance: DatabaseSync | null = null
+
+function dataDir(): string {
+  const dir = join(homedir(), '.nsai')
+  mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+// One-time migration: if the db exists only at the old Electron userData location, move it (+ its
+// WAL/SHM sidecars) into ~/.nsai, then delete the originals so nothing stale is left behind.
+function migrateLegacy(target: string): void {
+  if (existsSync(target)) return
+  let legacyBase: string
+  try {
+    legacyBase = join(app.getPath('userData'), 'nicosoft-studio.db')
+  } catch {
+    return // userData unavailable (e.g. tests) — nothing to migrate
+  }
+  if (!existsSync(legacyBase)) return
+  const exts = ['', '-wal', '-shm']
+  // Copy first, tracking what actually copied. If ANY copy fails, abort the whole migration and keep
+  // the legacy files intact for a retry next launch — never delete an original we couldn't copy.
+  const copied: string[] = []
+  for (const ext of exts) {
+    if (!existsSync(legacyBase + ext)) continue
+    try {
+      copyFileSync(legacyBase + ext, target + ext)
+      copied.push(ext)
+    } catch {
+      for (const c of copied) {
+        try {
+          unlinkSync(target + c) // clean up half-written copies
+        } catch {
+          /* ignore */
+        }
+      }
+      return
+    }
+  }
+  // Every copy succeeded → now it's safe to remove the originals.
+  for (const ext of copied) {
+    try {
+      unlinkSync(legacyBase + ext)
+    } catch {
+      /* ignore */
+    }
+  }
+}
 
 export function getDb(): DatabaseSync {
   if (instance) return instance
-  const file = join(app.getPath('userData'), 'nicosoft-studio.db')
+  const file = join(dataDir(), 'studio.db')
+  migrateLegacy(file)
   const db = new DatabaseSync(file)
   db.exec('PRAGMA journal_mode = WAL')
   db.exec('PRAGMA foreign_keys = ON')

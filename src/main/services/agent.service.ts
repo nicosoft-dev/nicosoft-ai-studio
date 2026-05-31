@@ -11,6 +11,7 @@ import { ulid } from 'ulid'
 import type { AgentContext, RequestPermission } from '../agent/context'
 import type { AgentLlmEvent } from '../agent/llm'
 import { runAgent, type AgentEvent } from '../agent/loop'
+import type { AnyBlock } from '../agent/types'
 import { CORE_TOOLS } from '../agent/registry'
 import { HEX_SYSTEM_PROMPT } from '../agent/system-prompt'
 import type { AgentRunInput } from '../ipc/contracts'
@@ -58,15 +59,26 @@ export async function run(
     sessionDir,
   }
 
+  // Build the seed user turn: prompt text first, then any pasted images as base64 image blocks (ccb
+  // order — text before images). data: URLs are split into the Anthropic base64 source.
+  const userContent: AnyBlock[] = []
+  if (input.prompt) userContent.push({ type: 'text', text: input.prompt })
+  for (const img of input.images ?? []) {
+    const m = /^data:[^;]+;base64,(.*)$/s.exec(img.dataUrl)
+    userContent.push({ type: 'image', source: { type: 'base64', media_type: img.mime, data: m ? m[1] : img.dataUrl } })
+  }
+  if (userContent.length === 0) userContent.push({ type: 'text', text: '' })
+
   const gen = runAgent({
     baseUrl: ep.baseUrl,
     apiKey: key,
     model: input.model,
     system: HEX_SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: [{ type: 'text', text: input.prompt }] }],
+    messages: [{ role: 'user', content: userContent }],
     tools: CORE_TOOLS,
     ctx,
     contextWindow: input.contextWindow ?? 200_000,
+    thinking: input.thinking,
     onStream: cb.onStream,
   })
 

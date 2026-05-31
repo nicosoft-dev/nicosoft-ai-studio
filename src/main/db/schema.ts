@@ -15,9 +15,10 @@ CREATE TABLE IF NOT EXISTS endpoints (
 );
 
 CREATE TABLE IF NOT EXISTS role_bindings (
-  role_id     TEXT PRIMARY KEY,                   -- built-in 8 + custom
-  endpoint_id TEXT,
-  model       TEXT,
+  role_id        TEXT PRIMARY KEY,                -- built-in 8 + custom
+  endpoint_id    TEXT,
+  model          TEXT,
+  thinking_depth TEXT,                            -- low | medium | high | max (null = provider default)
   FOREIGN KEY (endpoint_id) REFERENCES endpoints (id) ON DELETE SET NULL
 );
 

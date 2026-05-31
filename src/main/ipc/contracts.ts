@@ -1,4 +1,4 @@
-import type { Protocol } from '../domain'
+import type { ModelInfo, Protocol } from '../domain'
 
 // DTOs crossing the IPC boundary (handlers ↔ preload ↔ renderer). The renderer-facing Endpoint
 // view carries `hasKey` (a boolean) but never the key itself — secrets stay in the keychain.
@@ -9,7 +9,7 @@ export interface EndpointDto {
   protocol: Protocol
   baseUrl: string
   defaultModel: string | null
-  availableModels: string[]
+  availableModels: ModelInfo[]
   enabled: boolean
   hasKey: boolean
   createdAt: string
@@ -20,7 +20,7 @@ export interface EndpointInput {
   protocol: Protocol
   baseUrl: string
   defaultModel?: string | null
-  availableModels?: string[]
+  availableModels?: ModelInfo[]
   enabled?: boolean
   apiKey?: string // written to the keychain, never stored in the table
 }
@@ -33,8 +33,14 @@ export interface EndpointTestResult {
 export interface ChatSendInput {
   endpointId: string
   model: string
-  messages: { role: 'system' | 'user' | 'assistant'; content: string }[]
-  reasoning?: 'low' | 'medium' | 'high'
+  messages: {
+    role: 'system' | 'user' | 'assistant'
+    content: string
+    attachments?: { url: string; mime?: string }[] // image data URLs → adapter image blocks
+  }[]
+  // Resolved by the renderer's thinking engine; one of effort (OpenAI/Gemini-3) or budgetTokens
+  // (Anthropic/Gemini-2.5). Omitted when the model can't think.
+  thinking?: { effort?: 'minimal' | 'none' | 'low' | 'medium' | 'high' | 'xhigh'; budgetTokens?: number }
 }
 
 // Streaming events pushed to the renderer over `chat:delta` / `chat:done` / `chat:error`.
@@ -65,6 +71,10 @@ export interface AgentRunInput {
   cwd: string // the project directory Hex operates in (its tools are confined here)
   convId?: string // session id for ~/.nsai/sessions/<convId>/ + transcript; new one if omitted
   contextWindow?: number // model context window, drives compaction threshold (default 200K)
+  // Resolved thinking directive (Anthropic extended thinking); budgetTokens drives the thinking budget.
+  thinking?: { effort?: 'minimal' | 'none' | 'low' | 'medium' | 'high' | 'xhigh'; budgetTokens?: number }
+  // Pasted/attached images as data URLs (base64); sent as Anthropic image blocks in the seed user turn.
+  images?: { dataUrl: string; mime: string }[]
 }
 
 // Text streamed from the assistant as it generates (before the turn completes).
@@ -119,4 +129,24 @@ export interface AgentErrorDto {
   streamId: string
   code: string
   message: string
+}
+
+// === Roles (expert → endpoint/model binding + per-role state) ===
+// A role's binding: which endpoint/model it runs on + its default thinking depth (applied when a task
+// is dispatched to it; the chat composer can still override per-conversation). null = provider default.
+export interface RoleBindingDto {
+  roleId: string
+  endpointId: string | null
+  model: string | null
+  thinkingDepth: string | null // 'low' | 'medium' | 'high' | 'max' | null
+}
+export interface RoleBindingInput {
+  endpointId: string | null
+  model: string | null
+  thinkingDepth?: string | null
+}
+export interface RoleStateDto {
+  roleId: string
+  enabled: boolean
+  selfLearningEnabled: boolean
 }

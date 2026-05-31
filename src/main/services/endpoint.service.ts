@@ -63,7 +63,7 @@ export async function test(id: string): Promise<EndpointTestResult> {
   if (!row) return { ok: false, error: { code: 'not_found', message: 'endpoint not found' } }
   const key = keychain.getApiKey(id)
   if (!key) return { ok: false, error: { code: 'bad_key', message: 'no API key configured' } }
-  const model = row.defaultModel || row.availableModels[0]
+  const model = row.defaultModel || row.availableModels[0]?.slug
   if (!model) return { ok: false, error: { code: 'bad_request', message: 'no model configured to test' } }
   try {
     await chat(

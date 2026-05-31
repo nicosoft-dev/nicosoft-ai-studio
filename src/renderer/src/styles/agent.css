@@ -138,17 +138,19 @@
 .ap-deny kbd { background: var(--bg-3); }
 .ap-allow kbd { background: rgba(255, 255, 255, 0.18); }
 
-/* — Project-path selector: Claude-style chip row above the composer (no icon / divider / worktree) — */
+/* — Project-path selector: Claude-style chip row above the composer.
+   Local (plain label) · 📁 project (click → pick folder) · ⎇ branch (click → switch). — */
 .path-bar {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 2px 2px 8px;
   width: 100%;
-  text-align: left;
-  overflow: hidden;
 }
 .path-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-family: var(--mono);
   font-size: 11.5px;
   color: var(--text-3);
@@ -156,11 +158,185 @@
   border: 1px solid var(--border-1);
   border-radius: var(--r-sm);
   padding: 3px 8px;
-  white-space: nowrap;
   flex: none;
   max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
-.path-bar:hover .path-chip { color: var(--text-2); border-color: var(--border-2); }
-.path-chip.muted { color: var(--text-4); }
+.path-chip svg { flex: none; opacity: 0.85; }
+.path-chip-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* project / branch chips are buttons. */
+button.path-chip {
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+button.path-chip:hover:not(:disabled),
+button.path-chip.active {
+  color: var(--text-1);
+  border-color: var(--border-2);
+  background: var(--bg-3);
+}
+button.path-chip:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Empty state — a single folder icon button. */
+.path-folder-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  color: var(--text-3);
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+.path-folder-btn:hover {
+  color: var(--text-1);
+  border-color: var(--border-2);
+  background: var(--bg-3);
+}
+
+/* Branch dropdown — opens upward (composer sits below this row). */
+.path-branch {
+  position: relative;
+  display: inline-flex;
+}
+.path-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+.path-branch-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 50;
+  min-width: 180px;
+  max-width: 280px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-float);
+}
+.path-branch-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+}
+.path-branch-item:hover { background: var(--bg-2); }
+.path-branch-item.current { color: var(--accent); }
+.pbi-check { width: 13px; flex: none; display: inline-flex; color: var(--accent); }
+.pbi-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.path-branch-empty {
+  padding: 8px 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-4);
+}
+
+/* — Message image thumbnails (inside a chat bubble) — */
+.msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.msg-img-thumb {
+  width: 84px;
+  height: 84px;
+  object-fit: cover;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-1);
+  cursor: zoom-in;
+  transition: border-color 0.12s ease;
+}
+.msg-img-thumb:hover {
+  border-color: var(--border-2);
+}
+
+/* — Image viewer (full-screen lightbox) — */
+.img-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(3px);
+  padding: 40px;
+}
+.iv-img {
+  max-width: 92vw;
+  max-height: 84vh;
+  object-fit: contain;
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-float);
+}
+.iv-close,
+.iv-nav {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--text-1);
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  cursor: pointer;
+}
+.iv-close:hover,
+.iv-nav:hover {
+  background: var(--bg-3);
+}
+.iv-close {
+  top: 18px;
+  right: 18px;
+  width: 36px;
+  height: 36px;
+}
+.iv-nav {
+  top: 50%;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 40px;
+}
+.iv-nav.left {
+  left: 18px;
+}
+.iv-nav.right {
+  right: 18px;
+}
+.iv-count {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-3);
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-sm);
+  padding: 3px 10px;
+}

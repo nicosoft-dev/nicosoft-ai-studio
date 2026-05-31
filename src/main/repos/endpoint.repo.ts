@@ -1,6 +1,6 @@
 import { ulid } from 'ulid'
 import { getDb } from '../db/connection'
-import type { Protocol } from '../domain'
+import type { ModelInfo, Protocol } from '../domain'
 
 // Endpoints table CRUD. Pure SQL — no business logic / IPC / keychain. API keys live in the OS
 // keychain (see keychain.ts); this table holds only the connection shape. JSON column
@@ -12,7 +12,7 @@ export interface EndpointRow {
   protocol: Protocol
   baseUrl: string
   defaultModel: string | null
-  availableModels: string[]
+  availableModels: ModelInfo[]
   enabled: boolean
   createdAt: string
 }
@@ -22,7 +22,7 @@ export interface EndpointCreateInput {
   protocol: Protocol
   baseUrl: string
   defaultModel?: string
-  availableModels?: string[]
+  availableModels?: ModelInfo[]
   enabled?: boolean
 }
 
@@ -31,7 +31,7 @@ export interface EndpointUpdatePatch {
   protocol?: Protocol
   baseUrl?: string
   defaultModel?: string | null
-  availableModels?: string[]
+  availableModels?: ModelInfo[]
   enabled?: boolean
 }
 
@@ -46,6 +46,25 @@ interface EndpointRaw {
   created_at: string
 }
 
+// Parse the available_models JSON. Back-compat: an older string[] (bare slugs) is upgraded to
+// ModelInfo[] with contextLength 0 (unknown), so legacy rows round-trip through the new shape.
+function parseModels(json: string): ModelInfo[] {
+  let arr: unknown
+  try {
+    arr = JSON.parse(json)
+  } catch {
+    return [] // corrupt JSON — don't let one bad row blow up endpoints:list (and the settings page)
+  }
+  if (!Array.isArray(arr)) return []
+  return arr.flatMap((m) => {
+    if (typeof m === 'string') return [{ slug: m, contextLength: 0 }] // legacy bare-slug → upgrade
+    if (m && typeof m === 'object' && typeof (m as ModelInfo).slug === 'string') {
+      return [{ slug: (m as ModelInfo).slug, contextLength: Number((m as ModelInfo).contextLength) || 0 }]
+    }
+    return [] // drop null / number / malformed entries
+  })
+}
+
 function mapRow(raw: EndpointRaw): EndpointRow {
   return {
     id: raw.id,
@@ -53,7 +72,7 @@ function mapRow(raw: EndpointRaw): EndpointRow {
     protocol: raw.protocol,
     baseUrl: raw.base_url,
     defaultModel: raw.default_model,
-    availableModels: JSON.parse(raw.available_models) as string[],
+    availableModels: parseModels(raw.available_models),
     enabled: raw.enabled === 1,
     createdAt: raw.created_at
   }
