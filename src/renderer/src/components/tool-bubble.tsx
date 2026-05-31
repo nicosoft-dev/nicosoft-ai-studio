@@ -7,7 +7,7 @@
 import { useState } from 'react'
 import type { ReactElement } from 'react'
 import { Icons } from '@/components/icons'
-import type { HexToolCall } from '@/stores/hex'
+import type { ToolCall } from '@/stores/chat'
 
 const DIFF_TOOLS = new Set(['Edit', 'Write', 'MultiEdit'])
 
@@ -37,7 +37,7 @@ function toolSummary(name: string, input: Record<string, unknown>): string {
   }
 }
 
-export function ToolBubble({ tool }: { tool: HexToolCall }): ReactElement {
+export function ToolBubble({ tool }: { tool: ToolCall }): ReactElement {
   const [open, setOpen] = useState(false)
   const input = (tool.input ?? {}) as Record<string, unknown>
   const summary = toolSummary(tool.name, input)

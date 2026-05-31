@@ -17,6 +17,7 @@ import type {
   AgentPermissionCancel,
   AgentDone,
   AgentErrorDto,
+  ToolCallDto,
   RoleBindingDto,
   RoleBindingInput,
   RoleStateDto,
@@ -92,7 +93,9 @@ const api = {
     onPermission: (cb: (d: AgentPermissionRequest) => void): (() => void) => agentListen('agent:permission', cb),
     onPermissionCancel: (cb: (d: AgentPermissionCancel) => void): (() => void) => agentListen('agent:permission:cancel', cb),
     onDone: (cb: (d: AgentDone) => void): (() => void) => agentListen('agent:done', cb),
-    onError: (cb: (d: AgentErrorDto) => void): (() => void) => agentListen('agent:error', cb)
+    onError: (cb: (d: AgentErrorDto) => void): (() => void) => agentListen('agent:error', cb),
+    transcript: (convId: string): Promise<Record<string, ToolCallDto[]>> =>
+      ipcRenderer.invoke('agent:transcript', convId)
   },
 
   project: {

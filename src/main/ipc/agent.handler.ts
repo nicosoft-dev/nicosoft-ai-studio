@@ -130,4 +130,7 @@ export function registerAgentHandlers(): void {
   ipcMain.handle('agent:permission:respond', (_e, resp: AgentPermissionResponse) => {
     pendingPermissions.get(resp.permissionId)?.({ allow: resp.allow, updatedInput: resp.updatedInput })
   })
+
+  // Rebuild tool cards for a past conversation from its transcript (keyed by run_id).
+  ipcMain.handle('agent:transcript', (_e, convId: string) => agentService.readTranscript(convId))
 }

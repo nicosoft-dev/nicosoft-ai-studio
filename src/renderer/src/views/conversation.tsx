@@ -12,7 +12,9 @@ import { EmptyState } from '@/components/empty-state'
 import { PathBar } from '@/components/path-bar'
 import { useWorkspace } from '@/stores/workspace'
 import { Avatar, NameChip } from '@/components/primitives'
-import { useChat, type ChatMessage } from '@/stores/chat'
+import { useChat, roleHasAgent, type ChatMessage } from '@/stores/chat'
+import { ToolBubble } from '@/components/tool-bubble'
+import { ApprovalDialog } from '@/components/approval-dialog'
 import { useRoleBinding } from '@/lib/use-role-binding'
 import { fileToImage, imagesFromClipboard, type ImageAttachment } from '@/lib/image'
 import { getThinkingCapability, resolveThinking, type ThinkingDepth } from '@/lib/thinking'
@@ -52,6 +54,7 @@ function ChatSegment({
             ))}
           </div>
         ) : null}
+        {msg.tools && msg.tools.length > 0 ? msg.tools.map((t) => <ToolBubble key={t.id} tool={t} />) : null}
         {msg.streaming && !msg.text ? <span className="caret" /> : null}
       </div>
     </div>
@@ -84,8 +87,12 @@ function Composer({
   const usedTokens = messages.reduce((s, m) => s + m.text.length, 0) / 4 + value.length / 4
   const tokenAmber = b.contextLength > 0 && usedTokens / b.contextLength > 0.85
   const selectedEp = b.endpoints.find((e) => e.id === b.endpointId)
-  const noEndpoint = b.loaded && (b.endpoints.length === 0 || !selectedEp || !selectedEp.enabled || !selectedEp.hasKey || !b.model)
-  const ready = b.loaded && !noEndpoint
+  const agent = roleHasAgent(expert.id) // agent roles (Hex) additionally need an Anthropic endpoint + a project folder
+  const needAnthropic = agent && !!selectedEp && selectedEp.protocol !== 'anthropic'
+  const noEndpoint =
+    b.loaded &&
+    (b.endpoints.length === 0 || !selectedEp || !selectedEp.enabled || !selectedEp.hasKey || !b.model || needAnthropic)
+  const ready = b.loaded && !noEndpoint && (!agent || !!cwd)
   const effectiveDepth = (b.depth || 'medium') as ThinkingDepth
 
   const grow = (): void => {
@@ -125,7 +132,9 @@ function Composer({
       model: b.model,
       thinking,
       text,
-      images: images.length ? images : undefined
+      images: images.length ? images : undefined,
+      cwd: agent ? cwd : undefined,
+      contextWindow: agent ? b.contextLength || undefined : undefined
     })
   }
 
@@ -135,13 +144,17 @@ function Composer({
         {noEndpoint ? (
           <div className="dock-banner">
             <Icons.plug size={15} style={{ color: 'var(--text-3)' }} />
-            <span>Bind an endpoint with a key and model to chat with {expert.name}</span>
+            <span>
+              {needAnthropic
+                ? `${expert.name} needs an Anthropic-protocol endpoint — bind one in its profile`
+                : `Bind an endpoint with a key and model to chat with ${expert.name}`}
+            </span>
             <span className="db-arrow" onClick={onOpenSettings}>
               Open settings <Icons.arrowRight size={13} />
             </span>
           </div>
         ) : null}
-        <PathBar cwd={cwd} onPick={(dir) => setCwd(expert.id, dir)} />
+        {agent ? <PathBar cwd={cwd} onPick={(dir) => setCwd(expert.id, dir)} /> : null}
         <div className={'composer2' + (ready ? '' : ' disabled')}>
           <div className="cmp-toolbar">
             <ModelPicker models={b.models} value={b.model} onChange={b.onModel} disabled={!ready} />
@@ -158,7 +171,11 @@ function Composer({
             className="cmp-textarea"
             rows={1}
             value={value}
-            placeholder={`Ask ${expert.name} — Enter to send, Shift+Enter for newline`}
+            placeholder={
+              agent && !cwd
+                ? 'Choose a project folder above to start'
+                : `Ask ${expert.name} — Enter to send, Shift+Enter for newline`
+            }
             onChange={(e) => {
               setValue(e.target.value)
               grow()
@@ -203,6 +220,7 @@ export function ChatView({ expert, onOpenSettings }: { expert: Expert; onOpenSet
   const activeConv = chat.activeConv
   const messages = activeConv ? (chat.byConversation[activeConv] ?? []) : []
   const error = activeConv ? chat.error[activeConv] : null
+  const permission = activeConv ? chat.permission[activeConv] : null
   const listRef = useRef<HTMLDivElement>(null)
   const [value, setValue] = useState('')
   const [viewer, setViewer] = useState<{ items: ViewerImage[]; index: number } | null>(null)
@@ -236,6 +254,13 @@ export function ChatView({ expert, onOpenSettings }: { expert: Expert; onOpenSet
         </div>
       </div>
       <Composer expert={expert} value={value} setValue={setValue} onOpenSettings={onOpenSettings} />
+      {permission && activeConv ? (
+        <ApprovalDialog
+          prompt={permission}
+          onAllow={() => chat.respondPermission(activeConv, true)}
+          onDeny={() => chat.respondPermission(activeConv, false)}
+        />
+      ) : null}
       {viewer ? (
         <ImageViewer
           items={viewer.items}

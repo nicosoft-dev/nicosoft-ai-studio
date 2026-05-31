@@ -5,7 +5,7 @@
 // multi-turn seed. Tool steps stay in the per-session transcript (~/.nsai/sessions/<convId>/), not in
 // the messages table; messages hold only the final reply (clean for memory extraction + history).
 
-import { createWriteStream } from 'node:fs'
+import { createWriteStream, existsSync, readFileSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -17,7 +17,7 @@ import { isContentBlock } from '../agent/types'
 import type { AgentMessage, AnyBlock } from '../agent/types'
 import { CORE_TOOLS } from '../agent/registry'
 import { HEX_SYSTEM_PROMPT } from '../agent/system-prompt'
-import type { AgentRunInput } from '../ipc/contracts'
+import type { AgentRunInput, ToolCallDto } from '../ipc/contracts'
 import * as keychain from '../keychain/keychain'
 import { LlmError } from '../llm/types'
 import * as endpointRepo from '../repos/endpoint.repo'
@@ -219,4 +219,50 @@ function finalAssistantText(messages: AgentMessage[]): string {
     if (text.trim()) return text
   }
   return ''
+}
+
+// Rebuild tool cards from a conversation's transcript, grouped by run_id. The renderer calls this when
+// opening a past Hex conversation — messages hold only the final reply; the tool steps live in the
+// transcript. Returns {} for a non-agent conversation (no transcript file). Contract: one assistant
+// message per run (this service persists only the final reply), so all of a run's tools attach to that
+// single message — if that ever changes, the renderer needs a per-message key, not just run_id.
+export function readTranscript(convId: string): Record<string, ToolCallDto[]> {
+  const file = join(homedir(), '.nsai', 'sessions', convId, 'transcript.jsonl')
+  if (!existsSync(file)) return {}
+  let lines: string[]
+  try {
+    lines = readFileSync(file, 'utf-8').split('\n')
+  } catch {
+    return {}
+  }
+  const byRun: Record<string, ToolCallDto[]> = {}
+  for (const line of lines) {
+    if (!line) continue
+    let obj: { t?: string; runId?: string; event?: { type?: string; message?: { content?: unknown[] } } }
+    try {
+      obj = JSON.parse(line)
+    } catch {
+      continue
+    }
+    if (obj.t !== 'event' || !obj.runId || !obj.event) continue
+    const content = obj.event.message?.content
+    if (!Array.isArray(content)) continue
+    if (obj.event.type === 'assistant') {
+      for (const b of content as { type?: string; id?: string; name?: string; input?: unknown }[]) {
+        if (b.type === 'tool_use' && b.id) {
+          ;(byRun[obj.runId] ??= []).push({ id: b.id, name: b.name ?? '', input: b.input, status: 'running' })
+        }
+      }
+    } else if (obj.event.type === 'tool_results') {
+      for (const b of content as { type?: string; tool_use_id?: string; content?: unknown; is_error?: boolean }[]) {
+        if (b.type !== 'tool_result' || !b.tool_use_id) continue
+        const t = byRun[obj.runId]?.find((x) => x.id === b.tool_use_id)
+        if (t) {
+          t.status = b.is_error ? 'error' : 'done'
+          t.result = typeof b.content === 'string' ? b.content : JSON.stringify(b.content)
+        }
+      }
+    }
+  }
+  return byRun
 }

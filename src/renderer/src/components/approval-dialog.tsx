@@ -5,7 +5,7 @@
 
 import { useEffect } from 'react'
 import type { ReactElement } from 'react'
-import type { PermissionPrompt } from '@/stores/hex'
+import type { PermissionPrompt } from '@/stores/chat'
 
 // Render the tool input as a readable command / path block (full JSON only as a fallback).
 function formatInput(toolName: string, input: unknown): string {

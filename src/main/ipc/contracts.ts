@@ -136,6 +136,14 @@ export interface AgentErrorDto {
   code: string
   message: string
 }
+// A tool call rebuilt from a session transcript for history display (status + result already resolved).
+export interface ToolCallDto {
+  id: string
+  name: string
+  input: unknown
+  status: 'running' | 'done' | 'error'
+  result?: string
+}
 
 // === Roles (expert → endpoint/model binding + per-role state) ===
 // A role's binding: which endpoint/model it runs on + its default thinking depth (applied when a task
