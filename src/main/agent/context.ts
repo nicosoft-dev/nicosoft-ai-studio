@@ -45,4 +45,14 @@ export interface AgentContext {
   todos: TodoItem[] // the agent's working todo list (TodoWrite replaces it); UI renders it in H4
   spawnSubAgent?: SpawnSubAgent // set by runAgent for the Task tool; undefined inside a sub-agent
   sessionDir: string // large tool results persist to <sessionDir>/tool-results/<tool_use_id>.txt
+  // LLM access for tools that call a small/fast model (WebFetch content extraction, WebSearch's
+  // isolated secondary request). Injected by runAgent from its own baseUrl/apiKey + a small model.
+  llm?: AgentLlmAccess
+}
+
+// What a tool needs to make its own LLM call (a content-extraction summary, a delegated search).
+export interface AgentLlmAccess {
+  baseUrl: string
+  apiKey: string
+  smallModel: string // a fast/cheap model for extraction (e.g. nicosoft/claude-haiku-4-5-...)
 }

@@ -12,6 +12,7 @@ import { multiEditTool } from './tools/multiedit'
 import { readTool } from './tools/read'
 import { taskTool } from './tools/task'
 import { todoTool } from './tools/todo'
+import { webFetchTool } from './tools/web-fetch'
 import { writeTool } from './tools/write'
 
 export const CORE_TOOLS: readonly Tool[] = [
@@ -23,6 +24,7 @@ export const CORE_TOOLS: readonly Tool[] = [
   globTool,
   grepTool,
   bashTool,
+  webFetchTool,
   todoTool,
   taskTool,
 ] as unknown as Tool[]

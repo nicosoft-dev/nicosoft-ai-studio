@@ -30,6 +30,7 @@ export interface RunAgentParams {
   maxTokens?: number
   maxTurns?: number
   contextWindow?: number // model's context window, drives the autocompact threshold (default 200K)
+  smallModel?: string // fast/cheap model for tool-internal calls (WebFetch / WebSearch); default below
   onStream?: (e: AgentLlmEvent) => void // forwarded straight from the LLM call (text + tool deltas)
 }
 
@@ -51,6 +52,10 @@ const SUBAGENT_SYSTEM =
 // can't burn the parent's full budget).
 const SUBAGENT_MAX_TURNS = 20
 
+// Default fast/cheap model for tool-internal LLM calls (WebFetch content extraction, WebSearch's
+// secondary request) when the caller doesn't pin one. Anthropic-protocol so it routes the same way.
+const DEFAULT_SMALL_MODEL = 'nicosoft/claude-haiku-4-5-20251001'
+
 // Convert a Tool's zod inputSchema into the Anthropic tools param entry.
 function toToolSchema(tool: Tool): ToolSchema {
   return {
@@ -63,8 +68,12 @@ function toToolSchema(tool: Tool): ToolSchema {
 export async function* runAgent(
   params: RunAgentParams,
 ): AsyncGenerator<AgentEvent, AgentResult, void> {
-  const { baseUrl, apiKey, model, system, tools, ctx } = params
+  const { baseUrl, apiKey, model, system, tools } = params
   const maxTokens = params.maxTokens ?? 8192
+  const smallModel = params.smallModel ?? DEFAULT_SMALL_MODEL
+  // Augment the caller's context with LLM access so tools (WebFetch / WebSearch) can call a small
+  // model — defaults to the agent's own creds + a fast model; the caller can override ctx.llm.
+  const ctx: AgentContext = { ...params.ctx, llm: params.ctx.llm ?? { baseUrl, apiKey, smallModel } }
   const maxTurns = params.maxTurns ?? 50
   const contextWindow = params.contextWindow ?? 200_000
   let messages: AgentMessage[] = [...params.messages] // let — compaction replaces it
