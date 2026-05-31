@@ -5,6 +5,7 @@
 
 import { create } from 'zustand'
 import type { EffortLevel } from '@/lib/thinking'
+import { useChat } from './chat'
 
 export interface HexToolCall {
   id: string
@@ -29,6 +30,7 @@ export interface PermissionPrompt {
 }
 
 interface HexState {
+  convId: string | null // the conversation this Hex session persists to (created on first run)
   messages: HexMessage[]
   streaming: boolean
   streamId: string | null
@@ -56,6 +58,7 @@ const teardown = (): void => {
 }
 
 export const useHex = create<HexState>((set, get) => ({
+  convId: null,
   messages: [],
   streaming: false,
   streamId: null,
@@ -68,6 +71,19 @@ export const useHex = create<HexState>((set, get) => ({
       return
     }
     teardown()
+    // Hex is now a chat role: ensure a conversation exists (first run of a session creates one) so the
+    // backend can persist messages + recall/extract memory against it.
+    let convId = get().convId
+    if (!convId) {
+      const conv = await window.api.conversations.create({
+        kind: 'single',
+        primaryRoleId: 'hex',
+        title: prompt.trim().slice(0, 60) || 'Hex session'
+      })
+      convId = conv.id
+      set({ convId })
+      void useChat.getState().loadConversations()
+    }
     const userImages = (images ?? []).map((i) => ({ url: i.dataUrl, name: i.name }))
     set((s) => ({
       messages: [
@@ -153,6 +169,7 @@ export const useHex = create<HexState>((set, get) => ({
       api.onDone(() => {
         set({ streaming: false, streamId: null, permission: null })
         teardown()
+        void useChat.getState().loadConversations() // backend persisted the assistant reply + maybe title
       }),
     )
     unsubs.push(
@@ -169,6 +186,7 @@ export const useHex = create<HexState>((set, get) => ({
       cwd,
       thinking,
       contextWindow,
+      convId,
       images: images?.map((i) => ({ dataUrl: i.dataUrl, mime: i.mime }))
     })
     set({ streamId })
@@ -189,6 +207,6 @@ export const useHex = create<HexState>((set, get) => ({
 
   reset: () => {
     teardown()
-    set({ messages: [], streaming: false, streamId: null, permission: null, error: null })
+    set({ convId: null, messages: [], streaming: false, streamId: null, permission: null, error: null })
   },
 }))

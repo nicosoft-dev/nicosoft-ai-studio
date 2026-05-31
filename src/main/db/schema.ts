@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS messages (
   in_tokens       INTEGER NOT NULL DEFAULT 0,
   out_tokens      INTEGER NOT NULL DEFAULT 0,
   dispatch        TEXT,                           -- JSON string[] | null
+  run_id          TEXT,                           -- agent run id (Hex); links to transcript. null for plain chat
   created_at      TEXT NOT NULL,
   FOREIGN KEY (conversation_id) REFERENCES conversations (id) ON DELETE CASCADE
 );

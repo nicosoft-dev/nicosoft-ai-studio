@@ -7,6 +7,7 @@ import { SCHEMA_SQL } from './schema'
 export function runMigrations(db: DatabaseSync): void {
   db.exec(SCHEMA_SQL)
   ensureColumn(db, 'role_bindings', 'thinking_depth', 'TEXT')
+  ensureColumn(db, 'messages', 'run_id', 'TEXT')
 }
 
 // Add a column only if the table doesn't already have it (SQLite lacks ADD COLUMN IF NOT EXISTS).

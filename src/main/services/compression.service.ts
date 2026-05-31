@@ -34,6 +34,7 @@ export interface CompressInput {
   roleId: string
   endpointId: string
   model: string
+  contextWindow?: number // explicit window (Hex passes its run window); falls back to the model catalog
 }
 
 export async function maybeCompress(input: CompressInput): Promise<void> {
@@ -42,7 +43,8 @@ export async function maybeCompress(input: CompressInput): Promise<void> {
   try {
     const ep = endpointRepo.getById(input.endpointId)
     if (!ep) return
-    const ctxLen = ep.availableModels.find((m) => m.slug === input.model)?.contextLength ?? 0
+    const ctxLen =
+      input.contextWindow ?? ep.availableModels.find((m) => m.slug === input.model)?.contextLength ?? 0
     if (ctxLen <= 0) return // unknown window — can't compute a threshold
 
     const history = convRepo.listByConversation(input.convId)

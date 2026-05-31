@@ -2,8 +2,8 @@ import { ulid } from '../db/id'
 import { getDb } from '../db/connection'
 
 // summaries table — chain compression of a conversation. Each summary covers messages up to
-// `covered_up_to` (a message created_at); `parent_id` links to the previous summary so the chain can
-// be walked. Pure SQL.
+// `covered_up_to` (a message id; id ordering == time ordering with monotonic ULIDs); `parent_id` links
+// to the previous summary so the chain can be walked. Pure SQL.
 
 export interface SummaryRow {
   id: string

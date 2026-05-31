@@ -33,6 +33,7 @@ function toMsgDto(r: convRepo.MessageRow): MessageDto {
     model: r.model,
     content: r.content,
     attachments: (r.attachments as MessageAttachmentDto[]) ?? [],
+    runId: r.runId,
     createdAt: r.createdAt
   }
 }
@@ -57,7 +58,8 @@ export function append(convId: string, input: MessageAppendDto): MessageDto {
     expertId: input.expertId,
     model: input.model,
     content: input.content,
-    attachments: input.attachments ?? []
+    attachments: input.attachments ?? [],
+    runId: input.runId
   })
   convRepo.touch(convId) // bump updated_at so the history list re-sorts
   return toMsgDto(row)

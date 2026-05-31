@@ -33,6 +33,7 @@ export interface MessageRow {
   inTokens: number
   outTokens: number
   dispatch: string[] | null
+  runId: string | null
   createdAt: string
 }
 
@@ -45,6 +46,7 @@ export interface MessageAppendInput {
   inTokens?: number
   outTokens?: number
   dispatch?: string[]
+  runId?: string
 }
 
 interface ConversationRaw {
@@ -68,6 +70,7 @@ interface MessageRaw {
   in_tokens: number
   out_tokens: number
   dispatch: string | null
+  run_id: string | null
   created_at: string
 }
 
@@ -95,6 +98,7 @@ function mapMessage(raw: MessageRaw): MessageRow {
     inTokens: raw.in_tokens,
     outTokens: raw.out_tokens,
     dispatch: raw.dispatch ? (JSON.parse(raw.dispatch) as string[]) : null,
+    runId: raw.run_id,
     createdAt: raw.created_at
   }
 }
@@ -164,10 +168,11 @@ export function append(conversationId: string, input: MessageAppendInput): Messa
   const dispatch = input.dispatch ? JSON.stringify(input.dispatch) : null
   const inTokens = input.inTokens ?? 0
   const outTokens = input.outTokens ?? 0
+  const runId = input.runId ?? null
   getDb()
     .prepare(
-      `INSERT INTO messages (id, conversation_id, author, expert_id, model, content, attachments, in_tokens, out_tokens, dispatch, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO messages (id, conversation_id, author, expert_id, model, content, attachments, in_tokens, out_tokens, dispatch, run_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -180,6 +185,7 @@ export function append(conversationId: string, input: MessageAppendInput): Messa
       inTokens,
       outTokens,
       dispatch,
+      runId,
       createdAt
     )
   return {
@@ -193,6 +199,7 @@ export function append(conversationId: string, input: MessageAppendInput): Messa
     inTokens,
     outTokens,
     dispatch: input.dispatch ?? null,
+    runId,
     createdAt
   }
 }

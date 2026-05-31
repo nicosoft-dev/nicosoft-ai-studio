@@ -75,7 +75,7 @@ export interface AgentRunInput {
   model: string
   prompt: string
   cwd: string // the project directory Hex operates in (its tools are confined here)
-  convId?: string // session id for ~/.nsai/sessions/<convId>/ + transcript; new one if omitted
+  convId: string // the conversation this run belongs to; drives persistence + ~/.nsai/sessions/<convId>/
   contextWindow?: number // model context window, drives compaction threshold (default 200K)
   // Resolved thinking directive (Anthropic extended thinking); budgetTokens drives the thinking budget.
   thinking?: { effort?: 'minimal' | 'none' | 'low' | 'medium' | 'high' | 'xhigh'; budgetTokens?: number }
@@ -184,6 +184,7 @@ export interface MessageDto {
   model: string | null
   content: string
   attachments: MessageAttachmentDto[]
+  runId: string | null // agent run id (Hex); null for plain chat
   createdAt: string
 }
 export interface MessageAppendDto {
@@ -192,6 +193,7 @@ export interface MessageAppendDto {
   model?: string
   content: string
   attachments?: MessageAttachmentDto[]
+  runId?: string
 }
 export interface ConversationTitleInput {
   convId: string
