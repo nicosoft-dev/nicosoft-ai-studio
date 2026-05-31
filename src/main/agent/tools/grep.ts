@@ -24,6 +24,7 @@ export const grepTool = buildTool<typeof inputSchema, string>({
     'Search file contents across the project for a regular expression. Returns file:line:text matches.',
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
+  maxResultSizeChars: 20_000,
   validateInput: async (input) => {
     if ((input.glob ?? '').includes('..')) {
       return { result: false, message: 'glob must not contain ".." — searches stay within the project.' }

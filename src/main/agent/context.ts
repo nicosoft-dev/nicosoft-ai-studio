@@ -44,4 +44,5 @@ export interface AgentContext {
   requestPermission: RequestPermission
   todos: TodoItem[] // the agent's working todo list (TodoWrite replaces it); UI renders it in H4
   spawnSubAgent?: SpawnSubAgent // set by runAgent for the Task tool; undefined inside a sub-agent
+  sessionDir: string // large tool results persist to <sessionDir>/tool-results/<tool_use_id>.txt
 }

@@ -23,6 +23,7 @@ export const readTool = buildTool<typeof inputSchema, string>({
     'Use offset+limit for large files. Paths resolve under the project root.',
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
+  maxResultSizeChars: Infinity, // Read self-bounds (256KB file cap); its output must never be persisted
   async call(input, ctx) {
     const abs = await confineReal(ctx.cwd, input.file_path)
     const st = await stat(abs)

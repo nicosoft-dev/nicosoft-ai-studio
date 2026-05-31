@@ -46,6 +46,8 @@ export type StopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence
 export interface Usage {
   inTokens: number
   outTokens: number
+  cacheReadTokens?: number
+  cacheCreationTokens?: number
 }
 
 // One full assistant turn from the LLM call, with tool_use blocks already assembled from the stream.

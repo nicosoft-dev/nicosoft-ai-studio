@@ -6,6 +6,7 @@
 import type { ZodError } from 'zod'
 import type { AgentContext } from './context'
 import { findTool, type Tool } from './tool'
+import { persistLargeResult } from './tool-result-storage'
 import type { ToolResultBlock, ToolUseBlock } from './types'
 
 const MAX_CONCURRENCY = 10
@@ -77,7 +78,8 @@ async function runOne(
     if (!decision.allow) return errorResult(toolUse.id, decision.message ?? 'Permission denied')
 
     const result = await tool.call(decision.updatedInput ?? input, ctx)
-    return tool.mapResult(result.data, toolUse.id)
+    const block = tool.mapResult(result.data, toolUse.id)
+    return await persistLargeResult(block, tool.maxResultSizeChars, ctx.sessionDir)
   } catch (err) {
     return errorResult(toolUse.id, err instanceof Error ? err.message : String(err))
   }

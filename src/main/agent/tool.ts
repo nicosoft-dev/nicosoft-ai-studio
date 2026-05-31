@@ -33,6 +33,10 @@ export interface ToolDef<In extends z.ZodTypeAny = z.ZodTypeAny, Out = unknown> 
   checkPermissions?(input: z.infer<In>, ctx: AgentContext): Promise<PermissionResult>
   call(input: z.infer<In>, ctx: AgentContext, onProgress?: OnToolProgress): Promise<ToolResult<Out>>
   mapResult(out: Out, toolUseId: string): ToolResultBlock
+  // A tool result longer than this (chars) is persisted to disk and replaced with a preview + path.
+  // Infinity = never persist (the tool self-bounds its output). Globally clamped to 50_000 except
+  // Infinity. See docs/nicosoft-studio/12-hex-coding-agent.md (compaction layer 1).
+  maxResultSizeChars?: number
 }
 
 // A complete tool after defaults are applied — every gate is guaranteed present.
@@ -43,6 +47,7 @@ export interface Tool<In extends z.ZodTypeAny = z.ZodTypeAny, Out = unknown>
   isDestructive(input: z.infer<In>): boolean
   validateInput(input: z.infer<In>, ctx: AgentContext): Promise<ValidationResult>
   checkPermissions(input: z.infer<In>, ctx: AgentContext): Promise<PermissionResult>
+  maxResultSizeChars: number
 }
 
 // Fail-closed defaults: not concurrency-safe, treated as a write, non-destructive, input valid,
@@ -58,6 +63,7 @@ export function buildTool<In extends z.ZodTypeAny, Out>(def: ToolDef<In, Out>): 
       behavior: 'allow',
       updatedInput: input as Record<string, unknown>,
     }),
+    maxResultSizeChars: 50_000,
     ...def,
   }
 }

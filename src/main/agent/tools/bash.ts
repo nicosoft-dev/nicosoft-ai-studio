@@ -70,6 +70,7 @@ export const bashTool = buildTool<typeof inputSchema, BashOutput>({
     isReadOnlyCommand(input.command)
       ? { behavior: 'allow' }
       : { behavior: 'ask', message: `Run: ${input.command}` },
+  maxResultSizeChars: 30_000,
   call(input, ctx) {
     return new Promise<{ data: BashOutput }>((resolve, reject) => {
       const child = spawn(input.command, { shell: true, cwd: ctx.cwd, signal: ctx.signal })

@@ -36,7 +36,9 @@ export type AgentLlmEvent =
 interface StreamEvent {
   type: string
   index?: number
-  message?: { usage?: { input_tokens?: number } }
+  message?: {
+    usage?: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number }
+  }
   content_block?: { type?: string; text?: string; id?: string; name?: string }
   delta?: { type?: string; text?: string; partial_json?: string; stop_reason?: string }
   usage?: { output_tokens?: number }
@@ -77,6 +79,8 @@ export async function callWithTools(
   let stopReason: StopReason = null
   let inTokens = 0
   let outTokens = 0
+  let cacheReadTokens = 0
+  let cacheCreationTokens = 0
 
   try {
     for await (const payload of iterSSE(reader)) {
@@ -86,6 +90,8 @@ export async function callWithTools(
       switch (ev.type) {
         case 'message_start':
           inTokens = ev.message?.usage?.input_tokens ?? 0
+          cacheReadTokens = ev.message?.usage?.cache_read_input_tokens ?? 0
+          cacheCreationTokens = ev.message?.usage?.cache_creation_input_tokens ?? 0
           break
         case 'content_block_start': {
           const cb = ev.content_block
@@ -93,8 +99,10 @@ export async function callWithTools(
             blocks[idx] = { type: 'text', text: cb.text ?? '' }
           } else if (cb?.type === 'tool_use') {
             // Synthesize id/name if malformed so the block still round-trips and gets a paired
-            // tool_result — silently dropping it can empty the turn (→ 400 / false-complete).
-            const id = cb.id || `synthetic_${idx}`
+            // tool_result — silently dropping it can empty the turn (→ 400 / false-complete). The
+            // random suffix keeps a synthetic id collision-proof across parent + parallel sub-agents
+            // (they share a session dir for persisted results).
+            const id = cb.id || `synthetic_${idx}_${Math.random().toString(36).slice(2, 8)}`
             const name = cb.name || 'unknown'
             blocks[idx] = { type: 'tool_use', id, name, json: '' }
             onEvent?.({ type: 'tool_use_start', id, name })
@@ -141,5 +149,5 @@ export async function callWithTools(
     }
   }
 
-  return { content, stopReason, usage: { inTokens, outTokens } }
+  return { content, stopReason, usage: { inTokens, outTokens, cacheReadTokens, cacheCreationTokens } }
 }
