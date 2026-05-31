@@ -9,6 +9,7 @@
 //   tool_use blocks and can't itself overflow.
 
 import { collectTurn } from './llm'
+import { isContentBlock } from './types'
 import type { AgentMessage, ToolResultBlock, Usage } from './types'
 
 const COMPACTABLE_TOOLS = new Set(['Read', 'Bash', 'Grep', 'Glob', 'Edit', 'Write', 'MultiEdit', 'LS'])
@@ -29,14 +30,14 @@ export function microcompact(messages: AgentMessage[], keepRecent = KEEP_RECENT_
   const toolNameById = new Map<string, string>()
   for (const m of messages) {
     if (m.role === 'assistant') {
-      for (const b of m.content) if (b.type === 'tool_use') toolNameById.set(b.id, b.name)
+      for (const b of m.content) if (isContentBlock(b) && b.type === 'tool_use') toolNameById.set(b.id, b.name)
     }
   }
   const compactable: ToolResultBlock[] = []
   for (const m of messages) {
     if (m.role !== 'user') continue
     for (const b of m.content) {
-      if (b.type === 'tool_result' && typeof b.content === 'string' && b.content !== CLEARED_MARKER) {
+      if (isContentBlock(b) && b.type === 'tool_result' && typeof b.content === 'string' && b.content !== CLEARED_MARKER) {
         const name = toolNameById.get(b.tool_use_id)
         if (name && COMPACTABLE_TOOLS.has(name)) compactable.push(b)
       }
@@ -52,7 +53,7 @@ export function microcompact(messages: AgentMessage[], keepRecent = KEEP_RECENT_
       : {
           ...m,
           content: m.content.map((b) =>
-            b.type === 'tool_result' && clear.has(b) ? { ...b, content: CLEARED_MARKER } : b,
+            isContentBlock(b) && b.type === 'tool_result' && clear.has(b) ? { ...b, content: CLEARED_MARKER } : b,
           ),
         },
   )
@@ -68,7 +69,8 @@ export function estimateTokens(messages: AgentMessage[]): number {
   let chars = 0
   for (const m of messages) {
     for (const b of m.content) {
-      if (b.type === 'text') chars += b.text.length
+      if (!isContentBlock(b)) chars += JSON.stringify(b).length // server block — estimate by raw size
+      else if (b.type === 'text') chars += b.text.length
       else if (b.type === 'tool_use') chars += b.name.length + JSON.stringify(b.input).length
       else if (b.type === 'tool_result') chars += typeof b.content === 'string' ? b.content.length : 2_000
       else if (b.type === 'image') chars += 8_000 // ~2000 tokens flat
@@ -121,7 +123,8 @@ function messagesToTranscript(messages: AgentMessage[]): string {
   for (const m of messages) {
     const parts: string[] = []
     for (const b of m.content) {
-      if (b.type === 'text') parts.push(b.text)
+      if (!isContentBlock(b)) parts.push(`[${b.type}]`) // server block — opaque in the transcript
+      else if (b.type === 'text') parts.push(b.text)
       else if (b.type === 'tool_use') parts.push(`[called ${b.name}(${JSON.stringify(b.input)})]`)
       else if (b.type === 'tool_result') {
         const c = typeof b.content === 'string' ? b.content.slice(0, MAX_TOOL_RESULT_IN_TRANSCRIPT) : '<non-text>'

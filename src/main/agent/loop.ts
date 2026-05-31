@@ -17,7 +17,16 @@ import type { AgentContext, SpawnSubAgent } from './context'
 import { StreamingToolExecutor } from './execution'
 import { callWithTools, type AgentLlmEvent } from './llm'
 import type { Tool } from './tool'
-import type { AgentMessage, AssistantTurn, ToolSchema, ToolUseBlock, Usage } from './types'
+import { isContentBlock } from './types'
+import type {
+  AgentMessage,
+  AnyToolSchema,
+  AssistantTurn,
+  ServerToolSchema,
+  ToolSchema,
+  ToolUseBlock,
+  Usage,
+} from './types'
 
 export interface RunAgentParams {
   baseUrl: string
@@ -59,13 +68,37 @@ const DEFAULT_SMALL_MODEL = 'nicosoft/claude-haiku-4-5-20251001'
 // rejected for it on the OAuth channel, so default to Sonnet (verified working, cheaper than Opus).
 const DEFAULT_SEARCH_MODEL = 'nicosoft/claude-sonnet-4-6'
 
-// Convert a Tool's zod inputSchema into the Anthropic tools param entry.
-function toToolSchema(tool: Tool): ToolSchema {
-  return {
+// tool_search variant used when tools opt into deferral. Regex flavour (the model builds a Python
+// regex over tool names/descriptions); bm25 is the alternative.
+const TOOL_SEARCH_TYPE = 'tool_search_tool_regex_20251119'
+
+// Convert a Tool's zod inputSchema into the Anthropic tools param entry, optionally deferred.
+function toToolSchema(tool: Tool, defer: boolean): ToolSchema {
+  const schema: ToolSchema = {
     name: tool.name,
     description: tool.prompt(),
     input_schema: z.toJSONSchema(tool.inputSchema) as Record<string, unknown>,
   }
+  if (defer) schema.defer_loading = true
+  return schema
+}
+
+// Sonnet/Opus/Haiku 4.x+ support tool_reference expansion (tool_search); older/other families don't.
+function modelSupportsToolSearch(model: string): boolean {
+  return /claude-(sonnet|opus|haiku)-(4|[5-9])/i.test(model)
+}
+
+// Build the tools param. When some tools opt into deferral (shouldDefer — e.g. future MCP tools) and
+// the model supports tool_reference, declare the tool_search server tool and mark those tools
+// defer_loading so they're discovered on demand instead of bloating context. Otherwise every tool is
+// declared up front — the common case: Hex's core set is small and none deferred, so no tool_search.
+function buildToolsParam(tools: readonly Tool[], model: string): AnyToolSchema[] {
+  const hasDeferred = tools.some((t) => t.shouldDefer)
+  if (!hasDeferred || !modelSupportsToolSearch(model)) {
+    return tools.map((t) => toToolSchema(t, false))
+  }
+  const searchTool: ServerToolSchema = { type: TOOL_SEARCH_TYPE, name: 'tool_search_tool_regex' }
+  return [searchTool, ...tools.map((t) => toToolSchema(t, t.shouldDefer))]
 }
 
 export async function* runAgent(
@@ -82,7 +115,7 @@ export async function* runAgent(
   const maxTurns = params.maxTurns ?? 50
   const contextWindow = params.contextWindow ?? 200_000
   let messages: AgentMessage[] = [...params.messages] // let — compaction replaces it
-  const toolSchemas = tools.map(toToolSchema)
+  const toolSchemas = buildToolsParam(tools, model)
   let turns = 0
   // Compaction (layers 2/3) state: the full context size billed at the last API turn + where that
   // was, so the running estimate = tokensFromUsage(lastUsage) + char/4 of messages added since.
@@ -122,7 +155,7 @@ export async function* runAgent(
           break
         }
         if (step.value.type === 'assistant') {
-          for (const b of step.value.message.content) if (b.type === 'text') last = b.text
+          for (const b of step.value.message.content) if (isContentBlock(b) && b.type === 'text') last = b.text
         }
       }
       // Annotate a non-complete termination so a truncated child can't masquerade as a full summary.

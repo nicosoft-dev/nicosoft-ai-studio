@@ -4,7 +4,15 @@
 // Reuses the shared SSE plumbing. See docs/nicosoft-studio/12-hex-coding-agent.md §2.4.
 
 import { iterSSE, openStream, parseJSON, toLlmError } from '../llm/_shared'
-import type { AgentMessage, AssistantTurn, StopReason, TextBlock, ToolSchema, ToolUseBlock } from './types'
+import type {
+  AgentMessage,
+  AnyToolSchema,
+  AssistantTurn,
+  ServerBlock,
+  StopReason,
+  TextBlock,
+  ToolUseBlock,
+} from './types'
 
 const PROVIDER = 'anthropic'
 const ANTHROPIC_VERSION = '2023-06-01'
@@ -15,7 +23,7 @@ export interface AgentLlmRequest {
   model: string
   system: string
   messages: AgentMessage[]
-  tools: ToolSchema[]
+  tools: AnyToolSchema[]
   maxTokens: number
   signal?: AbortSignal
 }
@@ -33,7 +41,7 @@ interface StreamEvent {
   message?: {
     usage?: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number }
   }
-  content_block?: { type?: string; text?: string; id?: string; name?: string }
+  content_block?: { type?: string; text?: string; id?: string; name?: string; [key: string]: unknown }
   delta?: { type?: string; text?: string; partial_json?: string; stop_reason?: string }
   usage?: { output_tokens?: number }
 }
@@ -42,6 +50,9 @@ interface StreamEvent {
 type Accum =
   | { type: 'text'; text: string }
   | { type: 'tool_use'; id: string; name: string; json: string; input?: Record<string, unknown> }
+  // A server-side block carried verbatim. `json` accumulates server_tool_use input deltas (null for
+  // *_tool_result blocks, which arrive complete at content_block_start).
+  | { type: 'server'; raw: Record<string, unknown>; json: string | null }
 
 // POST /v1/messages (Anthropic protocol) with tools. Yields each completed tool_use block as it
 // finishes (content_block_stop); returns the assembled AssistantTurn when the stream ends.
@@ -98,6 +109,11 @@ export async function* callWithTools(
             const name = cb.name || 'unknown'
             blocks[idx] = { type: 'tool_use', id, name, json: '' }
             onEvent?.({ type: 'tool_use_start', id, name })
+          } else if (cb?.type) {
+            // Server-side block (server_tool_use / *_tool_result / tool_reference): carry it verbatim,
+            // never execute it. server_tool_use streams its input as input_json_delta like tool_use;
+            // other server blocks arrive complete here.
+            blocks[idx] = { type: 'server', raw: { ...cb }, json: cb.type === 'server_tool_use' ? '' : null }
           }
           break
         }
@@ -110,6 +126,13 @@ export async function* callWithTools(
           } else if (d?.type === 'input_json_delta' && blk?.type === 'tool_use' && typeof d.partial_json === 'string') {
             blk.json += d.partial_json
             onEvent?.({ type: 'tool_use_input', id: blk.id, delta: d.partial_json })
+          } else if (
+            d?.type === 'input_json_delta' &&
+            blk?.type === 'server' &&
+            blk.json !== null &&
+            typeof d.partial_json === 'string'
+          ) {
+            blk.json += d.partial_json // accumulate server_tool_use input (not surfaced to the loop)
           }
           break
         }
@@ -119,6 +142,10 @@ export async function* callWithTools(
             const input = (parseJSON(blk.json || '{}') as Record<string, unknown> | null) ?? {}
             blk.input = input // keep for the final content assembly
             yield { type: 'tool_use', id: blk.id, name: blk.name, input } // ← stream: loop starts execution
+          } else if (blk?.type === 'server' && blk.json !== null) {
+            // Finalize server_tool_use input into the raw block. Never yielded — the API already ran
+            // the server tool; the agent loop only executes its OWN tool_use blocks.
+            blk.raw.input = (parseJSON(blk.json || '{}') as Record<string, unknown> | null) ?? {}
           }
           break
         }
@@ -134,12 +161,14 @@ export async function* callWithTools(
     throw toLlmError(PROVIDER, err)
   }
 
-  // Assemble the full turn in index order.
-  const content: Array<TextBlock | ToolUseBlock> = []
+  // Assemble the full turn in index order. Server blocks are pushed verbatim (round-tripped, never
+  // executed) so the next request carries the model's own server-tool calls + results.
+  const content: Array<TextBlock | ToolUseBlock | ServerBlock> = []
   for (const b of blocks) {
     if (!b) continue
     if (b.type === 'text') content.push({ type: 'text', text: b.text })
-    else content.push({ type: 'tool_use', id: b.id, name: b.name, input: b.input ?? {} })
+    else if (b.type === 'tool_use') content.push({ type: 'tool_use', id: b.id, name: b.name, input: b.input ?? {} })
+    else content.push(b.raw as ServerBlock)
   }
   return { content, stopReason, usage: { inTokens, outTokens, cacheReadTokens, cacheCreationTokens } }
 }

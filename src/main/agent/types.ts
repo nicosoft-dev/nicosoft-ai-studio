@@ -36,9 +36,29 @@ export interface ToolResultBlock {
 
 export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ImageBlock
 
+// A server-side content block (server_tool_use / *_tool_result / tool_reference) carried verbatim
+// through the conversation. The agent never executes or inspects it — Anthropic produced it
+// server-side and the API expands tool_reference blocks automatically; we only round-trip it on the
+// wire so the model sees its own server-tool results on the next turn. Shape is whatever Anthropic
+// sends; only `type` is relied on.
+export interface ServerBlock {
+  type: string
+  [key: string]: unknown
+}
+
+export type AnyBlock = ContentBlock | ServerBlock
+
+const AGENT_BLOCK_TYPES = new Set(['text', 'tool_use', 'tool_result', 'image'])
+
+// Narrow an AnyBlock to the agent-handled ContentBlock union, filtering out opaque server blocks so
+// the existing `b.type === 'text'` narrows stay sound.
+export function isContentBlock(b: AnyBlock): b is ContentBlock {
+  return AGENT_BLOCK_TYPES.has(b.type)
+}
+
 export interface AgentMessage {
   role: 'user' | 'assistant'
-  content: ContentBlock[]
+  content: AnyBlock[]
 }
 
 export type StopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence' | 'refusal' | null
@@ -52,14 +72,28 @@ export interface Usage {
 
 // One full assistant turn from the LLM call, with tool_use blocks already assembled from the stream.
 export interface AssistantTurn {
-  content: Array<TextBlock | ToolUseBlock>
+  content: Array<TextBlock | ToolUseBlock | ServerBlock>
   stopReason: StopReason
   usage: Usage
 }
 
 // Anthropic `tools` param entry — name + description + JSON Schema (from zod-to-json-schema).
+// `defer_loading` marks a tool for tool_search: excluded from the initial context, surfaced only when
+// the model discovers it via the tool_search tool.
 export interface ToolSchema {
   name: string
   description: string
   input_schema: Record<string, unknown>
+  defer_loading?: boolean
 }
+
+// A server-side tool declared by `type` (tool_search / web_search / …), not name+schema — the agent
+// never executes it (the API does), so it has no input_schema; extra fields (max_uses, …) are
+// provider-specific and passed through verbatim.
+export interface ServerToolSchema {
+  type: string
+  name: string
+  [key: string]: unknown
+}
+
+export type AnyToolSchema = ToolSchema | ServerToolSchema

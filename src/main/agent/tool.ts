@@ -37,6 +37,9 @@ export interface ToolDef<In extends z.ZodTypeAny = z.ZodTypeAny, Out = unknown> 
   // Infinity = never persist (the tool self-bounds its output). Globally clamped to 50_000 except
   // Infinity. See docs/nicosoft-studio/12-hex-coding-agent.md (compaction layer 1).
   maxResultSizeChars?: number
+  // tool_search: when true this tool is loaded on demand (the model discovers it via tool_search)
+  // rather than declared up front — for large/optional tool sets (e.g. MCP). Core tools leave it false.
+  shouldDefer?: boolean
 }
 
 // A complete tool after defaults are applied — every gate is guaranteed present.
@@ -48,6 +51,7 @@ export interface Tool<In extends z.ZodTypeAny = z.ZodTypeAny, Out = unknown>
   validateInput(input: z.infer<In>, ctx: AgentContext): Promise<ValidationResult>
   checkPermissions(input: z.infer<In>, ctx: AgentContext): Promise<PermissionResult>
   maxResultSizeChars: number
+  shouldDefer: boolean
 }
 
 // Fail-closed defaults: not concurrency-safe, treated as a write, non-destructive, input valid,
@@ -64,6 +68,7 @@ export function buildTool<In extends z.ZodTypeAny, Out>(def: ToolDef<In, Out>): 
       updatedInput: input as Record<string, unknown>,
     }),
     maxResultSizeChars: 50_000,
+    shouldDefer: false,
     ...def,
   }
 }
