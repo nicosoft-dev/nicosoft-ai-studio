@@ -23,12 +23,6 @@ const SETTINGS_NAV: { id: string; label: string; icon: string }[] = [
   { id: "about",     label: "About",     icon: "info" },
 ];
 
-const MODELS_BY_FAMILY: Record<string, string[]> = {
-  anthropic: ["claude-haiku-4", "claude-sonnet-4.6", "claude-opus-4"],
-  openai: ["gpt-5-mini", "gpt-5", "gpt-5-pro"],
-  gemini: ["gemini-2.5-flash", "gemini-2.5-pro", "imagen-4"],
-};
-
 function SettingsNav({
   active,
   onSelect,
@@ -129,7 +123,6 @@ function RoleBindRow({
   const familyLabel: Record<string, string> = { anthropic: "Anthropic", openai: "OpenAI", gemini: "Gemini" };
   const epOpts = endpoints.map((ep) => ({ v: ep.name, l: ep.name }));
   const family = binding.family;
-  const modelOpts = (MODELS_BY_FAMILY[family as string] || []).map((m) => ({ v: m, l: m }));
   const epName = (binding as RoleBinding & { endpoint?: string }).endpoint || (endpoints.find((e) => e.proto === family) || {}).name || endpoints[0].name;
 
   return (
@@ -143,10 +136,20 @@ function RoleBindRow({
         <div className="rb-controls">
           <div style={{ width: 150 }}>
             <Dropdown options={epOpts} value={epName}
-              onChange={(v: string) => { const f = ((endpoints.find((e) => e.name === v) || {}).proto) as Family; onChange({ endpoint: v, family: f, model: (MODELS_BY_FAMILY[f as string] || [])[0] }); }} />
+              onChange={(v: string) => { const f = ((endpoints.find((e) => e.name === v) || {}).proto) as Family; onChange({ endpoint: v, family: f }); }} />
           </div>
+          {/* Model is a free-text slug: endpoints expose non-standard ids (e.g. nicosoft/claude-…),
+              so a fixed dropdown can't cover them. Same 34px height as the endpoint select. */}
           <div style={{ width: 168 }}>
-            <Dropdown options={modelOpts} value={binding.model} onChange={(v: string) => onChange({ model: v })} />
+            <input
+              className="input mono"
+              type="text"
+              value={binding.model}
+              placeholder="provider/model-id"
+              spellCheck={false}
+              autoComplete="off"
+              onChange={(e) => onChange({ model: e.target.value })}
+            />
           </div>
         </div>
       </div>
