@@ -34,7 +34,7 @@ export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
   text: string
-  images?: { url: string; name: string }[]
+  images?: { url: string; name: string; loading?: boolean }[]
   tools?: ToolCall[] // present on agent (tool-using) turns
   streaming?: boolean
   // Coordinator-dispatched message: the contributing expert (engineer/translator/...) and (pipeline only) the dispatch
@@ -107,7 +107,7 @@ export const useChat = create<ChatState>((set, get) => {
 
   // Attach a generated image (nsai-media:// url) to the current streaming assistant message — the
   // designer image-tool loop interleaves text deltas and generated images within one turn.
-  const appendImage = (convId: string, image: { url: string; name: string }): void => {
+  const appendImage = (convId: string, image: { url: string; name: string; loading?: boolean }): void => {
     set((s) => {
       const msgs = (s.byConversation[convId] ?? []).map((m) => ({ ...m }))
       let cur = msgs[msgs.length - 1]
@@ -117,6 +117,28 @@ export const useChat = create<ChatState>((set, get) => {
       }
       cur.images = [...(cur.images ?? []), image]
       return { byConversation: { ...s.byConversation, [convId]: msgs } }
+    })
+  }
+
+  // Replace the most recent loading placeholder (added by onImageStart) with the finished image.
+  const fulfillImage = (convId: string, image: { url: string; name: string }): void => {
+    set((s) => {
+      const msgs = (s.byConversation[convId] ?? []).map((m) => ({ ...m }))
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const imgs = msgs[i].images
+        if (!imgs) continue
+        let li = -1
+        for (let j = imgs.length - 1; j >= 0; j--)
+          if (imgs[j].loading) {
+            li = j
+            break
+          }
+        if (li >= 0) {
+          msgs[i] = { ...msgs[i], images: imgs.map((x, idx) => (idx === li ? { url: image.url, name: image.name } : x)) }
+          return { byConversation: { ...s.byConversation, [convId]: msgs } }
+        }
+      }
+      return s // no placeholder found (shouldn't happen) — leave state untouched
     })
   }
 
@@ -344,9 +366,13 @@ export const useChat = create<ChatState>((set, get) => {
       const meta = imageToolMeta.get(d.streamId)
       if (meta) appendDelta(meta.convId, d.text)
     })
+    it.onImageStart((d) => {
+      const meta = imageToolMeta.get(d.streamId)
+      if (meta) appendImage(meta.convId, { url: '', name: '', loading: true })
+    })
     it.onImage((d) => {
       const meta = imageToolMeta.get(d.streamId)
-      if (meta) appendImage(meta.convId, { url: d.attachment.url, name: d.attachment.name ?? 'image' })
+      if (meta) fulfillImage(meta.convId, { url: d.attachment.url, name: d.attachment.name ?? 'image' })
     })
     it.onDone((d) => {
       const meta = imageToolMeta.get(d.streamId)
@@ -355,7 +381,12 @@ export const useChat = create<ChatState>((set, get) => {
       set((s) => {
         const msgs = (s.byConversation[meta.convId] ?? []).map((m) => ({ ...m }))
         const cur = msgs[msgs.length - 1]
-        if (cur && cur.role === 'assistant') cur.streaming = false
+        if (cur && cur.role === 'assistant') {
+          cur.streaming = false
+          // Drop any unfulfilled loading placeholder — a generation that errored never sent onImage,
+          // so its spinner would otherwise hang forever (the round-N reply explains the failure).
+          if (cur.images) cur.images = cur.images.filter((x) => !x.loading)
+        }
         return {
           byConversation: { ...s.byConversation, [meta.convId]: msgs },
           streaming: { ...s.streaming, [meta.convId]: false },

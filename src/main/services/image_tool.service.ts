@@ -59,7 +59,8 @@ export interface ImageToolRunInput {
 
 export interface ImageToolCallbacks {
   onDelta: (text: string) => void
-  onImage: (attachment: MessageAttachmentDto) => void // a generated image (nsai-media:// ref)
+  onImageStart: () => void // a generation just started — show a loading placeholder while it renders
+  onImage: (attachment: MessageAttachmentDto) => void // the finished image (nsai-media:// ref) replaces the placeholder
 }
 
 // Assemble the chat context (system + memories + summary + recent turns) the same way chat.service does.
@@ -156,6 +157,7 @@ export async function run(input: ImageToolRunInput, cb: ImageToolCallbacks, sign
     const toolResults: ToolResult[] = []
     for (const tc of result.toolCalls) {
       if (tc.name !== NS_GENERATE_IMAGE.name) continue
+      cb.onImageStart() // surface a loading placeholder before the (multi-second) generation call
       try {
         const { attachment, response } = await execGenerateImage(input, ep.baseUrl, apiKey, tc.args, signal)
         attachments.push(attachment)

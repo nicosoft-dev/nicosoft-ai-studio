@@ -91,15 +91,27 @@ function ChatSegment({
         ) : null}
         {msg.images && msg.images.length > 0 ? (
           <div className="msg-images">
-            {msg.images.map((img, i) => (
-              <img
-                key={i}
-                className="msg-img-thumb"
-                src={img.url}
-                alt={img.name}
-                onClick={() => onOpenImage(msg.images!.map((x) => ({ url: x.url, name: x.name })), i)}
-              />
-            ))}
+            {msg.images.map((img, i) =>
+              img.loading ? (
+                <div key={i} className="msg-img-thumb msg-img-loading" title="Generating image…">
+                  <span className="img-spinner" />
+                </div>
+              ) : (
+                <img
+                  key={i}
+                  className="msg-img-thumb"
+                  src={img.url}
+                  alt={img.name}
+                  onClick={() => {
+                    const ready = msg.images!.filter((x) => !x.loading)
+                    onOpenImage(
+                      ready.map((x) => ({ url: x.url, name: x.name })),
+                      ready.findIndex((x) => x.url === img.url)
+                    )
+                  }}
+                />
+              )
+            )}
           </div>
         ) : null}
         {msg.tools && msg.tools.length > 0 ? msg.tools.map((t) => <ToolBubble key={t.id} tool={t} />) : null}

@@ -11,6 +11,7 @@ import { LlmError } from '../llm/types'
 import type {
   ImageToolRunInputDto,
   ImageToolDeltaDto,
+  ImageToolImageStartDto,
   ImageToolImageDto,
   ImageToolDoneDto,
   ImageToolErrorDto
@@ -41,6 +42,10 @@ export function registerImageToolHandlers(): void {
           onDelta: (text) => {
             const ev: ImageToolDeltaDto = { streamId, text }
             send('imagetool:delta', ev)
+          },
+          onImageStart: () => {
+            const ev: ImageToolImageStartDto = { streamId }
+            send('imagetool:imagestart', ev)
           },
           onImage: (attachment) => {
             const ev: ImageToolImageDto = { streamId, attachment }

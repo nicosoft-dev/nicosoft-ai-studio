@@ -210,6 +210,9 @@ export interface ImageToolDeltaDto {
   streamId: string
   text: string
 }
+export interface ImageToolImageStartDto {
+  streamId: string
+}
 export interface ImageToolImageDto {
   streamId: string
   attachment: MessageAttachmentDto

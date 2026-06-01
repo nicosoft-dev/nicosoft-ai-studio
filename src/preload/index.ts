@@ -27,6 +27,7 @@ import type {
   CoordinatorErrorDto,
   ImageToolRunInputDto,
   ImageToolDeltaDto,
+  ImageToolImageStartDto,
   ImageToolImageDto,
   ImageToolDoneDto,
   ImageToolErrorDto,
@@ -128,6 +129,7 @@ const api = {
     run: (input: ImageToolRunInputDto): Promise<{ streamId: string }> => ipcRenderer.invoke('imagetool:run', input),
     stop: (streamId: string): Promise<void> => ipcRenderer.invoke('imagetool:stop', streamId),
     onDelta: (cb: (d: ImageToolDeltaDto) => void): (() => void) => agentListen('imagetool:delta', cb),
+    onImageStart: (cb: (d: ImageToolImageStartDto) => void): (() => void) => agentListen('imagetool:imagestart', cb),
     onImage: (cb: (d: ImageToolImageDto) => void): (() => void) => agentListen('imagetool:image', cb),
     onDone: (cb: (d: ImageToolDoneDto) => void): (() => void) => agentListen('imagetool:done', cb),
     onError: (cb: (d: ImageToolErrorDto) => void): (() => void) => agentListen('imagetool:error', cb)
