@@ -11,11 +11,15 @@ interface InputTextPart {
   type: 'input_text'
   text: string
 }
+interface OutputTextPart {
+  type: 'output_text'
+  text: string
+}
 interface InputImagePart {
   type: 'input_image'
   image_url: string
 }
-type InputPart = InputTextPart | InputImagePart
+type InputPart = InputTextPart | OutputTextPart | InputImagePart
 
 interface InputItem {
   role: 'user' | 'assistant'
@@ -31,18 +35,26 @@ interface ResponsesBody {
   reasoning?: { effort: 'minimal' | 'none' | 'low' | 'medium' | 'high' | 'xhigh' }
 }
 
+// Responses API discriminates the text part type by role: a user turn uses `input_text`, while an
+// assistant turn (the model's own prior output, replayed for multi-turn context) must use
+// `output_text`. Sending `input_text` on an assistant item is rejected with
+// "Invalid value: 'input_text'. Supported values are: 'output_text' and 'refusal'."
+function textPart(role: 'user' | 'assistant', text: string): InputTextPart | OutputTextPart {
+  return role === 'assistant' ? { type: 'output_text', text } : { type: 'input_text', text }
+}
+
 // Build `input` items from messages. System messages are not emitted here (hoisted to instructions).
-// Each turn's text becomes an input_text part; image attachments become input_image parts.
+// Each turn's text becomes a role-appropriate text part; image attachments become input_image parts.
 function toInput(messages: ChatMessage[]): InputItem[] {
   const items: InputItem[] = []
   for (const m of messages) {
     if (m.role === 'system') continue
     const content: InputPart[] = []
-    if (m.content) content.push({ type: 'input_text', text: m.content })
+    if (m.content) content.push(textPart(m.role, m.content))
     for (const att of m.attachments ?? []) {
       content.push({ type: 'input_image', image_url: imageUrlOf(att) })
     }
-    if (content.length === 0) content.push({ type: 'input_text', text: '' })
+    if (content.length === 0) content.push(textPart(m.role, ''))
     items.push({ role: m.role, content })
   }
   return items
@@ -66,8 +78,12 @@ function buildBody(req: ChatRequest): ResponsesBody {
     stream: true,
     store: false // local-first: don't let the provider retain responses server-side
   }
+  // The Responses gateway rejects a request whose `instructions` is absent ("Instructions are
+  // required"). System-less calls still need a non-empty value: title/memory generation deliberately
+  // put their directive in a user turn (to survive the upstream identity overwrite), and endpoint-test
+  // pings carry no system at all. Fall back to a neutral prompt so those calls aren't 400'd.
   const instructions = toInstructions(req.messages)
-  if (instructions) body.instructions = instructions
+  body.instructions = instructions ?? 'You are a helpful assistant.'
   if (req.thinking?.effort) body.reasoning = { effort: req.thinking.effort }
   return body
 }

@@ -20,7 +20,7 @@ import type {
 const EXPERTS: Expert[] = [
   { id: 'atlas', name: 'Atlas', color: 'var(--exp-atlas)', specialty: 'Coordinator — routes & merges', personality: 'Calm air-traffic-controller', model: 'claude-sonnet-4.6', family: 'anthropic', coordinator: true },
   { id: 'iris', name: 'Iris', color: 'var(--exp-iris)', specialty: 'Generalist — chat & brainstorming', personality: 'Warm, curious front door', model: 'gpt-5.5', family: 'openai' },
-  { id: 'hex', name: 'Hex', color: 'var(--exp-hex)', specialty: 'Software engineer — code', personality: 'Precise, direct, no pleasantries', model: 'claude-sonnet-4.6', family: 'anthropic' },
+  { id: 'hex', name: 'Hex', color: 'var(--exp-hex)', specialty: 'Software engineer — code', personality: 'Precise, direct, no pleasantries', model: 'claude-opus-4.8', family: 'anthropic' },
   { id: 'lyra', name: 'Lyra', color: 'var(--exp-lyra)', specialty: 'Designer — images & posters', personality: 'Creative, opinionated', model: 'imagen-4', family: 'gemini' },
   { id: 'echo', name: 'Echo', color: 'var(--exp-echo)', specialty: 'Translator — any language pair', personality: 'Precise, culturally aware', model: 'gemini-3.1-flash-lite', family: 'gemini' },
   { id: 'sage', name: 'Sage', color: 'var(--exp-sage)', specialty: 'Editor — summarize & condense', personality: 'Structured, no padding', model: 'gemini-3.1-pro', family: 'gemini' },
