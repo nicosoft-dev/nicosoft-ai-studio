@@ -1,5 +1,5 @@
 // Shared primitives — recreated from the prototype's components.jsx.
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import type { CSSProperties, ReactElement } from 'react'
 import { Icons } from './icons'
 import { STUDIO_DATA } from '@/data/studio-data'
@@ -269,14 +269,14 @@ export function DispatchBadge({ chain }: { chain: string[] }): ReactElement {
       {chain.map((id) => {
         const e = EXPERT_BY_ID[id]
         return (
-          <span key={id}>
+          <Fragment key={id}>
             <span className="d-arrow">
               <Icons.arrowRight size={13} />
             </span>
             <span className="d-node">
               <span className="d-dot" style={{ background: e.color }} /> {e.name}
             </span>
-          </span>
+          </Fragment>
         )
       })}
     </div>
