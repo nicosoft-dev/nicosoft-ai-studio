@@ -197,6 +197,33 @@ export interface CoordinatorErrorDto {
   message: string
 }
 
+// === Image tool (designer chat + ns_generate_image) ===
+export interface ImageToolRunInputDto {
+  convId: string
+  endpointId: string
+  model: string // chat model (gemini-3.5-flash)
+  imageModel?: string // image backend slug; defaults to Nano Banana Pro
+  thinking?: { effort?: 'minimal' | 'none' | 'low' | 'medium' | 'high' | 'xhigh'; budgetTokens?: number }
+  prompt: string
+}
+export interface ImageToolDeltaDto {
+  streamId: string
+  text: string
+}
+export interface ImageToolImageDto {
+  streamId: string
+  attachment: MessageAttachmentDto
+}
+export interface ImageToolDoneDto {
+  streamId: string
+  inputTokens: number
+}
+export interface ImageToolErrorDto {
+  streamId: string
+  code: string
+  message: string
+}
+
 // === Roles (expert → endpoint/model binding + per-role state) ===
 // A role's binding: which endpoint/model it runs on + its default thinking depth (applied when a task
 // is dispatched to it; the chat composer can still override per-conversation). null = provider default.

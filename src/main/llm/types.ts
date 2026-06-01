@@ -88,6 +88,10 @@ export interface ToolCall {
   id: string
   name: string
   args: Record<string, unknown>
+  // Gemini thinking models return an opaque thought signature alongside a functionCall and REQUIRE it
+  // echoed back verbatim when the call is replayed next turn — otherwise the upstream returns 400
+  // "missing a thought_signature". Carried through but never interpreted.
+  thoughtSignature?: string
 }
 export interface ToolResult {
   id: string

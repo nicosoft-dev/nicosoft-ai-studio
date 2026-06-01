@@ -66,6 +66,16 @@ export function persistDataUrl(convId: string, att: MessageAttachmentDto): Messa
   return { kind: 'image', url: `${MEDIA_SCHEME}://${convId}/${imgId}.${ext}`, mime, name: att.name }
 }
 
+// Persist raw base64 image bytes (a generated image) to a file, returning its nsai-media:// reference.
+// Used by the ns_generate_image tool executor — the image never touches the DB as base64.
+export function persistBase64(convId: string, base64: string, mime: string): MessageAttachmentDto {
+  const ext = extForMime(mime)
+  const imgId = ulid()
+  mkdirSync(convDir(convId), { recursive: true })
+  writeFileSync(join(convDir(convId), `${imgId}.${ext}`), Buffer.from(base64, 'base64'))
+  return { kind: 'image', url: `${MEDIA_SCHEME}://${convId}/${imgId}.${ext}`, mime }
+}
+
 // Read an nsai-media:// file back as a base64 data URL for an LLM vision payload. Anything else
 // (already a data: URL, or a remote http URL) is returned unchanged so callers can resolve uniformly.
 export function resolveToDataUrl(url: string): string {

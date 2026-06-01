@@ -18,6 +18,7 @@ interface InlineDataPart {
 }
 interface FunctionCallPart {
   functionCall: { name: string; args?: Record<string, unknown> }
+  thoughtSignature?: string
 }
 interface FunctionResponsePart {
   functionResponse: { name: string; response: Record<string, unknown> }
@@ -76,7 +77,8 @@ function toContents(messages: ChatMessage[]): Content[] {
     }
     // An assistant turn may carry tool calls (functionCall); a user turn may carry their results
     // (functionResponse). These let the designer's chat+tool loop replay a multi-turn function call.
-    for (const tc of m.toolCalls ?? []) parts.push({ functionCall: { name: tc.name, args: tc.args } })
+    for (const tc of m.toolCalls ?? [])
+      parts.push({ functionCall: { name: tc.name, args: tc.args }, ...(tc.thoughtSignature ? { thoughtSignature: tc.thoughtSignature } : {}) })
     for (const tr of m.toolResults ?? []) parts.push({ functionResponse: { name: tr.name, response: asResponse(tr.result) } })
     if (m.content) parts.push({ text: m.content })
     if (parts.length === 0) parts.push({ text: '' })
@@ -109,6 +111,7 @@ function buildBody(req: ChatRequest): GeminiBody {
 interface GeminiPart {
   text?: string
   functionCall?: { name?: string; args?: Record<string, unknown> }
+  thoughtSignature?: string
 }
 interface GeminiChunk {
   candidates?: { content?: { parts?: GeminiPart[] } }[]
@@ -199,7 +202,13 @@ export const chatGemini: ChatFn = async (req: ChatRequest, onDelta: OnDelta): Pr
       // Collect any functionCall parts the model emitted (function calling — drives the tool loop).
       for (const c of chunk.candidates ?? []) {
         for (const p of c.content?.parts ?? []) {
-          if (p.functionCall?.name) toolCalls.push({ id: ulid(), name: p.functionCall.name, args: p.functionCall.args ?? {} })
+          if (p.functionCall?.name)
+            toolCalls.push({
+              id: ulid(),
+              name: p.functionCall.name,
+              args: p.functionCall.args ?? {},
+              ...(p.thoughtSignature ? { thoughtSignature: p.thoughtSignature } : {})
+            })
         }
       }
       const u = chunk.usageMetadata

@@ -25,6 +25,11 @@ import type {
   CoordinatorStepDone,
   CoordinatorDoneDto,
   CoordinatorErrorDto,
+  ImageToolRunInputDto,
+  ImageToolDeltaDto,
+  ImageToolImageDto,
+  ImageToolDoneDto,
+  ImageToolErrorDto,
   RoleBindingDto,
   RoleBindingInput,
   RoleStateDto,
@@ -117,6 +122,15 @@ const api = {
     onStepDone: (cb: (d: CoordinatorStepDone) => void): (() => void) => agentListen('coordinator:step:done', cb),
     onDone: (cb: (d: CoordinatorDoneDto) => void): (() => void) => agentListen('coordinator:done', cb),
     onError: (cb: (d: CoordinatorErrorDto) => void): (() => void) => agentListen('coordinator:error', cb)
+  },
+
+  imagetool: {
+    run: (input: ImageToolRunInputDto): Promise<{ streamId: string }> => ipcRenderer.invoke('imagetool:run', input),
+    stop: (streamId: string): Promise<void> => ipcRenderer.invoke('imagetool:stop', streamId),
+    onDelta: (cb: (d: ImageToolDeltaDto) => void): (() => void) => agentListen('imagetool:delta', cb),
+    onImage: (cb: (d: ImageToolImageDto) => void): (() => void) => agentListen('imagetool:image', cb),
+    onDone: (cb: (d: ImageToolDoneDto) => void): (() => void) => agentListen('imagetool:done', cb),
+    onError: (cb: (d: ImageToolErrorDto) => void): (() => void) => agentListen('imagetool:error', cb)
   },
 
   project: {

@@ -45,9 +45,13 @@ export function useRoleBinding(expert: Expert): RoleBindingControls {
       const loadedModel = b?.model || expert.model || ep?.defaultModel || ep?.availableModels[0]?.slug || ''
       const fam = ep ? protocolToFamily(ep.protocol) : expert.family
       const raw = (b?.thinkingDepth as ThinkingDepth | null) || ''
+      const supported = supportedDepths(getThinkingCapability(fam, loadedModel))
       // Clamp the persisted depth to what THIS model supports — a stale tier (e.g. 'max' left from an
       // Opus binding now pointing at a gpt-5 model) would otherwise mislead the picker.
-      const clamped = raw && supportedDepths(getThinkingCapability(fam, loadedModel)).includes(raw) ? raw : ''
+      const persisted = raw && supported.includes(raw) ? raw : ''
+      // Designer defaults to the model's TOP thinking tier (image work wants max reasoning) when the user
+      // hasn't set one; other roles fall back to medium (see conversation.tsx effectiveDepth).
+      const clamped = persisted || (expert.id === 'designer' && supported.length ? supported[supported.length - 1] : '')
       setEndpoints(eps)
       setEndpointId(ep?.id ?? '')
       setModel(loadedModel)
