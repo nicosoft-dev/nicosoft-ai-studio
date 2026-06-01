@@ -43,9 +43,9 @@ function OnboardWelcome(): ReactElement {
       <div className="onboard-h1">Welcome to NicoSoft AI Studio</div>
       <div className="onboard-sub">A desktop workspace where a small team of named AI experts works for you. Let&apos;s get you set up — starting with your name.</div>
       <div className="welcome-points">
-        <div className="wp-item"><span className="wp-dot" style={{ background: 'var(--exp-hex)' }} /> Eight named experts, each on the model best suited to its job</div>
-        <div className="wp-item"><span className="wp-dot" style={{ background: 'var(--accent)' }} /> Atlas routes your request — or convenes several experts to collaborate</div>
-        <div className="wp-item"><span className="wp-dot" style={{ background: 'var(--exp-lyra)' }} /> Bring your own keys; everything stays on your device</div>
+        <div className="wp-item"><span className="wp-dot" style={{ background: 'var(--exp-engineer)' }} /> Eight named experts, each on the model best suited to its job</div>
+        <div className="wp-item"><span className="wp-dot" style={{ background: 'var(--accent)' }} /> Coordinator routes your request — or convenes several experts to collaborate</div>
+        <div className="wp-item"><span className="wp-dot" style={{ background: 'var(--exp-designer)' }} /> Bring your own keys; everything stays on your device</div>
       </div>
     </>
   )

@@ -68,7 +68,7 @@ export interface ChatErrorDto {
   message: string
 }
 
-// === Agent (Hex coding agent) ===
+// === Agent (Engineer coding agent) ===
 // `agent:run` starts an agent stream and returns its streamId; events arrive on the channels below,
 // then `agent:done` or `agent:error`. `agent:stop` aborts. A tool that needs approval pauses on
 // `agent:permission` until the renderer answers via `agent:permission:respond`.
@@ -76,7 +76,7 @@ export interface AgentRunInput {
   endpointId: string
   model: string
   prompt: string
-  cwd: string // the project directory Hex operates in (its tools are confined here)
+  cwd: string // the project directory Engineer operates in (its tools are confined here)
   convId: string // the conversation this run belongs to; drives persistence + ~/.nsai/sessions/<convId>/
   contextWindow?: number // model context window, drives compaction threshold (default 200K)
   // Resolved thinking directive (Anthropic extended thinking); budgetTokens drives the thinking budget.
@@ -148,21 +148,21 @@ export interface ToolCallDto {
   result?: string
 }
 
-// === Atlas (router + multi-expert dispatch) ===
-// `atlas:run` starts a routed turn for the conversation. The user message (+ any image attachments)
-// is already persisted by the renderer (chat-path style), so atlas:run only needs the convId. Atlas
+// === Coordinator (router + multi-expert dispatch) ===
+// `coordinator:run` starts a routed turn for the conversation. The user message (+ any image attachments)
+// is already persisted by the renderer (chat-path style), so coordinator:run only needs the convId. Coordinator
 // decides single vs pipeline, runs the dispatched experts, persists each step as its own assistant
-// message, and emits the event stream below ending in `atlas:done` or `atlas:error`. `atlas:stop`
+// message, and emits the event stream below ending in `coordinator:done` or `coordinator:error`. `coordinator:stop`
 // aborts in flight.
-export interface AtlasRunInputDto {
+export interface CoordinatorRunInputDto {
   convId: string
   prompt: string
 }
 // Fired once per turn, after the route decision, before any text streams. `chain` lists the steps
 // the badge should render. Length 1 for single mode (no badge needed); for a pipeline = `[...experts,
-// 'atlas']` (experts in order plus the trailing Atlas synthesis). The renderer's DispatchBadge
-// already prefixes its own "Atlas · routing →" label, so the leading atlas is NOT in the chain.
-export interface AtlasDispatchEvent {
+// 'coordinator']` (experts in order plus the trailing Coordinator synthesis). The renderer's DispatchBadge
+// already prefixes its own "Coordinator · routing →" label, so the leading coordinator is NOT in the chain.
+export interface CoordinatorDispatchEvent {
   streamId: string
   chain: string[]
   reason: string
@@ -170,28 +170,28 @@ export interface AtlasDispatchEvent {
 // Fired before each step's text starts streaming. `dispatch` carries the full chain (same array for
 // every step of one pipeline turn) or null for single mode — that's what gets stored on each persisted
 // message and what the renderer uses to draw badges.
-export interface AtlasStepStart {
+export interface CoordinatorStepStart {
   streamId: string
   roleId: string
   dispatch: string[] | null
   model: string
 }
-export interface AtlasStepDelta {
+export interface CoordinatorStepDelta {
   streamId: string
   roleId: string
   text: string
 }
-export interface AtlasStepDone {
+export interface CoordinatorStepDone {
   streamId: string
   roleId: string
   text: string
   inputTokens: number
 }
-export interface AtlasDoneDto {
+export interface CoordinatorDoneDto {
   streamId: string
   inputTokens?: number // tokens of the LAST step in the turn — drives the composer readout
 }
-export interface AtlasErrorDto {
+export interface CoordinatorErrorDto {
   streamId: string
   code: string
   message: string
@@ -219,7 +219,7 @@ export interface RoleStateDto {
 
 // === Custom roles (user-defined experts) ===
 // A custom role lives in custom_roles + has its own role_bindings/role_states row. Built-in roles
-// (atlas, iris, hex, lyra, echo, sage, quant, mercury) are NOT in custom_roles. The renderer renders
+// (coordinator, generalist, engineer, designer, translator, editor, analyst, scheduler) are NOT in custom_roles. The renderer renders
 // both alongside each other; the `custom: true` flag tells it to expose Delete (built-ins only Disable).
 export interface CustomRoleDto {
   id: string
@@ -278,9 +278,9 @@ export interface MessageDto {
   model: string | null
   content: string
   attachments: MessageAttachmentDto[]
-  runId: string | null // agent run id (Hex); null for plain chat
+  runId: string | null // agent run id (Engineer); null for plain chat
   inputTokens: number // exact prompt context counted before this turn was sent (0 if unknown)
-  dispatch: string[] | null // atlas pipeline chain; null for single-expert / direct chat / agent turns
+  dispatch: string[] | null // coordinator pipeline chain; null for single-expert / direct chat / agent turns
   createdAt: string
 }
 export interface MessageAppendDto {
@@ -291,7 +291,7 @@ export interface MessageAppendDto {
   attachments?: MessageAttachmentDto[]
   runId?: string
   inputTokens?: number // exact prompt context for this turn (assistant messages)
-  dispatch?: string[] // set by atlas.service for pipeline steps; renderer reads it via MessageDto.dispatch
+  dispatch?: string[] // set by coordinator.service for pipeline steps; renderer reads it via MessageDto.dispatch
 }
 export interface ConversationTitleInput {
   convId: string

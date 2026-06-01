@@ -228,7 +228,7 @@ export function ExpertDetail({
       </div>
     )
   }
-  // Real conversations owned by this role (primary_role_id = expertId). For Atlas this surfaces every
+  // Real conversations owned by this role (primary_role_id = expertId). For Coordinator this surfaces every
   // routed conversation; for individual experts it's the direct-chat history. Most-recent-first; cap
   // to a sensible display count so the panel doesn't become a scroll trap.
   const recents = useMemo(
@@ -286,7 +286,7 @@ export function ExpertDetail({
           <EquippedSection expertId={expertId} />
 
           {/* recents — filtered by primary_role_id, so this lists DIRECT conversations with this
-              expert. Pipeline turns where another role (Atlas, etc.) routed work to this expert show
+              expert. Pipeline turns where another role (Coordinator, etc.) routed work to this expert show
               up under that primary role's detail page instead. */}
           <div className="detail-section">
             <div className="ds-head">

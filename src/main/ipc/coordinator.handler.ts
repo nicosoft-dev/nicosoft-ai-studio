@@ -1,27 +1,27 @@
-// Atlas orchestrator over IPC. `atlas:run` starts a routed turn (single or pipeline) and returns its
-// streamId; events arrive on `atlas:dispatch` (chain announced once after route) / `atlas:step:start`
-// (per step begin) / `atlas:delta` (per step text token) / `atlas:step:done` (per step finish), then
-// terminal `atlas:done` or `atlas:error`. `atlas:stop` aborts. This handler owns stream lifecycle
+// Coordinator orchestrator over IPC. `coordinator:run` starts a routed turn (single or pipeline) and returns its
+// streamId; events arrive on `coordinator:dispatch` (chain announced once after route) / `coordinator:step:start`
+// (per step begin) / `coordinator:delta` (per step text token) / `coordinator:step:done` (per step finish), then
+// terminal `coordinator:done` or `coordinator:error`. `coordinator:stop` aborts. This handler owns stream lifecycle
 // (id + AbortController + sender lifetime cleanup); the service does the orchestration.
 
 import { ipcMain, type WebContents } from 'electron'
 import { ulid } from 'ulid'
-import * as atlasService from '../services/atlas.service'
+import * as coordinatorService from '../services/coordinator.service'
 import { LlmError } from '../llm/types'
 import type {
-  AtlasRunInputDto,
-  AtlasDispatchEvent,
-  AtlasStepStart,
-  AtlasStepDelta,
-  AtlasStepDone,
-  AtlasDoneDto,
-  AtlasErrorDto
+  CoordinatorRunInputDto,
+  CoordinatorDispatchEvent,
+  CoordinatorStepStart,
+  CoordinatorStepDelta,
+  CoordinatorStepDone,
+  CoordinatorDoneDto,
+  CoordinatorErrorDto
 } from './contracts'
 
 const streams = new Map<string, { controller: AbortController; sender: WebContents }>()
 
-export function registerAtlasHandlers(): void {
-  ipcMain.handle('atlas:run', (e, input: AtlasRunInputDto): { streamId: string } => {
+export function registerCoordinatorHandlers(): void {
+  ipcMain.handle('coordinator:run', (e, input: CoordinatorRunInputDto): { streamId: string } => {
     const streamId = ulid()
     const controller = new AbortController()
     const sender = e.sender
@@ -38,38 +38,38 @@ export function registerAtlasHandlers(): void {
       if (!sender.isDestroyed()) sender.send(channel, data)
     }
 
-    void atlasService
+    void coordinatorService
       .run(
         input,
         {
           onDispatch: (chain, reason) => {
-            const ev: AtlasDispatchEvent = { streamId, chain, reason }
-            send('atlas:dispatch', ev)
+            const ev: CoordinatorDispatchEvent = { streamId, chain, reason }
+            send('coordinator:dispatch', ev)
           },
           onStepStart: (roleId, dispatch, model) => {
-            const ev: AtlasStepStart = { streamId, roleId, dispatch, model }
-            send('atlas:step:start', ev)
+            const ev: CoordinatorStepStart = { streamId, roleId, dispatch, model }
+            send('coordinator:step:start', ev)
           },
           onDelta: (roleId, text) => {
-            const ev: AtlasStepDelta = { streamId, roleId, text }
-            send('atlas:delta', ev)
+            const ev: CoordinatorStepDelta = { streamId, roleId, text }
+            send('coordinator:delta', ev)
           },
           onStepDone: (roleId, text, inputTokens) => {
-            const ev: AtlasStepDone = { streamId, roleId, text, inputTokens }
-            send('atlas:step:done', ev)
+            const ev: CoordinatorStepDone = { streamId, roleId, text, inputTokens }
+            send('coordinator:step:done', ev)
           }
         },
         controller.signal
       )
       .then((r) => {
-        const ev: AtlasDoneDto = { streamId, inputTokens: r.inputTokens }
-        send('atlas:done', ev)
+        const ev: CoordinatorDoneDto = { streamId, inputTokens: r.inputTokens }
+        send('coordinator:done', ev)
       })
       .catch((err: unknown) => {
         const code = err instanceof LlmError ? err.code : 'unknown'
         const message = err instanceof Error ? err.message : String(err)
-        const ev: AtlasErrorDto = { streamId, code, message }
-        send('atlas:error', ev)
+        const ev: CoordinatorErrorDto = { streamId, code, message }
+        send('coordinator:error', ev)
       })
       .finally(() => {
         if (!sender.isDestroyed()) {
@@ -83,7 +83,7 @@ export function registerAtlasHandlers(): void {
     return { streamId }
   })
 
-  ipcMain.handle('atlas:stop', (_e, streamId: string) => {
+  ipcMain.handle('coordinator:stop', (_e, streamId: string) => {
     streams.get(streamId)?.controller.abort()
     streams.delete(streamId)
   })

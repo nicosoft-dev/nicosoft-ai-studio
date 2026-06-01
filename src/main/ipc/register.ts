@@ -1,5 +1,5 @@
 import { registerAgentHandlers } from './agent.handler'
-import { registerAtlasHandlers } from './atlas.handler'
+import { registerCoordinatorHandlers } from './coordinator.handler'
 import { registerConversationHandlers } from './conversations.handler'
 import { registerEndpointHandlers } from './endpoints.handler'
 import { registerProjectHandlers } from './project.handler'
@@ -14,7 +14,7 @@ export function registerIpc(): void {
   registerSettingsHandlers()
   registerChatHandlers()
   registerAgentHandlers()
-  registerAtlasHandlers()
+  registerCoordinatorHandlers()
   registerProjectHandlers()
   registerRoleHandlers()
   registerConversationHandlers()

@@ -121,7 +121,7 @@ function ProjectDetail({ project, onBack, onOpenExpert }: { project: Project; on
 
           {/* Plan */}
           <div className="proj-section">
-            <div className="ps-head"><span className="ps-icon"><Icons.listChecks size={15} /></span> Plan <span className="ps-sub">— task breakdown · Atlas chairs</span></div>
+            <div className="ps-head"><span className="ps-icon"><Icons.listChecks size={15} /></span> Plan <span className="ps-sub">— task breakdown · Danny chairs</span></div>
             <div className="plan-list">
               {project.plan.map((t, i) => {
                 const e = EXPERT_BY_ID[t.expert];

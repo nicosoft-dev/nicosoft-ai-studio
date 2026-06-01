@@ -16,7 +16,7 @@ const WS_NOTES = [
   { title: "Q2 launch", body: "Waitlist API + hero illustration done; funnel model still queued." },
 ];
 
-/* small flat thumbnails standing in for Lyra's generated images */
+/* small flat thumbnails standing in for Designer's generated images */
 function ImageThumb({ idx }: { idx: number }): ReactElement {
   const looks = [
     { bg: "#0a0a0f", a: "oklch(0.78 0.19 330)", b: "oklch(0.82 0.16 90)", t: "GAME" },
@@ -62,7 +62,7 @@ export function WorkspaceDrawer({ onClose }: { onClose: () => void }): ReactElem
         </div>
 
         <div className="ws-section">
-          <div className="ws-section-head">Recent images <span className="ws-by">· Lyra</span></div>
+          <div className="ws-section-head">Recent images <span className="ws-by">· Georgia</span></div>
           <div className="ws-images">
             {[0, 1, 2, 3].map((i) => <ImageThumb key={i} idx={i} />)}
           </div>

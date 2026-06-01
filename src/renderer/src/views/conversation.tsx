@@ -28,13 +28,13 @@ function fmtTokens(n: number): string {
   return `${parseFloat((n / 1000).toFixed(1))}K`
 }
 
-// True when this assistant message represents Atlas's synthesis step — the final pipeline message
-// where Atlas merges the experts' outputs. Detected by being expertId='atlas' inside a dispatch chain.
+// True when this assistant message represents Coordinator's synthesis step — the final pipeline message
+// where Coordinator merges the experts' outputs. Detected by being expertId='coordinator' inside a dispatch chain.
 function isSynthesis(msg: ChatMessage): boolean {
-  return msg.role === 'assistant' && (msg.expertId ?? null) === 'atlas' && Array.isArray(msg.dispatch) && msg.dispatch.length > 0
+  return msg.role === 'assistant' && (msg.expertId ?? null) === 'coordinator' && Array.isArray(msg.dispatch) && msg.dispatch.length > 0
 }
 
-/* — One message in the list (user or assistant). For Atlas-routed conversations the contributing
+/* — One message in the list (user or assistant). For Coordinator-routed conversations the contributing
  *   expert can vary per message — resolve the expert from msg.expertId (with the prop as a fallback). — */
 function ChatSegment({
   msg,
@@ -48,17 +48,17 @@ function ChatSegment({
   onOpenImage: (items: ViewerImage[], index: number) => void
 }): ReactElement {
   const isUser = msg.role === 'user'
-  // Lookup the per-message expert if Atlas tagged it; fall back to the prop (the conversation's
+  // Lookup the per-message expert if Coordinator tagged it; fall back to the prop (the conversation's
   // primary role) so direct chats / agents render the same as before. expertById is the merged
   // built-in + custom-roles map.
   const msgExpert: Expert | undefined = !isUser && msg.expertId ? expertById[msg.expertId] : undefined
   const renderExpert = msgExpert ?? expert
   const synthesis = isSynthesis(msg)
   const segColor = isUser ? 'var(--border-2)' : synthesis ? 'var(--accent)' : renderExpert.color
-  // Foldable: a dispatched expert step inside a panel/debate (has a chain, isn't Atlas's intro/synthesis).
+  // Foldable: a dispatched expert step inside a panel/debate (has a chain, isn't Coordinator's intro/synthesis).
   // Parallel/council stack many of these, so once a step finishes streaming we collapse it to a one-line
-  // summary — the user watches it stream live, then it folds away, leaving Atlas's synthesis prominent.
-  const foldable = !isUser && !synthesis && !!msg.dispatch?.length && msg.expertId != null && msg.expertId !== 'atlas'
+  // summary — the user watches it stream live, then it folds away, leaving Coordinator's synthesis prominent.
+  const foldable = !isUser && !synthesis && !!msg.dispatch?.length && msg.expertId != null && msg.expertId !== 'coordinator'
   const [expanded, setExpanded] = useState(false)
   const bodyRef = useRef<HTMLDivElement>(null)
   // Folded expert steps render in a fixed-height scroll WINDOW from the start (not collapsed to a line):
@@ -151,7 +151,7 @@ function Composer({
       : messages.reduce((s, m) => s + m.text.length, 0) / 4 + value.length / 4
   const tokenAmber = b.contextLength > 0 && usedTokens / b.contextLength > 0.85
   const selectedEp = b.endpoints.find((e) => e.id === b.endpointId)
-  const agent = roleHasAgent(expert.id) // agent roles (Hex) additionally need an Anthropic endpoint + a project folder
+  const agent = roleHasAgent(expert.id) // agent roles (Engineer) additionally need an Anthropic endpoint + a project folder
   const needAnthropic = agent && !!selectedEp && selectedEp.protocol !== 'anthropic'
   const noEndpoint =
     b.loaded &&
@@ -278,7 +278,7 @@ function Composer({
   )
 }
 
-/* — The full conversation view for a non-Hex role — */
+/* — The full conversation view for a non-Engineer role — */
 export function ChatView({ expert, onOpenSettings }: { expert: Expert; onOpenSettings?: () => void }): ReactElement {
   const chat = useChat()
   const { byId: expertById } = useAllExperts()
@@ -307,7 +307,7 @@ export function ChatView({ expert, onOpenSettings }: { expert: Expert; onOpenSet
             messages.map((m, i) => {
               // Show the dispatch badge above the FIRST message of each pipeline turn — detected by a
               // non-empty dispatch chain that differs from the previous message's chain (or the
-              // previous message has none). Single-mode atlas turns have dispatch=null → no badge.
+              // previous message has none). Single-mode coordinator turns have dispatch=null → no badge.
               const prev = i > 0 ? messages[i - 1] : null
               const showBadge =
                 m.role === 'assistant' &&

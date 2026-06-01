@@ -35,14 +35,14 @@
   --error:   oklch(0.65 0.16 22);
 
   /* — Expert identity colors (8 muted, harmonious hues) — */
-  --exp-atlas:   var(--accent);
-  --exp-iris:    oklch(0.74 0.115 18);
-  --exp-hex:     oklch(0.71 0.115 256);
-  --exp-lyra:    oklch(0.71 0.135 322);
-  --exp-echo:    oklch(0.76 0.095 205);
-  --exp-sage:    oklch(0.745 0.105 158);
-  --exp-quant:   oklch(0.81 0.10 92);
-  --exp-mercury: oklch(0.755 0.115 50);
+  --exp-coordinator:   var(--accent);
+  --exp-generalist:    oklch(0.74 0.115 18);
+  --exp-engineer:     oklch(0.71 0.115 256);
+  --exp-designer:    oklch(0.71 0.135 322);
+  --exp-translator:    oklch(0.76 0.095 205);
+  --exp-editor:    oklch(0.745 0.105 158);
+  --exp-analyst:   oklch(0.81 0.10 92);
+  --exp-scheduler: oklch(0.755 0.115 50);
 
   /* — Type — */
   --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;

@@ -1,12 +1,12 @@
 // WebSearch — delegate to the server-side web_search tool via an ISOLATED secondary request, exactly
 // like ccb's apiAdapter. The agent's main conversation never carries a server tool; this tool's
-// call() fires a fresh, single-purpose request whose tools list is JUST web_search (none of Hex's
+// call() fires a fresh, single-purpose request whose tools list is JUST web_search (none of Engineer's
 // local tools), so the server-side search stays fully isolated from the main loop — no multi-computer
 // confusion. We extract the web_search_tool_result hits and hand them back as a normal tool_result.
 //
 // We pin web_search_20250305 (ccb's version): the standalone server search that returns
 // web_search_tool_result directly. The newer web_search_20260209 routes through the code_execution
-// sandbox instead (verified on the OAuth channel), which Hex deliberately avoids. Haiku doesn't
+// sandbox instead (verified on the OAuth channel), which Engineer deliberately avoids. Haiku doesn't
 // support the server search, so this uses ctx.llm.searchModel (Sonnet by default), not smallModel.
 
 import { z } from 'zod'

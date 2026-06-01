@@ -189,8 +189,8 @@ export function EndpointDialog({
 
 /* — Custom role editor — */
 const ROLE_SWATCHES = [
-  "var(--exp-iris)", "var(--exp-hex)", "var(--exp-lyra)", "var(--exp-echo)",
-  "var(--exp-sage)", "var(--exp-quant)", "var(--exp-mercury)", "var(--accent)",
+  "var(--exp-generalist)", "var(--exp-engineer)", "var(--exp-designer)", "var(--exp-translator)",
+  "var(--exp-editor)", "var(--exp-analyst)", "var(--exp-scheduler)", "var(--accent)",
   "var(--text-3)",
 ]
 const ROLE_TOOLS = ["Web search", "Code execution", "Image generation", "File reading"]
@@ -208,7 +208,7 @@ export function RoleEditorDialog({
 }): ReactElement {
   const isEdit = !!initialRole
   const [name, setName] = useState(initialRole?.name ?? '')
-  const [color, setColor] = useState(initialRole?.color || 'var(--exp-iris)')
+  const [color, setColor] = useState(initialRole?.color || 'var(--exp-generalist)')
   const [systemPrompt, setSystemPrompt] = useState(initialRole?.systemPrompt ?? '')
   const [greeting, setGreeting] = useState(initialRole?.greeting ?? '')
   const [tools, setTools] = useState<Record<string, boolean>>(() => {
@@ -431,7 +431,7 @@ export function CommandPalette({
   const activeExperts = EXPERTS.filter((e) => !roles.isDeleted(e.id) && !roles.isDisabled(e.id))
   const rows: CmdkRow[] = []
   rows.push({ group: "Recent conversations" })
-  recents.forEach((c) => rows.push({ type: "conv", id: c.id, label: c.title ?? 'Untitled', expert: c.primaryRoleId ?? 'iris' }))
+  recents.forEach((c) => rows.push({ type: "conv", id: c.id, label: c.title ?? 'Untitled', expert: c.primaryRoleId ?? 'generalist' }))
   rows.push({ group: "Roles" })
   activeExperts.forEach((e) => rows.push({ type: "expert", id: e.id, label: e.name, hint: e.specialty, avatar: e }))
   rows.push({ group: "Settings" })

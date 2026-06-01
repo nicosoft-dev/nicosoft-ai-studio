@@ -1,4 +1,4 @@
-// Tool contract for the Hex coding agent — the runtime-only subset of Claude Code's Tool interface
+// Tool contract for the Engineer coding agent — the runtime-only subset of Claude Code's Tool interface
 // (none of the ~30 UI render methods). A tool author writes a ToolDef; buildTool fills fail-closed
 // defaults. See docs/nicosoft-studio/12-hex-coding-agent.md §2.2.
 

@@ -5,7 +5,7 @@ import { useCustomRoles } from './custom-roles'
 
 // Role enable / disable / delete store. Backend-backed via window.api.roles — every mutation persists
 // to role_states (enable/disable) or cascades the delete (memory + bindings + state + custom row).
-// Atlas (the coordinator) is locked: toggle/disable are no-ops on 'atlas' so the router can never be
+// Coordinator (the coordinator) is locked: toggle/disable are no-ops on 'coordinator' so the router can never be
 // turned off from the UI.
 //
 // `load()` hydrates `disabled` from role_states on first mount. Built-in roles default to enabled
@@ -24,7 +24,7 @@ interface RolesState {
   remove: (id: string) => void
 }
 
-const ATLAS_ID = 'atlas'
+const COORDINATOR_ID = 'coordinator'
 
 export const useRoles = create<RolesState>((set, get) => ({
   disabled: [],
@@ -33,9 +33,9 @@ export const useRoles = create<RolesState>((set, get) => ({
 
   load: async () => {
     const states = await window.api.roles.listStates()
-    // Defensive: even if a state row for atlas somehow says disabled, treat atlas as enabled — the
+    // Defensive: even if a state row for coordinator somehow says disabled, treat coordinator as enabled — the
     // router can't function without it, and the UI never exposes a way to disable it anyway.
-    const disabled = states.filter((s) => !s.enabled && s.roleId !== ATLAS_ID).map((s) => s.roleId)
+    const disabled = states.filter((s) => !s.enabled && s.roleId !== COORDINATOR_ID).map((s) => s.roleId)
     set({ disabled, loaded: true })
   },
 
@@ -43,7 +43,7 @@ export const useRoles = create<RolesState>((set, get) => ({
   isDeleted: (id) => get().deleted.includes(id),
 
   toggle: (id) => {
-    if (id === ATLAS_ID) return
+    if (id === COORDINATOR_ID) return
     const currentlyDisabled = get().isDisabled(id)
     void window.api.roles.setState(id, { enabled: currentlyDisabled })
     set((s) => ({
@@ -57,7 +57,7 @@ export const useRoles = create<RolesState>((set, get) => ({
   },
 
   disable: (id) => {
-    if (id === ATLAS_ID) return
+    if (id === COORDINATOR_ID) return
     void window.api.roles.setState(id, { enabled: false })
     set((s) => (s.disabled.includes(id) ? s : { disabled: [...s.disabled, id] }))
   },

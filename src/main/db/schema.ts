@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS custom_roles (
 );
 
 CREATE TABLE IF NOT EXISTS role_states (
-  role_id              TEXT PRIMARY KEY,          -- Atlas row cannot be disabled (enforced in service)
+  role_id              TEXT PRIMARY KEY,          -- Coordinator row cannot be disabled (enforced in service)
   enabled              INTEGER NOT NULL DEFAULT 1,
   self_learning_enabled INTEGER NOT NULL DEFAULT 1
 );
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS messages (
   in_tokens       INTEGER NOT NULL DEFAULT 0,
   out_tokens      INTEGER NOT NULL DEFAULT 0,
   dispatch        TEXT,                           -- JSON string[] | null
-  run_id          TEXT,                           -- agent run id (Hex); links to transcript. null for plain chat
+  run_id          TEXT,                           -- agent run id (Engineer); links to transcript. null for plain chat
   created_at      TEXT NOT NULL,
   FOREIGN KEY (conversation_id) REFERENCES conversations (id) ON DELETE CASCADE
 );

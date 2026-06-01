@@ -34,7 +34,7 @@ export interface CompressInput {
   roleId: string
   endpointId: string
   model: string
-  contextWindow?: number // explicit window (Hex passes its run window); falls back to the model catalog
+  contextWindow?: number // explicit window (Engineer passes its run window); falls back to the model catalog
   currentTokens?: number // exact prompt tokens (count_tokens) for this turn; preferred over the estimate
 }
 

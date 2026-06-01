@@ -215,7 +215,7 @@ export function StatsPage(): ReactElement {
             </div>
             <div className="an-divider" />
             <div className="an-mini-label">Learning events · last 4 weeks</div>
-            <LineTrend data={A.memory.learning.byWeek} color="var(--exp-sage)" height={52}
+            <LineTrend data={A.memory.learning.byWeek} color="var(--exp-editor)" height={52}
               labels={["W1", "W2", "W3", "W4"]} />
           </AnCard>
         </div>
@@ -226,7 +226,7 @@ export function StatsPage(): ReactElement {
         <div className="an-section-head">Activity</div>
         <div className="an-grid">
           <AnCard title="Activity trend" sub="last 14 days" wide>
-            <LineTrend data={A.activity.byDay} color="var(--exp-hex)" height={68} />
+            <LineTrend data={A.activity.byDay} color="var(--exp-engineer)" height={68} />
           </AnCard>
 
           <AnCard title="Most active">

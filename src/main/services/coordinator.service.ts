@@ -1,14 +1,14 @@
-// Atlas orchestrator — route + dispatch + synthesize. Atlas is the LLM router/coordinator (not a
-// keyword rule). Every Atlas turn:
-//   ① @mention fast path (0 LLM) OR Atlas LLM router → JSON decision (single | pipeline)
+// Coordinator orchestrator — route + dispatch + synthesize. Coordinator is the LLM router/coordinator (not a
+// keyword rule). Every Coordinator turn:
+//   ① @mention fast path (0 LLM) OR Coordinator LLM router → JSON decision (single | pipeline)
 //   ② DISPATCH — single: stream that expert's reply / pipeline: run each in sequence, feeding the
 //     prior step's output forward
-//   ③ SYNTHESIZE — only after a pipeline: Atlas LLM in prose mode merges the outputs into one reply
+//   ③ SYNTHESIZE — only after a pipeline: Coordinator LLM in prose mode merges the outputs into one reply
 //
 // Cross-protocol JSON forcing for the router: Anthropic uses assistant-prefill "{"; the user message
 // always reiterates the JSON contract so it survives OAuth gateways that overwrite the system prompt
 // (Claude Code identity injection on nicosoft/* slugs — Batch 2 lesson). `parseRouteDecision` is
-// lenient (JSON.parse → first {...} substring → role-name scan → fallback iris) — Atlas never gets
+// lenient (JSON.parse → first {...} substring → role-name scan → fallback generalist) — Coordinator never gets
 // stuck.
 //
 // Each step's reply is persisted as its own assistant message in the conversation, tagged with the
@@ -29,12 +29,12 @@ import { countContext } from './token-count.service'
 import { pickSmallModel } from './model-select'
 import { LlmError, type ChatAttachment, type ChatMessage } from '../llm/types'
 import {
-  ATLAS_COUNCIL_SYNTHESIS_PROMPT,
-  ATLAS_DIRECT_PROMPT,
-  ATLAS_FACILITATOR_PROMPT,
-  ATLAS_PARALLEL_SYNTHESIS_PROMPT,
-  ATLAS_ROUTER_PROMPT,
-  ATLAS_SYNTHESIS_PROMPT,
+  COORDINATOR_COUNCIL_SYNTHESIS_PROMPT,
+  COORDINATOR_DIRECT_PROMPT,
+  COORDINATOR_FACILITATOR_PROMPT,
+  COORDINATOR_PARALLEL_SYNTHESIS_PROMPT,
+  COORDINATOR_ROUTER_PROMPT,
+  COORDINATOR_SYNTHESIS_PROMPT,
   DISPATCHABLE_ROLE_IDS,
   buildRolePrompt,
   displayName,
@@ -46,17 +46,17 @@ export interface RouteDecision {
   role?: string
   roles?: string[]
   reason: string
-  // Atlas's coordinating voice, shown as an Atlas message before the expert(s) answer. Only present on
+  // Coordinator's coordinating voice, shown as an Coordinator message before the expert(s) answer. Only present on
   // LLM-routed turns — @mention fast-path and config/error fallbacks have none (no LLM call to make it).
   intro?: string
 }
 
-export interface AtlasRunInput {
+export interface CoordinatorRunInput {
   convId: string
   prompt: string
 }
 
-export interface AtlasCallbacks {
+export interface CoordinatorCallbacks {
   onDispatch: (chain: string[], reason: string) => void
   onStepStart: (roleId: string, dispatch: string[] | null, model: string) => void
   onDelta: (roleId: string, text: string) => void
@@ -65,22 +65,22 @@ export interface AtlasCallbacks {
 
 const ROUTER_HISTORY_LIMIT = 4 // last N messages handed to the router for context
 
-// Top-level entrypoint. Always called from atlas.handler; the user turn is already persisted by the
+// Top-level entrypoint. Always called from coordinator.handler; the user turn is already persisted by the
 // renderer (chat-path style — see chat store `send`). Throws on configuration errors so the handler
-// turns them into a single `atlas:error` event.
-export async function run(input: AtlasRunInput, cb: AtlasCallbacks, signal: AbortSignal): Promise<{ inputTokens: number }> {
+// turns them into a single `coordinator:error` event.
+export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, signal: AbortSignal): Promise<{ inputTokens: number }> {
   const history = convRepo.listByConversation(input.convId)
   const decision = await route(input.prompt, history, signal)
   if (signal.aborted) throw new LlmError('network', 'aborted before dispatch')
 
   if (decision.mode === 'direct') {
-    // B0: Atlas takes the turn himself — simple/general enough that a specialist would be overkill. His
+    // B0: Coordinator takes the turn himself — simple/general enough that a specialist would be overkill. His
     // own binding + the direct persona, full history for multi-turn continuity. No intro: the reply IS
-    // Atlas speaking, not a hand-off announcement.
-    cb.onDispatch(['atlas'], decision.reason)
+    // Coordinator speaking, not a hand-off announcement.
+    cb.onDispatch(['coordinator'], decision.reason)
     const out = await runRoleStep({
       convId: input.convId,
-      roleId: 'atlas',
+      roleId: 'coordinator',
       prompt: input.prompt,
       dispatch: null,
       includeHistory: true,
@@ -88,7 +88,7 @@ export async function run(input: AtlasRunInput, cb: AtlasCallbacks, signal: Abor
       cb,
       signal
     })
-    fireSideEffects(input.convId, 'atlas', out.endpointId, out.model, out.inputTokens)
+    fireSideEffects(input.convId, 'coordinator', out.endpointId, out.model, out.inputTokens)
     return { inputTokens: out.inputTokens }
   }
 
@@ -97,7 +97,7 @@ export async function run(input: AtlasRunInput, cb: AtlasCallbacks, signal: Abor
     // tells the user who answered). The first/only step gets the full conversation history (and any
     // user-attached images) so it can answer multi-turn requests with continuity.
     cb.onDispatch([decision.role!], decision.reason)
-    if (decision.intro) emitAtlasIntro(input.convId, decision.intro, cb)
+    if (decision.intro) emitCoordinatorIntro(input.convId, decision.intro, cb)
     const out = await runRoleStep({
       convId: input.convId,
       roleId: decision.role!,
@@ -113,12 +113,12 @@ export async function run(input: AtlasRunInput, cb: AtlasCallbacks, signal: Abor
 
   if (decision.mode === 'parallel') {
     // B1: N experts answer the SAME question INDEPENDENTLY + concurrently (diversity is the point — they
-    // don't see each other), then Atlas synthesizes a multi-perspective comparison. The renderer routes
+    // don't see each other), then Coordinator synthesizes a multi-perspective comparison. The renderer routes
     // each expert's deltas by roleId so they stream side-by-side. One failure drops out (filter) rather
     // than sinking the whole panel.
-    const fullChain = [...decision.roles!, 'atlas']
+    const fullChain = [...decision.roles!, 'coordinator']
     cb.onDispatch(fullChain, decision.reason)
-    if (decision.intro) emitAtlasIntro(input.convId, decision.intro, cb)
+    if (decision.intro) emitCoordinatorIntro(input.convId, decision.intro, cb)
     const settled = await Promise.all(
       decision.roles!.map((roleId) =>
         runRoleStep({ convId: input.convId, roleId, prompt: buildPanelPrompt(input.prompt, roleId), dispatch: fullChain, includeHistory: false, cb, signal })
@@ -132,7 +132,7 @@ export async function run(input: AtlasRunInput, cb: AtlasCallbacks, signal: Abor
     const synthInput = buildParallelSynthesisInput(input.prompt, outputs.map((o) => ({ role: o.role, text: o.text })))
     const synth = await runRoleStep({
       convId: input.convId,
-      roleId: 'atlas',
+      roleId: 'coordinator',
       prompt: synthInput,
       dispatch: fullChain,
       includeHistory: false,
@@ -146,15 +146,15 @@ export async function run(input: AtlasRunInput, cb: AtlasCallbacks, signal: Abor
   }
 
   if (decision.mode === 'council') {
-    // B3: Atlas FACILITATES a live debate. Round 1 = proposals; later rounds = critique. After each
-    // round Atlas decides the next move — converge, continue with the current panel, or pull in ONE
+    // B3: Coordinator FACILITATES a live debate. Round 1 = proposals; later rounds = critique. After each
+    // round Coordinator decides the next move — converge, continue with the current panel, or pull in ONE
     // missing expert (dynamic panel). MAX_ROUNDS is a runaway backstop, NOT the strategy. A freshly
     // added expert proposes fresh on its first turn (tracked via `seen`), then critiques.
     const MAX_ROUNDS = 6
     let roles = [...decision.roles!]
-    let fullChain = [...roles, 'atlas']
+    let fullChain = [...roles, 'coordinator']
     cb.onDispatch(fullChain, decision.reason)
-    if (decision.intro) emitAtlasIntro(input.convId, decision.intro, cb)
+    if (decision.intro) emitCoordinatorIntro(input.convId, decision.intro, cb)
 
     const seen = new Set<string>()
     let positions: { role: string; text: string }[] = []
@@ -177,8 +177,8 @@ export async function run(input: AtlasRunInput, cb: AtlasCallbacks, signal: Abor
       if (move.action === 'converge') break
       if (move.action === 'add') {
         roles = [...roles, move.role]
-        fullChain = [...roles, 'atlas']
-        emitAtlasIntro(input.convId, `Bringing in ${displayName(move.role)} for a perspective the others can't cover.`, cb)
+        fullChain = [...roles, 'coordinator']
+        emitCoordinatorIntro(input.convId, `Bringing in ${displayName(move.role)} for a perspective the others can't cover.`, cb)
       }
       // 'continue' (or 'add' after pulling the new expert) → next round
     }
@@ -186,7 +186,7 @@ export async function run(input: AtlasRunInput, cb: AtlasCallbacks, signal: Abor
     const synthInput = buildCouncilSynthesisInput(input.prompt, positions)
     const synth = await runRoleStep({
       convId: input.convId,
-      roleId: 'atlas',
+      roleId: 'coordinator',
       prompt: synthInput,
       dispatch: fullChain,
       includeHistory: false,
@@ -194,16 +194,16 @@ export async function run(input: AtlasRunInput, cb: AtlasCallbacks, signal: Abor
       cb,
       signal
     })
-    fireSideEffects(input.convId, 'atlas', synth.endpointId, synth.model, synth.inputTokens)
+    fireSideEffects(input.convId, 'coordinator', synth.endpointId, synth.model, synth.inputTokens)
     return { inputTokens: synth.inputTokens }
   }
 
-  // Pipeline: chain stored on each step = [...experts, 'atlas']. The renderer's DispatchBadge prefixes
-  // its own "Atlas · routing →" label, so we don't include the leading atlas; the trailing 'atlas' is
-  // the synthesis step. Example: a 2-expert pipeline echo→hex → chain = ['echo','hex','atlas'].
-  const fullChain = [...decision.roles!, 'atlas']
+  // Pipeline: chain stored on each step = [...experts, 'coordinator']. The renderer's DispatchBadge prefixes
+  // its own "Coordinator · routing →" label, so we don't include the leading coordinator; the trailing 'coordinator' is
+  // the synthesis step. Example: a 2-expert pipeline translator→engineer → chain = ['translator','engineer','coordinator'].
+  const fullChain = [...decision.roles!, 'coordinator']
   cb.onDispatch(fullChain, decision.reason)
-  if (decision.intro) emitAtlasIntro(input.convId, decision.intro, cb)
+  if (decision.intro) emitCoordinatorIntro(input.convId, decision.intro, cb)
   let lastTokens = 0
   let lastRoleId = decision.roles![decision.roles!.length - 1]
   let lastEndpointId = ''
@@ -237,13 +237,13 @@ export async function run(input: AtlasRunInput, cb: AtlasCallbacks, signal: Abor
     lastModel = out.model
     if (signal.aborted) throw new LlmError('network', 'aborted mid-pipeline')
   }
-  // Synthesis: Atlas merges the chain. Uses Atlas's own binding (router model). Memory recall is
+  // Synthesis: Coordinator merges the chain. Uses Coordinator's own binding (router model). Memory recall is
   // intentionally skipped — the synthesis prompt's job is to merge the experts' outputs faithfully,
-  // not to inject Atlas's own learned facts on top of them.
+  // not to inject Coordinator's own learned facts on top of them.
   const synthInput = buildSynthesisInput(input.prompt, stepOutputs)
   const synth = await runRoleStep({
     convId: input.convId,
-    roleId: 'atlas',
+    roleId: 'coordinator',
     prompt: synthInput,
     dispatch: fullChain,
     includeHistory: false,
@@ -260,24 +260,24 @@ export async function run(input: AtlasRunInput, cb: AtlasCallbacks, signal: Abor
 export async function route(userInput: string, history: convRepo.MessageRow[], signal?: AbortSignal): Promise<RouteDecision> {
   const disabled = disabledRoleIds()
   const enabled = DISPATCHABLE_ROLE_IDS.filter((r) => !disabled.has(r))
-  if (enabled.length === 0) return { mode: 'single', role: 'iris', reason: 'no roles enabled' }
+  if (enabled.length === 0) return { mode: 'single', role: 'generalist', reason: 'no roles enabled' }
 
   // 0. @mention 0-LLM fast path — user explicitly named a built-in role. Must be currently enabled;
   //    a disabled @mention falls through to the LLM router. v0.1 LIMITATION: custom roles cannot be
-  //    routed by Atlas — neither via @mention (the router only knows the 7 built-in ids, see
-  //    ATLAS_ROUTER_PROMPT) nor via the LLM router. Users reach custom roles by clicking them in the
-  //    sidebar (direct chat path). Extending Atlas to dispatch into custom roles requires plumbing
+  //    routed by Coordinator — neither via @mention (the router only knows the 7 built-in ids, see
+  //    COORDINATOR_ROUTER_PROMPT) nor via the LLM router. Users reach custom roles by clicking them in the
+  //    sidebar (direct chat path). Extending Coordinator to dispatch into custom roles requires plumbing
   //    custom-role names into the router prompt + buildRolePrompt fallback for arbitrary ids.
   const mention = /^@(\p{L}+)/u.exec(userInput)
   if (mention) {
-    const id = roleIdFromName(mention[1]) // accepts the display name (@Flynn) or the raw id (@hex)
+    const id = roleIdFromName(mention[1]) // accepts the display name (@Flynn) or the raw id (@engineer)
     if (enabled.includes(id as (typeof enabled)[number])) {
       return { mode: 'single', role: id, reason: 'explicit @mention' }
     }
   }
 
-  const binding = roleRepo.getBinding('atlas')
-  if (!binding?.endpointId || !binding.model) return { mode: 'single', role: enabled[0], reason: 'atlas not configured' }
+  const binding = roleRepo.getBinding('coordinator')
+  if (!binding?.endpointId || !binding.model) return { mode: 'single', role: enabled[0], reason: 'coordinator not configured' }
   const ep = endpointRepo.getById(binding.endpointId)
   if (!ep || !ep.enabled) return { mode: 'single', role: enabled[0], reason: 'endpoint missing' }
   const apiKey = keychain.getApiKey(binding.endpointId)
@@ -291,10 +291,10 @@ export async function route(userInput: string, history: convRepo.MessageRow[], s
     )
     return parseRouteDecision(result.text, enabled)
   } catch (e) {
-    // Router LLM failed — fall back to the first enabled role so Atlas never dead-ends, but DON'T
+    // Router LLM failed — fall back to the first enabled role so Coordinator never dead-ends, but DON'T
     // swallow silently: a persistent failure here makes every turn degrade to one role, which looks
     // like a routing-quality problem while actually being a broken router. Surface it.
-    console.warn('[atlas] router LLM call failed, falling back to', enabled[0], '—', e instanceof Error ? e.message : e)
+    console.warn('[coordinator] router LLM call failed, falling back to', enabled[0], '—', e instanceof Error ? e.message : e)
     return { mode: 'single', role: enabled[0], reason: 'router error' }
   }
 }
@@ -305,7 +305,7 @@ function buildRouterMessages(
   enabled: readonly string[]
 ): ChatMessage[] {
   const sysParts = [
-    ATLAS_ROUTER_PROMPT,
+    COORDINATOR_ROUTER_PROMPT,
     '',
     `Currently available experts: ${enabled.map(displayName).join(', ')}. Route ONLY to these — others are disabled.`
   ]
@@ -371,28 +371,28 @@ export function parseRouteDecision(raw: string, enabled: readonly string[]): Rou
       /* try next candidate */
     }
   }
-  // Final lenient parse: scan first role mention; default to iris (or first enabled) so Atlas never
+  // Final lenient parse: scan first role mention; default to generalist (or first enabled) so Coordinator never
   // dead-ends.
   const lower = trimmed.toLowerCase()
   const hit = enabled.find((r) => lower.includes(r) || lower.includes(displayName(r).toLowerCase()))
-  return { mode: 'single', role: hit ?? enabled[0] ?? 'iris', reason: 'lenient parse' }
+  return { mode: 'single', role: hit ?? enabled[0] ?? 'generalist', reason: 'lenient parse' }
 }
 
 // ------- Dispatch (per-role step) -------
 
-// Atlas's coordinating voice. The router already produced `intro` alongside the route decision (no
-// extra LLM call); we surface it as Atlas's own step — onStepStart/onDelta/onStepDone mirror a real
-// dispatched step so the renderer draws an Atlas bubble — then persist it. Turns single-dispatch from a
-// silent passthrough into a visible "Atlas acknowledges + hands off" beat before the expert answers.
-// Carries NO dispatch chain: the intro is Atlas's opening voice, not part of the dispatch flow, and a
+// Coordinator's coordinating voice. The router already produced `intro` alongside the route decision (no
+// extra LLM call); we surface it as Coordinator's own step — onStepStart/onDelta/onStepDone mirror a real
+// dispatched step so the renderer draws an Coordinator bubble — then persist it. Turns single-dispatch from a
+// silent passthrough into a visible "Coordinator acknowledges + hands off" beat before the expert answers.
+// Carries NO dispatch chain: the intro is Coordinator's opening voice, not part of the dispatch flow, and a
 // chain would make the renderer's isSynthesis() mis-tag it as the synthesis step (only the trailing
-// Atlas merge is synthesis). The dispatch badge attaches from the first expert step onward.
-function emitAtlasIntro(convId: string, intro: string, cb: AtlasCallbacks): void {
-  const atlasModel = roleRepo.getBinding('atlas')?.model ?? ''
-  cb.onStepStart('atlas', null, atlasModel)
-  cb.onDelta('atlas', intro)
-  convService.append(convId, { author: 'expert', expertId: 'atlas', model: atlasModel, content: intro })
-  cb.onStepDone('atlas', intro, 0)
+// Coordinator merge is synthesis). The dispatch badge attaches from the first expert step onward.
+function emitCoordinatorIntro(convId: string, intro: string, cb: CoordinatorCallbacks): void {
+  const coordinatorModel = roleRepo.getBinding('coordinator')?.model ?? ''
+  cb.onStepStart('coordinator', null, coordinatorModel)
+  cb.onDelta('coordinator', intro)
+  convService.append(convId, { author: 'expert', expertId: 'coordinator', model: coordinatorModel, content: intro })
+  cb.onStepDone('coordinator', intro, 0)
 }
 
 interface RunStepOptions {
@@ -400,23 +400,23 @@ interface RunStepOptions {
   roleId: string
   prompt: string
   dispatch: string[] | null
-  cb: AtlasCallbacks
+  cb: CoordinatorCallbacks
   signal: AbortSignal
   // includeHistory=true → seed messages with prior conversation turns (after the latest summary's
   // covered_up_to boundary). Used for single-mode and the FIRST step of a pipeline so the dispatched
   // role can answer multi-turn requests with continuity. False for pipeline step 2+ and synthesis —
   // those steps' "user input" is a constructed prompt, not a free-form user turn.
   includeHistory?: boolean
-  // isSynthesis=true → skip memory recall (the prompt itself is a synthesis directive — Atlas's own
-  // memories would only blur the merge) and use the Atlas synthesis system prompt.
+  // isSynthesis=true → skip memory recall (the prompt itself is a synthesis directive — Coordinator's own
+  // memories would only blur the merge) and use the Coordinator synthesis system prompt.
   isSynthesis?: boolean
-  // isDirect=true → Atlas answers the turn himself (B0): use ATLAS_DIRECT_PROMPT instead of a role
-  // section. Memory recall still runs (Atlas's own memories help), unlike synthesis.
+  // isDirect=true → Coordinator answers the turn himself (B0): use COORDINATOR_DIRECT_PROMPT instead of a role
+  // section. Memory recall still runs (Coordinator's own memories help), unlike synthesis.
   isDirect?: boolean
-  // isParallelSynthesis=true → Atlas merges a parallel panel (B1): use ATLAS_PARALLEL_SYNTHESIS_PROMPT,
+  // isParallelSynthesis=true → Coordinator merges a parallel panel (B1): use COORDINATOR_PARALLEL_SYNTHESIS_PROMPT,
   // skip memory recall like normal synthesis.
   isParallelSynthesis?: boolean
-  // isCouncilSynthesis=true → Atlas closes a multi-round debate (B2): use ATLAS_COUNCIL_SYNTHESIS_PROMPT,
+  // isCouncilSynthesis=true → Coordinator closes a multi-round debate (B2): use COORDINATOR_COUNCIL_SYNTHESIS_PROMPT,
   // skip memory recall.
   isCouncilSynthesis?: boolean
 }
@@ -434,13 +434,13 @@ async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputT
   if (!apiKey) throw new LlmError('bad_key', `no API key for role "${roleId}"`)
 
   const systemPrompt = isDirect
-    ? ATLAS_DIRECT_PROMPT
+    ? COORDINATOR_DIRECT_PROMPT
     : isParallelSynthesis
-      ? ATLAS_PARALLEL_SYNTHESIS_PROMPT
+      ? COORDINATOR_PARALLEL_SYNTHESIS_PROMPT
       : isCouncilSynthesis
-        ? ATLAS_COUNCIL_SYNTHESIS_PROMPT
+        ? COORDINATOR_COUNCIL_SYNTHESIS_PROMPT
         : isSynthesis
-          ? ATLAS_SYNTHESIS_PROMPT
+          ? COORDINATOR_SYNTHESIS_PROMPT
           : buildRolePrompt(roleId)
   if (!systemPrompt) throw new LlmError('bad_request', `unknown role "${roleId}"`)
 
@@ -456,7 +456,7 @@ async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputT
   const system = parts.join('\n\n')
 
   // Build the conversation messages. With history: replay turns after the latest summary's boundary,
-  // verbatim — the trailing user turn IS the current request (renderer persisted it before atlas:run),
+  // verbatim — the trailing user turn IS the current request (renderer persisted it before coordinator:run),
   // so we don't append `prompt` again. Without history: a single user turn carrying `prompt`.
   const messages: ChatMessage[] = [{ role: 'system', content: system }]
   if (includeHistory) {
@@ -469,7 +469,7 @@ async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputT
       messages.push({ role, content: m.content, ...(atts.length ? { attachments: atts } : {}) })
     }
     // Defensive: if for any reason the history doesn't end with the current user turn, append it. This
-    // covers (rare) atlas runs invoked without renderer-side persistence — keeps the model unblocked.
+    // covers (rare) coordinator runs invoked without renderer-side persistence — keeps the model unblocked.
     const last = messages[messages.length - 1]
     if (!last || last.role !== 'user') messages.push({ role: 'user', content: prompt })
   } else {
@@ -521,7 +521,7 @@ async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputT
 }
 
 // Convert a persisted message's attachments column to the ChatMessage attachment shape adapters
-// understand. Mirrors chat.service's helper — duplicated rather than imported to keep atlas.service
+// understand. Mirrors chat.service's helper — duplicated rather than imported to keep coordinator.service
 // self-contained at the same dep level.
 function messageAttachments(raw: unknown): ChatAttachment[] {
   if (!Array.isArray(raw)) return []
@@ -552,10 +552,10 @@ function buildSynthesisInput(originalQuery: string, outputs: { role: string; tex
 }
 
 // Each parallel-panel expert gets the question + a nudge that they're one independent voice. Without it,
-// role personas like Hex's "dispatch mode" wording make them try to route or defer instead of answering
-// (observed in e2e: Hex replied "Routing this…" rather than giving its take).
+// role personas like Engineer's "dispatch mode" wording make them try to route or defer instead of answering
+// (observed in e2e: Engineer replied "Routing this…" rather than giving its take).
 function buildPanelPrompt(question: string, roleId: string): string {
-  return `${question}\n\n---\nYou are one of several experts answering this independently. Give YOUR own substantive take from your specialty as ${displayName(roleId)} — don't route it, don't defer to other experts, don't ask who should handle it. Atlas compares everyone's answers afterward.`
+  return `${question}\n\n---\nYou are one of several experts answering this independently. Give YOUR own substantive take from your specialty as ${displayName(roleId)} — don't route it, don't defer to other experts, don't ask who should handle it. Coordinator compares everyone's answers afterward.`
 }
 
 function buildParallelSynthesisInput(originalQuery: string, outputs: { role: string; text: string }[]): string {
@@ -594,13 +594,13 @@ function buildCouncilSynthesisInput(question: string, positions: { role: string;
   return sections.join('\n')
 }
 
-// B3: after each council round Atlas facilitates — returns the next move (converge / continue / add a
-// missing expert). Atlas's own binding, no prefill (Sonnet 4.6). availableToAdd = enabled experts not on
+// B3: after each council round Coordinator facilitates — returns the next move (converge / continue / add a
+// missing expert). Coordinator's own binding, no prefill (Sonnet 4.6). availableToAdd = enabled experts not on
 // the panel, capped by MAX_PANEL. Any failure → converge (stop safely; MAX_ROUNDS also caps).
 type FacilitateMove = { action: 'converge' } | { action: 'continue' } | { action: 'add'; role: string }
 async function facilitate(question: string, positions: { role: string; text: string }[], panel: string[], signal: AbortSignal): Promise<FacilitateMove> {
   const MAX_PANEL = 4
-  const binding = roleRepo.getBinding('atlas')
+  const binding = roleRepo.getBinding('coordinator')
   if (!binding?.endpointId || !binding.model) return { action: 'converge' }
   const ep = endpointRepo.getById(binding.endpointId)
   if (!ep || !ep.enabled) return { action: 'converge' }
@@ -608,14 +608,14 @@ async function facilitate(question: string, positions: { role: string; text: str
   if (!apiKey) return { action: 'converge' }
   const disabled = disabledRoleIds()
   // Only experts that can actually speak: not disabled, not already on the panel, AND have a binding —
-  // Lyra (image role, no chat binding) would just fail + get filtered, leaving a dangling "Bringing in
-  // Lyra" note. Excluding it here keeps Atlas from pulling in someone who can't contribute.
+  // Designer (image role, no chat binding) would just fail + get filtered, leaving a dangling "Bringing in
+  // Designer" note. Excluding it here keeps Coordinator from pulling in someone who can't contribute.
   const available =
     panel.length >= MAX_PANEL
       ? []
       : DISPATCHABLE_ROLE_IDS.filter((r) => !disabled.has(r) && !panel.includes(r) && !!roleRepo.getBinding(r)?.endpointId)
   const messages: ChatMessage[] = [
-    { role: 'system', content: ATLAS_FACILITATOR_PROMPT },
+    { role: 'system', content: COORDINATOR_FACILITATOR_PROMPT },
     { role: 'user', content: buildFacilitateInput(question, positions, panel, available) }
   ]
   try {
@@ -640,15 +640,15 @@ async function facilitate(question: string, positions: { role: string; text: str
 function disabledRoleIds(): Set<string> {
   const out = new Set<string>()
   for (const s of roleRepo.listStates()) if (!s.enabled) out.add(s.roleId)
-  // Atlas is the router and can never be disabled — defensive belt-and-suspenders alongside the UI's
+  // Coordinator is the router and can never be disabled — defensive belt-and-suspenders alongside the UI's
   // own lockout.
-  out.delete('atlas')
+  out.delete('coordinator')
   return out
 }
 
 // Mirror chat.service / agent.service end-of-turn side effects: memory extraction cadence + context
 // compression check. Pipeline mode passes the LAST expert's binding (not synthesis's) — that's the
-// largest model in the chain (e.g. hex sonnet, not atlas haiku), so the compression threshold is
+// largest model in the chain (e.g. engineer sonnet, not coordinator haiku), so the compression threshold is
 // measured against the expert that actually sets the multi-turn ceiling. Fire-and-forget so they
 // don't delay the IPC done event.
 function fireSideEffects(convId: string, roleId: string, endpointId: string, model: string, inputTokens: number): void {

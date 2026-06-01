@@ -1,6 +1,6 @@
 // Shared composer controls — model picker (with a search box when the list is long) + dynamic
 // thinking-depth picker. Both menus open UPWARD (the composer sits at the bottom of the pane). Used by
-// the regular conversation composer and the Hex agent composer so every role's footer is consistent.
+// the regular conversation composer and the Engineer agent composer so every role's footer is consistent.
 
 import { useState } from 'react'
 import type { ReactElement } from 'react'

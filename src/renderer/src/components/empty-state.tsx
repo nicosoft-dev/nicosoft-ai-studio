@@ -4,10 +4,10 @@ import { STUDIO_DATA } from '@/data/studio-data'
 import type { Expert } from '@/types'
 
 // Centered welcome state for an empty conversation — big avatar + greeting + example chips. Shared by
-// the regular conversation view and the Hex agent view so every role's blank state looks the same.
+// the regular conversation view and the Engineer agent view so every role's blank state looks the same.
 export function EmptyState({ expert, onChip }: { expert: Expert; onChip: (c: string) => void }): ReactElement {
   const { GREETINGS } = STUDIO_DATA
-  const g = GREETINGS[expert.id] || GREETINGS.iris
+  const g = GREETINGS[expert.id] || GREETINGS.generalist
   return (
     <div className="empty-state">
       <div className="empty-inner">

@@ -17,7 +17,7 @@ await page.waitForTimeout(800)
 
 // Skip onboarding so the sidebar renders.
 await page.evaluate(() =>
-  localStorage.setItem('nicosoft-studio-state-v1', JSON.stringify({ view: 'app', activeExpert: 'atlas' }))
+  localStorage.setItem('nicosoft-studio-state-v1', JSON.stringify({ view: 'app', activeExpert: 'coordinator' }))
 )
 await page.reload()
 await page.waitForTimeout(1200)
@@ -26,7 +26,7 @@ await page.waitForTimeout(1200)
 const created = await page.evaluate(async () => {
   const row = await window.api.roles.createCustom({
     name: 'Pixel',
-    color: 'var(--exp-lyra)',
+    color: 'var(--exp-designer)',
     systemPrompt: 'You are Pixel, a focused image specialist.',
     greeting: "Hi, I'm Pixel.",
     tools: ['Image generation']
@@ -86,14 +86,14 @@ assert.equal(deleted.statesStillThere, false, 'role_states row removed (cascade)
 
 // 7. BUILT-IN DELETE LOCK — calling roles:remove on a built-in is a no-op (getCustom is null).
 await page.evaluate(async () => {
-  await window.api.roles.remove('hex')
+  await window.api.roles.remove('engineer')
 })
 const builtinsIntact = await page.evaluate(async () => {
   const bs = await window.api.roles.listBindings()
-  return bs.some((b) => b.roleId === 'hex') // hex was bound by 3B test setup
+  return bs.some((b) => b.roleId === 'engineer') // engineer was bound by 3B test setup
 })
-console.log('hex still bound after roles:remove("hex"):', builtinsIntact)
-// Hex's binding may or may not still be there depending on prior tests, but the call shouldn't have
+console.log('engineer still bound after roles:remove("engineer"):', builtinsIntact)
+// Engineer's binding may or may not still be there depending on prior tests, but the call shouldn't have
 // thrown. The real guarantee is the renderer's expert.tsx hides the Delete button for non-custom
 // experts; the backend just no-ops for safety.
 

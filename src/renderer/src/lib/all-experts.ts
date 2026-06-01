@@ -30,7 +30,7 @@ function customToExpert(c: CustomRoleDto): Expert {
 export function useAllExperts(): { experts: Expert[]; byId: Record<string, Expert> } {
   const customs = useCustomRoles((s) => s.list)
   return useMemo(() => {
-    // Built-ins minus the prototype 'ci' mock (replaced by real customs from DB). Order: atlas first,
+    // Built-ins minus the prototype 'ci' mock (replaced by real customs from DB). Order: coordinator first,
     // then the other built-ins in their original order, then customs sorted by creation time (oldest
     // first) so the sidebar layout stays stable as the user adds roles.
     const builtins = STUDIO_DATA.EXPERTS.filter((e) => !e.custom)

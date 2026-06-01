@@ -1,7 +1,7 @@
 /* ============================================================
    NicoSoft AI Studio — Scheduled
    Timed tasks that fire an orchestrated step chain. (mock)
-   Email always routes through an email MCP / Mercury draft —
+   Email always routes through an email MCP / Scheduler draft —
    Studio never sends mail itself.
    ============================================================ */
 import { Fragment, useState } from 'react'
@@ -57,7 +57,7 @@ function ScheduledList({
       </div>
       <div className="sched-body">
         <div className="sched-inner">
-          <div className="sched-note">Timed tasks fire an orchestrated step chain. Email always goes through an email MCP or a Mercury draft — Studio never sends mail itself.</div>
+          <div className="sched-note">Timed tasks fire an orchestrated step chain. Email always goes through an email MCP or a Scheduler draft — Studio never sends mail itself.</div>
           <div className="sched-list">
             {tasks.map((t) => (
               <div className={"sched-row" + (t.enabled ? "" : " off")} key={t.id}>
@@ -99,11 +99,11 @@ function ScheduledEditor({ task, onBack }: { task: ScheduledTask | null; onBack:
   const [name, setName] = useState(task ? task.name : "New scheduled task");
   const [trigger, setTrigger] = useState(task ? task.trigger.type : "weekly");
   const [when, setWhen] = useState(task ? task.trigger.label : "Mon 9:00");
-  const [steps, setSteps] = useState<ScheduledStep[]>(task ? task.steps : [{ kind: "expert", expert: "quant", text: "Analyze last week's metrics." }]);
+  const [steps, setSteps] = useState<ScheduledStep[]>(task ? task.steps : [{ kind: "expert", expert: "analyst", text: "Analyze last week's metrics." }]);
   const expertOpts = EXPERTS.filter((e) => !e.unconfigured).map((e) => ({ v: e.id, l: e.name }));
 
   const setStep = (i: number, patch: Partial<ScheduledStep>): void => setSteps((p) => p.map((s, j) => (j === i ? { ...s, ...patch } : s)));
-  const addStep = (): void => setSteps((p) => [...p, { kind: "expert", expert: "iris", text: "" }]);
+  const addStep = (): void => setSteps((p) => [...p, { kind: "expert", expert: "generalist", text: "" }]);
   const removeStep = (i: number): void => setSteps((p) => p.filter((_, j) => j !== i));
   const move = (i: number, dir: number): void => setSteps((p) => {
     const j = i + dir; if (j < 0 || j >= p.length) return p;
@@ -154,7 +154,7 @@ function ScheduledEditor({ task, onBack }: { task: ScheduledTask | null; onBack:
                         </div>
                         {s.kind === "expert" && (
                           <div style={{ width: 130 }}>
-                            <Dropdown options={expertOpts} value={s.expert || "iris"} onChange={(v) => setStep(i, { expert: v })} />
+                            <Dropdown options={expertOpts} value={s.expert || "generalist"} onChange={(v) => setStep(i, { expert: v })} />
                           </div>
                         )}
                         <div className="se-reorder">

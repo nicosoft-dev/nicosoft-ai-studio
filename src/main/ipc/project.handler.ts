@@ -6,7 +6,7 @@ import { dialog, ipcMain } from 'electron'
 
 const execFileAsync = promisify(execFile)
 
-// Project picker + git branch list / switch for Hex's path selector (Claude-style chip row).
+// Project picker + git branch list / switch for Engineer's path selector (Claude-style chip row).
 export function registerProjectHandlers(): void {
   // Open a native folder picker; returns the chosen absolute path or null if cancelled.
   ipcMain.handle('project:pick', async (): Promise<string | null> => {

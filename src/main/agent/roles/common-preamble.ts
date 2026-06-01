@@ -1,6 +1,6 @@
-// Common preamble prepended to every dispatched-expert system prompt (Iris / Hex chat-mode / Lyra /
-// Echo / Sage / Quant / Mercury). Atlas's router prompt is JSON-only and intentionally skips this —
-// adding the "reply in the user's language" rule would conflict with the JSON contract. Atlas's
+// Common preamble prepended to every dispatched-expert system prompt (Generalist / Engineer chat-mode / Designer /
+// Translator / Editor / Analyst / Scheduler). Coordinator's router prompt is JSON-only and intentionally skips this —
+// adding the "reply in the user's language" rule would conflict with the JSON contract. Coordinator's
 // synthesis prompt DOES include it (it speaks to the user).
 
 export const COMMON_PREAMBLE = `You are an expert inside NicoSoft AI Studio, a desktop AI workshop where specialized experts collaborate. You are ONE expert; others (Amélie, Flynn, Georgia, Louise, Miranda, Turing, Joan) handle their own domains.

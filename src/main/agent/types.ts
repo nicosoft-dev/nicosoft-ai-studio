@@ -1,4 +1,4 @@
-// Agent-layer message + content-block types for the Hex coding agent. Richer than llm/types.ts's
+// Agent-layer message + content-block types for the Engineer coding agent. Richer than llm/types.ts's
 // ChatMessage (plain text) — the agent loop needs tool_use / tool_result blocks to match the
 // Anthropic tool-use wire. See docs/nicosoft-studio/12-hex-coding-agent.md §2.4.
 

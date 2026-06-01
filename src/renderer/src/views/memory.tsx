@@ -21,9 +21,9 @@ interface LayerMetaEntry {
 }
 
 export const LAYER_META: Record<LayerKey, LayerMetaEntry> = {
-  SHARED: { label: 'Shared', hint: 'About you · all experts', color: 'var(--exp-echo)' },
+  SHARED: { label: 'Shared', hint: 'About you · all experts', color: 'var(--exp-translator)' },
   ROLE: { label: 'Role', hint: 'What this expert knows', color: 'var(--accent)' },
-  COLLAB: { label: 'Collab', hint: 'Learned across hand-offs', color: 'var(--exp-quant)' }
+  COLLAB: { label: 'Collab', hint: 'Learned across hand-offs', color: 'var(--exp-analyst)' }
 }
 
 interface FlatEntry {

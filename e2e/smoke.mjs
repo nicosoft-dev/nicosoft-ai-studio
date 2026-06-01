@@ -18,14 +18,14 @@ page.on('console', (m) => {
 await page.waitForLoadState('domcontentloaded')
 await page.waitForTimeout(1200)
 
-// Hex renders via the unified ChatView (no more HexAgentView).
+// Engineer renders via the unified ChatView (no more EngineerAgentView).
 await page.evaluate(() =>
-  localStorage.setItem('nicosoft-studio-state-v1', JSON.stringify({ view: 'app', activeExpert: 'hex' }))
+  localStorage.setItem('nicosoft-studio-state-v1', JSON.stringify({ view: 'app', activeExpert: 'engineer' }))
 )
 await page.reload()
 await page.waitForTimeout(2000)
-const hexText = await page.evaluate(() => document.body.innerText)
-assert.ok(hexText.includes('Hex'), 'Hex view should render')
+const engineerText = await page.evaluate(() => document.body.innerText)
+assert.ok(engineerText.includes('Flynn'), 'Flynn (engineer) view should render')
 assert.ok(await page.$('textarea.cmp-textarea'), 'composer textarea should render')
 
 // Memory settings page renders real per-role self-learning.
@@ -39,4 +39,4 @@ assert.ok(memText.includes('Self-learning'), 'Memory settings should render')
 
 assert.equal(errors.length, 0, 'no JS errors expected:\n' + errors.join('\n'))
 await app.close()
-console.log('✓ smoke OK (no JS errors, Hex + Memory render)')
+console.log('✓ smoke OK (no JS errors, Engineer + Memory render)')

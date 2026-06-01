@@ -1,4 +1,4 @@
-// Hex agent service — now a CHAT reply engine. A Hex turn is one agent run, but it's wrapped in the
+// Engineer agent service — now a CHAT reply engine. A Engineer turn is one agent run, but it's wrapped in the
 // chat layer: persist the user turn, recall memories + history from the conversation, inject them into
 // the agent's system, run the ReAct loop, persist the final reply, then fire memory extraction +
 // compression. The agent loop (agent/loop.ts) itself is unchanged — it just gets a richer system + a
@@ -16,7 +16,7 @@ import { runAgent, buildToolsParam, type AgentEvent, type AgentResult } from '..
 import { isContentBlock } from '../agent/types'
 import type { AgentMessage, AnyBlock } from '../agent/types'
 import { CORE_TOOLS } from '../agent/registry'
-import { HEX_SYSTEM_PROMPT } from '../agent/system-prompt'
+import { ENGINEER_SYSTEM_PROMPT } from '../agent/system-prompt'
 import type { AgentRunInput, ToolCallDto } from '../ipc/contracts'
 import * as keychain from '../keychain/keychain'
 import { LlmError } from '../llm/types'
@@ -31,7 +31,7 @@ import * as compressionService from './compression.service'
 import { pickSmallModel } from './model-select'
 import { countAnthropic } from './token-count.service'
 
-const HEX_ROLE_ID = 'hex' // this version's agent is Hex-only
+const ENGINEER_ROLE_ID = 'engineer' // this version's agent is Engineer-only
 
 export interface AgentCallbacks {
   onStream: (e: AgentLlmEvent) => void // fine-grained deltas (text + tool_use input) for streaming UI
@@ -46,9 +46,9 @@ export async function run(
 ): Promise<{ reason: string; turns: number; convId: string; runId: string; promptTokens: number }> {
   const ep = endpointRepo.getById(input.endpointId)
   if (!ep) throw new LlmError('bad_request', 'endpoint not found')
-  // Hex's loop speaks the Anthropic Messages protocol (tool use over /v1/messages).
+  // Engineer's loop speaks the Anthropic Messages protocol (tool use over /v1/messages).
   if (ep.protocol !== 'anthropic') {
-    throw new LlmError('bad_request', 'Hex requires an Anthropic-protocol endpoint')
+    throw new LlmError('bad_request', 'Engineer requires an Anthropic-protocol endpoint')
   }
   const key = keychain.getApiKey(input.endpointId)
   if (!key) throw new LlmError('bad_key', 'no API key configured for this endpoint')
@@ -60,7 +60,7 @@ export async function run(
   const userImages = (input.images ?? []).map((i) => ({ url: i.dataUrl }))
   convService.append(convId, {
     author: 'user',
-    expertId: HEX_ROLE_ID,
+    expertId: ENGINEER_ROLE_ID,
     content: input.prompt,
     attachments: userImages,
     runId,
@@ -69,7 +69,7 @@ export async function run(
   // ② chat-layer context: recall memories + the history after the latest summary's boundary + summary.
   const memories = await memoryService.recall({
     convId,
-    roleId: HEX_ROLE_ID,
+    roleId: ENGINEER_ROLE_ID,
     endpointId: input.endpointId,
     model: input.model,
   })
@@ -77,9 +77,9 @@ export async function run(
   const summary = summaryRepo.getLatest(convId)
   const recent = summary?.coveredUpTo != null ? history.filter((m) => m.id > summary.coveredUpTo!) : history
 
-  // ③ Agent system = HEX prompt + injected memories + summary; seed = history → AgentMessage (Anthropic
+  // ③ Agent system = ENGINEER prompt + injected memories + summary; seed = history → AgentMessage (Anthropic
   //    needs a user-first list, so drop any leading assistant turns left by a fold boundary).
-  const system = buildHexSystem(memories, summary?.content ?? null)
+  const system = buildEngineerSystem(memories, summary?.content ?? null)
   const mapped = conversationToAgentMessages(recent)
   const firstUser = mapped.findIndex((m) => m.role === 'user')
   const seed = firstUser > 0 ? mapped.slice(firstUser) : mapped
@@ -158,7 +158,7 @@ export async function run(
   if (finalText) {
     convService.append(convId, {
       author: 'expert',
-      expertId: HEX_ROLE_ID,
+      expertId: ENGINEER_ROLE_ID,
       model: input.model,
       content: finalText,
       runId,
@@ -166,19 +166,19 @@ export async function run(
     })
   }
 
-  // Record usage — a Hex run spans many turns; without this it's invisible to usage stats.
+  // Record usage — a Engineer run spans many turns; without this it's invisible to usage stats.
   usageRepo.record({ model: input.model, provider: ep.protocol, inTokens, outTokens })
 
   // ⑥ chat-layer side effects, fire-and-forget so they don't delay the run's completion (mirrors the
   //    plain-chat onDone path: memory extraction cadence + compression check). contextWindow is passed
-  //    explicitly because Hex's model may not be in the endpoint's availableModels catalog.
+  //    explicitly because Engineer's model may not be in the endpoint's availableModels catalog.
   void memoryService
-    .onTurn({ convId, roleId: HEX_ROLE_ID, endpointId: input.endpointId, model: input.model })
+    .onTurn({ convId, roleId: ENGINEER_ROLE_ID, endpointId: input.endpointId, model: input.model })
     .catch(() => {})
   void compressionService
     .maybeCompress({
       convId,
-      roleId: HEX_ROLE_ID,
+      roleId: ENGINEER_ROLE_ID,
       endpointId: input.endpointId,
       model: input.model,
       contextWindow: input.contextWindow,
@@ -189,9 +189,9 @@ export async function run(
   return { reason: result.reason, turns: result.turns, convId, runId, promptTokens }
 }
 
-// HEX system prompt + the chat layer's injected context (recalled memories, conversation summary).
-function buildHexSystem(memories: MemoryRow[], summary: string | null): string {
-  const parts = [HEX_SYSTEM_PROMPT]
+// ENGINEER system prompt + the chat layer's injected context (recalled memories, conversation summary).
+function buildEngineerSystem(memories: MemoryRow[], summary: string | null): string {
+  const parts = [ENGINEER_SYSTEM_PROMPT]
   if (memories.length) {
     parts.push(
       "What you've learned about this user (engineering preferences, project conventions):\n" +
@@ -240,7 +240,7 @@ function finalAssistantText(messages: AgentMessage[]): string {
 }
 
 // Rebuild tool cards from a conversation's transcript, grouped by run_id. The renderer calls this when
-// opening a past Hex conversation — messages hold only the final reply; the tool steps live in the
+// opening a past Engineer conversation — messages hold only the final reply; the tool steps live in the
 // transcript. Returns {} for a non-agent conversation (no transcript file). Contract: one assistant
 // message per run (this service persists only the final reply), so all of a run's tools attach to that
 // single message — if that ever changes, the renderer needs a per-message key, not just run_id.

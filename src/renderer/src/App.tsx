@@ -51,7 +51,7 @@ export default function App(): ReactElement {
   const persisted = loadState()
 
   const [view, setView] = useState<string>(persisted.view || 'onboarding')
-  const [activeExpert, setActiveExpert] = useState<string>(persisted.activeExpert || 'hex')
+  const [activeExpert, setActiveExpert] = useState<string>(persisted.activeExpert || 'engineer')
   const [settingsTab, setSettingsTab] = useState<string>(persisted.settingsTab || 'endpoints')
   const [cmdk, setCmdk] = useState(false)
   // null = closed, {} = create mode, {initialRole} = edit mode for an existing custom role.
@@ -146,7 +146,7 @@ export default function App(): ReactElement {
     setView('settings')
   }
 
-  const expert = EXPERT_BY_ID[activeExpert] || EXPERT_BY_ID.iris
+  const expert = EXPERT_BY_ID[activeExpert] || EXPERT_BY_ID.generalist
   const navView = ['studio', 'extensions', 'projects', 'scheduled'].includes(view)
 
   if (view === 'onboarding') {
@@ -156,7 +156,7 @@ export default function App(): ReactElement {
           onFinish={() => {
             setView('studio')
             chat.newConversation()
-            setActiveExpert('iris')
+            setActiveExpert('generalist')
           }}
         />
       </div>
@@ -187,7 +187,7 @@ export default function App(): ReactElement {
             onNewRole={() => setRoleDialog({})}
             onNewConversation={() => {
               chat.newConversation()
-              setActiveExpert('iris')
+              setActiveExpert('generalist')
               setView('app')
             }}
           />

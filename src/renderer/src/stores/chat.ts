@@ -11,13 +11,13 @@ import type { EffortLevel } from '@/lib/thinking'
 
 type ConversationDto = Awaited<ReturnType<typeof window.api.conversations.list>>[number]
 
-// Roles whose replies come from the agent (tool use). This version: Hex only when the user talks to
-// it directly from the sidebar. When Atlas pipelines into Hex, the dispatch uses chat mode (no tools)
-// because the atlas.service runs each step through llmChat. Atlas itself routes through window.api.atlas.
-const AGENT_ROLES = new Set(['hex'])
-const ATLAS_ID = 'atlas'
+// Roles whose replies come from the agent (tool use). This version: Engineer only when the user talks to
+// it directly from the sidebar. When Coordinator pipelines into Engineer, the dispatch uses chat mode (no tools)
+// because the coordinator.service runs each step through llmChat. Coordinator itself routes through window.api.coordinator.
+const AGENT_ROLES = new Set(['engineer'])
+const COORDINATOR_ID = 'coordinator'
 export const roleHasAgent = (expertId: string): boolean => AGENT_ROLES.has(expertId)
-export const roleIsAtlas = (expertId: string): boolean => expertId === ATLAS_ID
+export const roleIsCoordinator = (expertId: string): boolean => expertId === COORDINATOR_ID
 
 export interface ToolCall {
   id: string
@@ -33,7 +33,7 @@ export interface ChatMessage {
   images?: { url: string; name: string }[]
   tools?: ToolCall[] // present on agent (tool-using) turns
   streaming?: boolean
-  // Atlas-dispatched message: the contributing expert (hex/echo/...) and (pipeline only) the dispatch
+  // Coordinator-dispatched message: the contributing expert (engineer/translator/...) and (pipeline only) the dispatch
   // chain shared by every step of that turn. The renderer reads both to switch avatar/name per message
   // and draw a single dispatch badge spanning consecutive same-chain messages.
   expertId?: string | null
@@ -79,7 +79,7 @@ const uid = (): string => globalThis.crypto.randomUUID()
 type Meta = { convId: string; expertId: string; endpointId: string; model: string }
 const streamMeta = new Map<string, Meta>() // chat (plain text) path: streamId → conversation
 const agentMeta = new Map<string, Meta>() // agent (tool use) path: streamId → conversation
-const atlasMeta = new Map<string, { convId: string; endpointId: string; model: string }>() // atlas: streamId → conversation
+const coordinatorMeta = new Map<string, { convId: string; endpointId: string; model: string }>() // coordinator: streamId → conversation
 let creating = false // sync guard: blocks a double-create when a fresh thread's first message fires twice
 let listening = false
 
@@ -100,7 +100,7 @@ export const useChat = create<ChatState>((set, get) => {
     })
   }
 
-  // Atlas parallel panel: experts stream CONCURRENTLY, so "the last bubble" (appendDelta) would
+  // Coordinator parallel panel: experts stream CONCURRENTLY, so "the last bubble" (appendDelta) would
   // interleave their text. Route each delta to the streaming bubble tagged with its roleId instead.
   const appendDeltaToRole = (convId: string, roleId: string, text: string): void => {
     set((s) => {
@@ -241,7 +241,7 @@ export const useChat = create<ChatState>((set, get) => {
       if (meta) finishWithError(meta.convId, d.message)
     })
 
-    // ---- atlas (router + multi-expert dispatch) path ----
+    // ---- coordinator (router + multi-expert dispatch) path ----
     // Event lifecycle per turn:
     //   1. step:start arrives BEFORE any delta for that step. We rebind the placeholder assistant
     //      message (created in send() optimistically) to the actual roleId for the first step, and
@@ -250,13 +250,13 @@ export const useChat = create<ChatState>((set, get) => {
     //   2. delta accumulates text into the most recent streaming assistant.
     //   3. step:done marks the current message non-streaming + sets the authoritative text.
     //   4. done clears the conversation's streaming flag + reloads history.
-    const at = window.api.atlas
+    const at = window.api.coordinator
     at.onDispatch(() => {
       // chain is already stored per-message via step:start.dispatch; nothing global to update here.
       // Future: surface decision.reason as a debug tooltip on the badge.
     })
     at.onStepStart((d) => {
-      const meta = atlasMeta.get(d.streamId)
+      const meta = coordinatorMeta.get(d.streamId)
       if (!meta) return
       set((s) => {
         const msgs = (s.byConversation[meta.convId] ?? []).map((m) => ({ ...m }))
@@ -273,11 +273,11 @@ export const useChat = create<ChatState>((set, get) => {
       })
     })
     at.onDelta((d) => {
-      const meta = atlasMeta.get(d.streamId)
+      const meta = coordinatorMeta.get(d.streamId)
       if (meta) appendDeltaToRole(meta.convId, d.roleId, d.text)
     })
     at.onStepDone((d) => {
-      const meta = atlasMeta.get(d.streamId)
+      const meta = coordinatorMeta.get(d.streamId)
       if (!meta) return
       set((s) => {
         const msgs = (s.byConversation[meta.convId] ?? []).map((m) => ({ ...m }))
@@ -293,8 +293,8 @@ export const useChat = create<ChatState>((set, get) => {
       })
     })
     at.onDone((d) => {
-      const meta = atlasMeta.get(d.streamId)
-      atlasMeta.delete(d.streamId)
+      const meta = coordinatorMeta.get(d.streamId)
+      coordinatorMeta.delete(d.streamId)
       if (!meta) return
       set((s) => {
         const msgs = (s.byConversation[meta.convId] ?? []).map((m) => ({ ...m }))
@@ -311,8 +311,8 @@ export const useChat = create<ChatState>((set, get) => {
       void get().loadConversations() // bump title / updated_at
     })
     at.onError((d) => {
-      const meta = atlasMeta.get(d.streamId)
-      atlasMeta.delete(d.streamId)
+      const meta = coordinatorMeta.get(d.streamId)
+      coordinatorMeta.delete(d.streamId)
       if (meta) finishWithError(meta.convId, d.message)
     })
   }
@@ -417,9 +417,9 @@ export const useChat = create<ChatState>((set, get) => {
           .catch(() => {})
       }
 
-      if (roleIsAtlas(expertId)) {
-        // Atlas path: renderer persists the user turn (chat-path style), then atlas.run does the route
-        // → dispatch → (optional) synthesize. atlas.service reads the just-persisted user message + any
+      if (roleIsCoordinator(expertId)) {
+        // Coordinator path: renderer persists the user turn (chat-path style), then coordinator.run does the route
+        // → dispatch → (optional) synthesize. coordinator.service reads the just-persisted user message + any
         // attachments straight from the conversation history; we don't re-ship images over IPC.
         try {
           await window.api.conversations.append(cid, {
@@ -428,8 +428,8 @@ export const useChat = create<ChatState>((set, get) => {
             content: text,
             attachments: userImages.map((i) => ({ url: i.url, name: i.name }))
           })
-          const { streamId } = await window.api.atlas.run({ convId: cid, prompt: text })
-          atlasMeta.set(streamId, { convId: cid, endpointId, model })
+          const { streamId } = await window.api.coordinator.run({ convId: cid, prompt: text })
+          coordinatorMeta.set(streamId, { convId: cid, endpointId, model })
         } catch (e) {
           finishWithError(cid, e instanceof Error ? e.message : String(e))
         }
@@ -513,10 +513,10 @@ export const useChat = create<ChatState>((set, get) => {
           agentMeta.delete(sid)
         }
       }
-      for (const [sid, meta] of atlasMeta) {
+      for (const [sid, meta] of coordinatorMeta) {
         if (meta.convId === cid) {
-          void window.api.atlas.stop(sid)
-          atlasMeta.delete(sid)
+          void window.api.coordinator.stop(sid)
+          coordinatorMeta.delete(sid)
         }
       }
       // Also clear any pending approval: stop just deleted the agentMeta, so the backend's done/cancel

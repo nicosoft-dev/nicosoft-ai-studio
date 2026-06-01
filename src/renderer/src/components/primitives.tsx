@@ -141,7 +141,7 @@ export function CodeBlock({ lang, code }: { lang: string; code: string }): React
   )
 }
 
-/* — Lyra generated-image card (CSS-rendered "poster") — */
+/* — Designer generated-image card (CSS-rendered "poster") — */
 export function GeneratedPoster(): ReactElement {
   return (
     <div className="image-card">
@@ -260,11 +260,11 @@ export function Segment({ seg }: { seg: SegmentData }): ReactElement {
 /* — Dispatch badge for collaboration — */
 export function DispatchBadge({ chain }: { chain: string[] }): ReactElement {
   const { EXPERT_BY_ID } = STUDIO_DATA
-  const atlas = EXPERT_BY_ID.atlas
+  const coordinator = EXPERT_BY_ID.coordinator
   return (
     <div className="dispatch">
       <span className="d-node d-lead">
-        <span className="d-dot" style={{ background: atlas.color }} /> {atlas.name} · routing
+        <span className="d-dot" style={{ background: coordinator.color }} /> {coordinator.name} · routing
       </span>
       {chain.map((id) => {
         const e = EXPERT_BY_ID[id]

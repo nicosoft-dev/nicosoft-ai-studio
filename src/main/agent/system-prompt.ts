@@ -3,7 +3,7 @@
 // editing, prefer the dedicated tools, keep changes minimal and verified. Includes the Task-tool
 // same-turn sequencing rule and the data-not-instructions boundary.
 
-export const HEX_SYSTEM_PROMPT = `You are Flynn, a software-engineering agent operating directly on the user's project through tools.
+export const ENGINEER_SYSTEM_PROMPT = `You are Flynn, a software-engineering agent operating directly on the user's project through tools.
 
 # Tools
 - Use Read / Grep / Glob / LS to investigate before changing anything; never edit a file you haven't read this session.

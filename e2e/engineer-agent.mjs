@@ -1,9 +1,9 @@
-// End-to-end agent test — drives Hex through a real run: sets its endpoint key + cwd, sends a
+// End-to-end agent test — drives Engineer through a real run: sets its endpoint key + cwd, sends a
 // read-only task with an explicit "remember" cue, waits for the agent (auto-approving any tool
 // permission since the cwd is a throwaway dir), then asserts the reply persisted (with run_id) and the
 // memory was extracted. MANUAL — it calls the LLM (costs money) and writes the keychain, so it's not
 // part of CI.
-//   NS_KEY=<anthropic-key> node e2e/hex-agent.mjs
+//   NS_KEY=<anthropic-key> node e2e/engineer-agent.mjs
 import { _electron } from 'playwright'
 import { strict as assert } from 'node:assert'
 import { fileURLToPath } from 'node:url'
@@ -11,14 +11,14 @@ import { dirname, join } from 'node:path'
 import { mkdirSync, writeFileSync } from 'node:fs'
 
 const PROJECT = join(dirname(fileURLToPath(import.meta.url)), '..')
-const CWD = '/tmp/hex-test'
+const CWD = '/tmp/engineer-test'
 const NS_KEY = process.env.NS_KEY
 if (!NS_KEY) {
   console.error('NS_KEY env required')
   process.exit(1)
 }
 
-// a tiny buggy file for Hex to read
+// a tiny buggy file for Engineer to read
 mkdirSync(CWD, { recursive: true })
 writeFileSync(join(CWD, 'hello.js'), 'function add(a, b) {\n  return a - b // bug: should be +\n}\nconsole.log(add(2, 3))\n')
 
@@ -34,8 +34,8 @@ await page.waitForTimeout(1000)
 
 await page.evaluate(
   ({ cwd }) => {
-    localStorage.setItem('nicosoft-studio-cwd-by-expert', JSON.stringify({ hex: cwd }))
-    localStorage.setItem('nicosoft-studio-state-v1', JSON.stringify({ view: 'app', activeExpert: 'hex' }))
+    localStorage.setItem('nicosoft-studio-cwd-by-expert', JSON.stringify({ engineer: cwd }))
+    localStorage.setItem('nicosoft-studio-state-v1', JSON.stringify({ view: 'app', activeExpert: 'engineer' }))
   },
   { cwd: CWD }
 )
@@ -44,13 +44,13 @@ await page.waitForTimeout(1500)
 
 const epInfo = await page.evaluate(async (key) => {
   const bindings = await window.api.roles.listBindings()
-  const hexB = bindings.find((b) => b.roleId === 'hex')
+  const engineerB = bindings.find((b) => b.roleId === 'engineer')
   const eps = await window.api.endpoints.list()
-  const ep = eps.find((e) => e.id === hexB?.endpointId)
+  const ep = eps.find((e) => e.id === engineerB?.endpointId)
   if (ep && !ep.hasKey) await window.api.endpoints.update(ep.id, { apiKey: key })
-  return { endpointId: hexB?.endpointId, model: hexB?.model, protocol: ep?.protocol }
+  return { endpointId: engineerB?.endpointId, model: engineerB?.model, protocol: ep?.protocol }
 }, NS_KEY)
-console.log('hex endpoint:', JSON.stringify(epInfo))
+console.log('engineer endpoint:', JSON.stringify(epInfo))
 
 await page.reload()
 await page.waitForTimeout(1500)
@@ -77,8 +77,8 @@ await page.waitForTimeout(8000) // let the fire-and-forget memory extraction lan
 
 const result = await page.evaluate(async () => {
   const convs = await window.api.conversations.list()
-  const hexConv = convs.find((c) => c.primaryRoleId === 'hex')
-  const msgs = hexConv ? await window.api.conversations.messages(hexConv.id) : []
+  const engineerConv = convs.find((c) => c.primaryRoleId === 'engineer')
+  const msgs = engineerConv ? await window.api.conversations.messages(engineerConv.id) : []
   const mems = await window.api.memory.list()
   return { msgs: msgs.map((m) => ({ author: m.author, hasRunId: !!m.runId, text: m.content.slice(0, 120) })), mems }
 })
@@ -90,4 +90,4 @@ assert.ok(result.msgs.every((m) => m.hasRunId), 'messages tagged with run_id')
 assert.ok(result.mems.length >= 1, 'a memory was extracted from the explicit cue')
 
 await app.close()
-console.log('✓ hex agent e2e OK')
+console.log('✓ engineer agent e2e OK')

@@ -23,7 +23,7 @@ await page.waitForLoadState('domcontentloaded')
 await page.waitForTimeout(1000)
 
 const result = await page.evaluate(async (key) => {
-  const b = (await window.api.roles.listBindings()).find((x) => x.roleId === 'hex')
+  const b = (await window.api.roles.listBindings()).find((x) => x.roleId === 'engineer')
   const ep = (await window.api.endpoints.list()).find((e) => e.id === b?.endpointId)
   if (ep && !ep.hasKey) await window.api.endpoints.update(ep.id, { apiKey: key })
   const cfg = { endpointId: b.endpointId, model: b.model }
@@ -33,18 +33,18 @@ const result = await page.evaluate(async (key) => {
   const title = await window.api.conversations.title({ convId: 'reg-title', firstMessage, ...cfg })
 
   // 2) Memory extraction via the AUTO path (no "remember" cue) from a wrapped reply.
-  const conv = await window.api.conversations.create({ kind: 'single', primaryRoleId: 'hex', title: 'reg-mem' })
+  const conv = await window.api.conversations.create({ kind: 'single', primaryRoleId: 'engineer', title: 'reg-mem' })
   await window.api.conversations.append(conv.id, {
     author: 'user',
-    expertId: 'hex',
+    expertId: 'engineer',
     content: 'Quick setup question: I always use 4-space indentation and I deploy to production only on Tuesdays. How should I configure my formatter?'
   })
   await window.api.conversations.append(conv.id, {
     author: 'expert',
-    expertId: 'hex',
+    expertId: 'engineer',
     content: 'Set your formatter to 4-space indentation (e.g. Prettier tabWidth 4, useTabs false) and wire it into a pre-commit hook so every commit is consistent.'
   })
-  const ctx = { convId: conv.id, roleId: 'hex', endpointId: cfg.endpointId, model: cfg.model }
+  const ctx = { convId: conv.id, roleId: 'engineer', endpointId: cfg.endpointId, model: cfg.model }
   for (let i = 0; i < 3; i++) await window.api.memory.onTurn(ctx) // one of the 3 turn counts hits the auto cadence
   return { firstMessage, title, convId: conv.id }
 }, NS_KEY)

@@ -221,7 +221,7 @@ export function Sidebar({
 }): ReactElement {
   const { experts: EXPERTS, byId: EXPERT_BY_ID } = useAllExperts()
   const roles = useRoles()
-  const atlas = EXPERTS.find((e) => e.coordinator)
+  const coordinator = EXPERTS.find((e) => e.coordinator)
   const rest = EXPERTS.filter((e) => !e.coordinator && !roles.isDeleted(e.id))
   // Until useRoles.load() finishes, treat every role as enabled so we don't paint a disabled row that
   // would jump to enabled (or vice versa) once state hydrates. The Disabled section stays hidden in
@@ -260,7 +260,7 @@ export function Sidebar({
         <SideSectionHead label="Roles" count={1 + enabledRest.length} collapsed={!rolesOpen} onToggle={() => setRolesOpen((s) => !s)} />
         {rolesOpen && (
           <>
-            {atlas && <RoleRow expert={atlas} active={activeExpert === "atlas"} onChat={() => onSelectExpert("atlas")} onProfile={() => onOpenProfile("atlas")} />}
+            {coordinator && <RoleRow expert={coordinator} active={activeExpert === "coordinator"} onChat={() => onSelectExpert("coordinator")} onProfile={() => onOpenProfile("coordinator")} />}
             {enabledRest.map((e) => (
               <RoleRow key={e.id} expert={e} active={activeExpert === e.id}
                 onChat={() => onSelectExpert(e.id)} onProfile={() => onOpenProfile(e.id)} />

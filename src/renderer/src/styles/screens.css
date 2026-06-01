@@ -68,7 +68,7 @@
 }
 .seg-head .ts { font-size: 11px; color: var(--text-4); margin-left: auto; font-variant-numeric: tabular-nums; }
 /* Folding: dispatched-expert steps (parallel/council/pipeline) render in a fixed-height scroll window
-   from the start; "View full" expands to full height. Atlas intro/synthesis + single/direct never fold. */
+   from the start; "View full" expands to full height. Coordinator intro/synthesis + single/direct never fold. */
 .seg-head .fold-toggle {
   font-size: 11px; color: var(--text-4); background: none;
   border: 1px solid var(--border-2); border-radius: 5px;
@@ -161,7 +161,7 @@
 .inline-notice .n-text { flex: 1; font-size: 13px; color: var(--text-2); }
 .inline-notice .n-text strong { color: var(--text-1); }
 
-/* lyra image card */
+/* designer image card */
 .image-card {
   margin: 12px 0; border: 1px solid var(--border-1); border-radius: var(--r-md);
   overflow: hidden; max-width: 340px;
@@ -542,8 +542,8 @@
   min-width: 0; overflow: hidden;
 }
 .workstation:hover { background: var(--bg-2); }
-.workstation.atlas { background: var(--bg-2); }
-.workstation.atlas:hover { background: var(--bg-3); }
+.workstation.coordinator { background: var(--bg-2); }
+.workstation.coordinator:hover { background: var(--bg-3); }
 
 .ws-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .ws-top-right { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
@@ -555,7 +555,7 @@
   font-size: 13.5px; color: var(--text-1); font-weight: 600; letter-spacing: -0.01em;
   display: flex; align-items: center; gap: 7px;
 }
-.workstation.atlas .ws-name { font-size: 15px; }
+.workstation.coordinator .ws-name { font-size: 15px; }
 .ws-lead {
   font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
   color: var(--accent); background: var(--accent-soft); padding: 1px 5px; border-radius: 3px;
@@ -831,7 +831,7 @@
 .io-track { flex: 1; height: 7px; background: var(--bg-3); border-radius: 4px; overflow: hidden; }
 .io-fill { display: block; height: 100%; border-radius: 4px; }
 .io-fill.in { background: var(--accent); opacity: 0.85; }
-.io-fill.out { background: var(--exp-echo); opacity: 0.7; }
+.io-fill.out { background: var(--exp-translator); opacity: 0.7; }
 .io-val { font-family: var(--mono); font-size: 11.5px; color: var(--text-3); width: 44px; flex: 0 0 44px; text-align: right; }
 
 /* generic bar list */
@@ -850,15 +850,15 @@
 /* memory stacked bar + legend */
 .stacked-bar { display: flex; height: 9px; border-radius: 4px; overflow: hidden; gap: 1px; background: var(--bg-1); margin-bottom: 14px; }
 .stk-seg { height: 100%; }
-.stk-seg.shared { background: var(--exp-echo); opacity: 0.65; }
+.stk-seg.shared { background: var(--exp-translator); opacity: 0.65; }
 .stk-seg.role { background: var(--accent); opacity: 0.8; }
-.stk-seg.collab { background: var(--exp-quant); opacity: 0.65; }
+.stk-seg.collab { background: var(--exp-analyst); opacity: 0.65; }
 .layer-legend { display: flex; flex-direction: column; gap: 9px; }
 .ll-row { display: flex; align-items: center; gap: 9px; }
 .ll-dot { width: 8px; height: 8px; border-radius: 2px; flex: 0 0 8px; }
-.ll-dot.shared { background: var(--exp-echo); opacity: 0.8; }
+.ll-dot.shared { background: var(--exp-translator); opacity: 0.8; }
 .ll-dot.role { background: var(--accent); }
-.ll-dot.collab { background: var(--exp-quant); opacity: 0.8; }
+.ll-dot.collab { background: var(--exp-analyst); opacity: 0.8; }
 .ll-key { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; color: var(--text-2); width: 58px; flex: 0 0 58px; }
 .ll-hint { font-size: 11.5px; color: var(--text-4); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ll-val { font-family: var(--mono); font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
@@ -1082,9 +1082,9 @@
 .mem-layer { display: flex; flex-direction: column; }
 .mem-layer-head { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; }
 .mem-layer-tag { font-size: 10px; font-weight: 600; letter-spacing: 0.05em; padding: 2px 7px; border-radius: 4px; }
-.mem-layer-tag.shared { color: var(--exp-echo); background: color-mix(in oklab, var(--exp-echo) 14%, transparent); }
+.mem-layer-tag.shared { color: var(--exp-translator); background: color-mix(in oklab, var(--exp-translator) 14%, transparent); }
 .mem-layer-tag.role { color: var(--accent); background: var(--accent-soft); }
-.mem-layer-tag.collab { color: var(--exp-quant); background: color-mix(in oklab, var(--exp-quant) 14%, transparent); }
+.mem-layer-tag.collab { color: var(--exp-analyst); background: color-mix(in oklab, var(--exp-analyst) 14%, transparent); }
 .mem-layer-hint { font-size: 11.5px; color: var(--text-4); flex: 1; }
 .mem-layer-count { font-size: 11px; color: var(--text-4); background: var(--bg-3); border-radius: 9px; padding: 0 7px; line-height: 17px; }
 .mem-list { display: flex; flex-direction: column; gap: 6px; }
@@ -1092,9 +1092,9 @@
 .mem-item { display: flex; align-items: center; gap: 10px; padding: 9px 11px; background: var(--bg-1); border: 1px solid var(--border-1); border-radius: var(--r-sm); }
 .mem-item:hover { background: var(--bg-2); }
 .mem-layer-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 7px; }
-.mem-layer-dot.shared { background: var(--exp-echo); }
+.mem-layer-dot.shared { background: var(--exp-translator); }
 .mem-layer-dot.role { background: var(--accent); }
-.mem-layer-dot.collab { background: var(--exp-quant); }
+.mem-layer-dot.collab { background: var(--exp-analyst); }
 .mem-text { flex: 1; min-width: 0; font-size: 13px; color: var(--text-2); line-height: 1.45; }
 .mem-edit { height: 28px; font-size: 13px; }
 .mem-actions { display: flex; gap: 2px; opacity: 0; transition: opacity 0.12s; flex: 0 0 auto; }

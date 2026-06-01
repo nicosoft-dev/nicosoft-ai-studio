@@ -1,5 +1,5 @@
-// ApprovalDialog — a centered floating card asking the user to approve a mutating tool before Hex
-// runs it. Visual design from claude.ai/design: title "Hex wants to run <Tool>" (tool in accent), an
+// ApprovalDialog — a centered floating card asking the user to approve a mutating tool before Engineer
+// runs it. Visual design from claude.ai/design: title "Engineer wants to run <Tool>" (tool in accent), an
 // optional reason line, the tool input as a mono code block, and Deny (ghost, Esc) / Allow (accent,
 // Enter) buttons. Keyboard: Enter approves, Esc denies. Styles in styles/agent.css.
 
@@ -57,7 +57,7 @@ export function ApprovalDialog({
             <TerminalIcon />
           </span>
           <span className="ap-title">
-            {STUDIO_DATA.EXPERT_BY_ID.hex?.name ?? 'Flynn'} wants to run <span className="ap-tool">{prompt.toolName}</span>
+            {STUDIO_DATA.EXPERT_BY_ID.engineer?.name ?? 'Flynn'} wants to run <span className="ap-tool">{prompt.toolName}</span>
           </span>
         </div>
         {prompt.reason ? <div className="ap-reason">{prompt.reason}</div> : null}

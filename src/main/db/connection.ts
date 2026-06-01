@@ -6,7 +6,7 @@ import { copyFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs'
 import { runMigrations } from './migrate'
 
 // Single DatabaseSync instance for the main process. ALL app data (settings, endpoints, roles, chats,
-// memory, …) lives under ~/.nsai — the same root as the Hex session transcripts — not Electron's
+// memory, …) lives under ~/.nsai — the same root as the Engineer session transcripts — not Electron's
 // default userData dir.
 let instance: DatabaseSync | null = null
 
