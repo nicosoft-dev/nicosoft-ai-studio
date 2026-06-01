@@ -20,12 +20,63 @@ import { useRoleBinding } from '@/lib/use-role-binding'
 import { fileToImage, imagesFromClipboard, type ImageAttachment } from '@/lib/image'
 import { getThinkingCapability, resolveThinking, type ThinkingDepth } from '@/lib/thinking'
 import { useAllExperts } from '@/lib/all-experts'
+import { randomVerb } from '@/lib/spinner-verbs'
 import type { Expert } from '@/types'
 
 // Compact token readout: K below 1M, M at/above it (1M, 1.05M, 1.5M — trailing zeros trimmed).
 function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${parseFloat((n / 1_000_000).toFixed(2))}M`
   return `${parseFloat((n / 1000).toFixed(1))}K`
+}
+
+// Claude-Code-style readout formatters for the streaming indicator: compact lower-case token count
+// ("1.2k") and a coarse elapsed string ("3s" / "1m 5s").
+const READOUT_NUM = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
+function fmtReadoutTokens(n: number): string {
+  return READOUT_NUM.format(n).toLowerCase()
+}
+function fmtElapsed(ms: number): string {
+  const s = Math.floor(ms / 1000)
+  if (s < 60) return `${s}s`
+  return `${Math.floor(s / 60)}m ${s % 60}s`
+}
+
+// The live "thinking" readout shown while a reply streams: a steady role-colored dot (CSS breathes its
+// opacity — no spin) + a playful action verb · elapsed · output-token estimate (chars/4, same heuristic
+// Claude Code uses). The verb rotates every 5s so the easter-egg word bank gets airtime. Tokens/elapsed
+// appear once they're meaningful, so the pure-thinking phase (no text yet) reads "● Cogitating… · 3s".
+function ThinkingReadout({ chars }: { chars: number }): ReactElement {
+  const startRef = useRef(Date.now())
+  const [verb, setVerb] = useState(randomVerb)
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const clock = setInterval(() => setNow(Date.now()), 250)
+    const roll = setInterval(() => setVerb(randomVerb()), 5000)
+    return () => {
+      clearInterval(clock)
+      clearInterval(roll)
+    }
+  }, [])
+  const elapsed = now - startRef.current
+  const tokens = Math.round(chars / 4)
+  return (
+    <span className="thinking-readout" aria-label="thinking">
+      <span className="tr-dot" />
+      <span className="tr-verb">{verb}…</span>
+      {elapsed >= 1000 ? (
+        <>
+          <span className="tr-sep">·</span>
+          <span>{fmtElapsed(elapsed)}</span>
+        </>
+      ) : null}
+      {tokens > 0 ? (
+        <>
+          <span className="tr-sep">·</span>
+          <span>↓ {fmtReadoutTokens(tokens)} tokens</span>
+        </>
+      ) : null}
+    </span>
+  )
 }
 
 // True when this assistant message represents Coordinator's synthesis step — the final pipeline message
@@ -115,7 +166,7 @@ function ChatSegment({
           </div>
         ) : null}
         {msg.tools && msg.tools.length > 0 ? msg.tools.map((t) => <ToolBubble key={t.id} tool={t} />) : null}
-        {msg.streaming && !msg.text ? <span className="caret" /> : null}
+        {msg.streaming ? <ThinkingReadout chars={msg.text.length} /> : null}
       </div>
     </div>
   )

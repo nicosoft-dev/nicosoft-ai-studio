@@ -16,8 +16,8 @@
 
 /* message list */
 .msg-list { flex: 1; overflow-y: auto; overflow-x: hidden; }
-.msg-inner { max-width: 760px; margin: 0 auto; padding: 24px 0 28px; }
-.w-1024 .msg-inner { max-width: 680px; padding: 22px 0 26px; }
+.msg-inner { max-width: min(1200px, 90%); margin: 0 auto; padding: 24px 0 28px; }
+.w-1024 .msg-inner { max-width: min(1000px, 90%); padding: 22px 0 26px; }
 
 /* dispatch badge */
 .dispatch {
@@ -137,9 +137,14 @@
 }
 .seg-action:hover { background: var(--bg-3); color: var(--text-2); }
 
-/* streaming caret + pulse */
-.avatar.streaming { animation: pulse-soft 1.4s ease-in-out infinite; }
-.caret { display: inline-block; width: 7px; height: 15px; background: var(--seg-color, var(--accent)); margin-left: 2px; vertical-align: text-bottom; animation: blink 1s step-end infinite; border-radius: 1px; }
+/* Streaming "thinking" readout — a steady dot in the role's color (breathing opacity, NO spin/scale)
+   followed by a Claude-Code-style action verb · elapsed · token estimate. The avatar deliberately no
+   longer pulses (its .streaming class is now a no-op); this row owns the live indicator. */
+.thinking-readout { display: inline-flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 12.5px; color: var(--text-3); margin-top: 2px; }
+.thinking-readout .tr-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--seg-color, var(--accent)); flex: 0 0 auto; animation: tr-breathe 1.4s ease-in-out infinite; }
+.thinking-readout .tr-verb { color: var(--text-2); }
+.thinking-readout .tr-sep { color: var(--text-4); }
+@keyframes tr-breathe { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
 
 /* skeleton */
 .skel-line { height: 11px; border-radius: 4px; background: var(--bg-3); animation: skel 1.4s ease-in-out infinite; margin-bottom: 9px; }
@@ -169,10 +174,12 @@
 /* ============================================================
    Chat input
    ============================================================ */
-.input-dock { flex: 0 0 auto; padding: 0 28px 20px; background: var(--bg-1); }
-.w-1024 .input-dock { padding: 0 24px 18px; }
-.input-dock-inner { max-width: 760px; margin: 0 auto; }
-.w-1024 .input-dock-inner { max-width: 680px; }
+/* No left/right padding here — the inner already centers at min(1200px, 90%); matching .msg-list (which
+   has none) makes the composer's edges line up exactly with the message content above it. */
+.input-dock { flex: 0 0 auto; padding: 0 0 20px; background: var(--bg-1); }
+.w-1024 .input-dock { padding: 0 0 18px; }
+.input-dock-inner { max-width: min(1200px, 90%); margin: 0 auto; }
+.w-1024 .input-dock-inner { max-width: min(1000px, 90%); }
 
 .composer {
   background: var(--bg-2); border: 1px solid var(--border-1);
