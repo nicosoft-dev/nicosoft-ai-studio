@@ -18,14 +18,14 @@ import type {
 } from '@/types'
 
 const EXPERTS: Expert[] = [
-  { id: 'atlas', name: 'Atlas', color: 'var(--exp-atlas)', specialty: 'Coordinator — routes & merges', personality: 'Calm air-traffic-controller', model: 'claude-sonnet-4.6', family: 'anthropic', coordinator: true },
-  { id: 'iris', name: 'Iris', color: 'var(--exp-iris)', specialty: 'Generalist — chat & brainstorming', personality: 'Warm, curious front door', model: 'gpt-5.5', family: 'openai' },
-  { id: 'hex', name: 'Hex', color: 'var(--exp-hex)', specialty: 'Software engineer — code', personality: 'Precise, direct, no pleasantries', model: 'claude-opus-4.8', family: 'anthropic' },
-  { id: 'lyra', name: 'Lyra', color: 'var(--exp-lyra)', specialty: 'Designer — images & posters', personality: 'Creative, opinionated', model: 'imagen-4', family: 'gemini' },
-  { id: 'echo', name: 'Echo', color: 'var(--exp-echo)', specialty: 'Translator — any language pair', personality: 'Precise, culturally aware', model: 'gemini-3.1-flash-lite', family: 'gemini' },
-  { id: 'sage', name: 'Sage', color: 'var(--exp-sage)', specialty: 'Editor — summarize & condense', personality: 'Structured, no padding', model: 'gemini-3.1-pro', family: 'gemini' },
-  { id: 'quant', name: 'Quant', color: 'var(--exp-quant)', specialty: 'Data analyst — stats & charts', personality: 'Rigorous, honest about uncertainty', model: 'gpt-5.5', family: 'openai' },
-  { id: 'mercury', name: 'Mercury', color: 'var(--exp-mercury)', specialty: 'Email & scheduling', personality: 'Efficient, situationally appropriate', model: 'gpt-5-mini', family: 'openai' }
+  { id: 'atlas', name: 'Danny', color: 'var(--exp-atlas)', specialty: 'Coordinator — routes & merges', personality: 'Calm air-traffic-controller', model: 'claude-sonnet-4.6', family: 'anthropic', coordinator: true },
+  { id: 'iris', name: 'Amélie', color: 'var(--exp-iris)', specialty: 'Generalist — chat & brainstorming', personality: 'Warm, curious front door', model: 'gpt-5.5', family: 'openai' },
+  { id: 'hex', name: 'Flynn', color: 'var(--exp-hex)', specialty: 'Software engineer — code', personality: 'Precise, direct, no pleasantries', model: 'claude-opus-4.8', family: 'anthropic' },
+  { id: 'lyra', name: 'Georgia', color: 'var(--exp-lyra)', specialty: 'Designer — images & posters', personality: 'Creative, opinionated', model: 'imagen-4', family: 'gemini' },
+  { id: 'echo', name: 'Louise', color: 'var(--exp-echo)', specialty: 'Translator — any language pair', personality: 'Precise, culturally aware', model: 'gemini-3.1-flash-lite', family: 'gemini' },
+  { id: 'sage', name: 'Miranda', color: 'var(--exp-sage)', specialty: 'Editor — summarize & condense', personality: 'Structured, no padding', model: 'gemini-3.1-pro', family: 'gemini' },
+  { id: 'quant', name: 'Turing', color: 'var(--exp-quant)', specialty: 'Data analyst — stats & charts', personality: 'Rigorous, honest about uncertainty', model: 'gpt-5.5', family: 'openai' },
+  { id: 'mercury', name: 'Joan', color: 'var(--exp-mercury)', specialty: 'Email & scheduling', personality: 'Efficient, situationally appropriate', model: 'gpt-5-mini', family: 'openai' }
 ]
 
 const EXPERT_BY_ID: Record<string, Expert> = Object.fromEntries(EXPERTS.map((e) => [e.id, e]))
@@ -50,7 +50,7 @@ const MEMORY: MemoryData = {
         { id: 'h2', text: 'Prefers AbortController over boolean flags for effect cleanup.' },
         { id: 'h3', text: 'Reviews must include a one-line summary before the diff.' }
       ],
-      collab: [{ id: 'h4', text: 'When an error is non-English, Echo translates it before Hex debugs.' }]
+      collab: [{ id: 'h4', text: 'When an error is non-English, Echo translates it before Flynn debugs.' }]
     },
     quant: {
       role: [
@@ -61,11 +61,11 @@ const MEMORY: MemoryData = {
     },
     echo: {
       role: [{ id: 'e1', text: 'Targets German and Japanese most often; keeps an informal register.' }],
-      collab: [{ id: 'e2', text: 'Passes translated stack traces to Hex with the original kept inline.' }]
+      collab: [{ id: 'e2', text: 'Passes translated stack traces to Flynn with the original kept inline.' }]
     },
     atlas: {
       role: [{ id: 'a1', text: 'Prefers a one-line synthesis at the end of multi-expert tasks.' }],
-      collab: [{ id: 'a2', text: 'Routes code + non-English errors to Echo → Hex in that order.' }]
+      collab: [{ id: 'a2', text: 'Routes code + non-English errors to Echo → Flynn in that order.' }]
     },
     sage: { role: [{ id: 'sg1', text: 'Wants action items as bullets, max three, no preamble.' }], collab: [] },
     iris: { role: [{ id: 'i1', text: 'Likes 2–3 framed options before committing to one.' }], collab: [] },
@@ -216,7 +216,7 @@ const ROLE_BINDINGS: RoleBinding[] = [
 ]
 
 const GREETINGS: Record<string, Greeting> = {
-  iris: { greeting: "Hi, I'm Iris. I handle the everyday stuff — ask me anything, or I'll point you to the right expert.", chips: ['Explain this error message', 'Brainstorm names for my app', 'Plan a 3-day trip'] },
+  iris: { greeting: "Hi, I'm Amélie. I handle the everyday stuff — ask me anything, or I'll point you to the right expert.", chips: ['Explain this error message', 'Brainstorm names for my app', 'Plan a 3-day trip'] },
   hex: { greeting: 'I write, debug, and review code. Paste a snippet or describe the bug.', chips: ['Review this function', 'Why is this test flaky?', 'Refactor for readability'] },
   atlas: { greeting: "I coordinate the team. Tell me what you need and I'll route it to the right expert — or convene several and merge their work.", chips: ['Translate and debug this error', 'Research, then summarize', 'Draft and schedule an email'] },
   lyra: { greeting: 'I make posters, illustrations, and avatars. Describe the vibe, the text, and the format.', chips: ['Poster for our game night', 'App icon, flat & minimal', 'Hero illustration, isometric'] },
@@ -276,7 +276,7 @@ const CONVERSATIONS: Record<string, Conversation> = {
       { who: 'user', ts: '10:02 AM', blocks: [{ type: 'para', html: "Here's a stack trace from our scraper. The error is in German — translate it and tell me what's actually breaking:" }, { type: 'quote', html: 'ConnectionResetError: Verbindung vom Server zurückgesetzt' }] },
       { who: 'echo', model: 'gemini-2.5-flash', ts: '10:02 AM', blocks: [{ type: 'para', html: '<strong>Translation:</strong> "Connection reset by the server."' }, { type: 'para', html: '(German "zurückgesetzt" here = reset/dropped, not "reset to defaults".)' }] },
       { who: 'hex', model: 'claude-sonnet-4.6', ts: '10:03 AM', blocks: [{ type: 'para', html: "This isn't a bug in your code — the remote server is dropping the connection mid-request, usually rate-limiting or bot detection. Add retry-with-backoff and rotate the User-Agent:" }, { type: 'code', lang: 'python', code: 'for attempt in range(5):\n    try:\n        return session.get(url, timeout=10)\n    except ConnectionResetError:\n        time.sleep(2 ** attempt)   # 1s, 2s, 4s, 8s, 16s' }] },
-      { who: 'atlas', model: 'claude-haiku-4', ts: '10:03 AM', synthesis: true, blocks: [{ type: 'para', html: 'Echo confirmed the error means the server reset the connection; Hex diagnosed it as server-side rate-limiting, not your code. <strong>Fix:</strong> wrap the request in exponential backoff (snippet above) and rotate the User-Agent. If it persists, you\'re being bot-detected — slow the crawl rate.' }] }
+      { who: 'atlas', model: 'claude-haiku-4', ts: '10:03 AM', synthesis: true, blocks: [{ type: 'para', html: 'Louise confirmed the error means the server reset the connection; Flynn diagnosed it as server-side rate-limiting, not your code. <strong>Fix:</strong> wrap the request in exponential backoff (snippet above) and rotate the User-Agent. If it persists, you\'re being bot-detected — slow the crawl rate.' }] }
     ]
   },
   churn: {
@@ -315,8 +315,8 @@ const CONVERSATIONS: Record<string, Conversation> = {
     title: 'Summarize standup notes',
     expert: 'sage',
     segments: [
-      { who: 'user', ts: '9:58 AM', blocks: [{ type: 'para', html: 'Condense these standup notes into 3 bullet action items: “Auth refactor is blocked on the OAuth race — Hex is on it. Churn dashboard shipped to staging. Need a decision on the Q2 launch date by Friday.”' }] },
-      { who: 'sage', model: 'gemini-2.5-flash', ts: '9:58 AM', streaming: true, blocks: [{ type: 'para', html: '<strong>Action items</strong>' }, { type: 'para', html: '• Unblock the auth refactor — Hex to land the OAuth race fix<br>• Verify the churn dashboard on staging before promoting<br>• Lock the Q2 launch da' }] }
+      { who: 'user', ts: '9:58 AM', blocks: [{ type: 'para', html: 'Condense these standup notes into 3 bullet action items: “Auth refactor is blocked on the OAuth race — Flynn is on it. Churn dashboard shipped to staging. Need a decision on the Q2 launch date by Friday.”' }] },
+      { who: 'sage', model: 'gemini-2.5-flash', ts: '9:58 AM', streaming: true, blocks: [{ type: 'para', html: '<strong>Action items</strong>' }, { type: 'para', html: '• Unblock the auth refactor — Flynn to land the OAuth race fix<br>• Verify the churn dashboard on staging before promoting<br>• Lock the Q2 launch da' }] }
     ]
   },
   debugbuild: {
@@ -388,7 +388,7 @@ const SCHEDULED: ScheduledTask[] = [
     lastRun: { when: 'last Mon', result: 'ok' },
     steps: [
       { kind: 'expert', expert: 'quant', text: "Analyze last week's metrics vs. the prior week." },
-      { kind: 'expert', expert: 'mercury', text: "Draft the report email from Quant's findings." },
+      { kind: 'expert', expert: 'mercury', text: "Draft the report email from Turing's findings." },
       { kind: 'email', text: 'Send via the email MCP to the team list.' }
     ]
   },

@@ -264,7 +264,7 @@ export function DispatchBadge({ chain }: { chain: string[] }): ReactElement {
   return (
     <div className="dispatch">
       <span className="d-node d-lead">
-        <span className="d-dot" style={{ background: atlas.color }} /> Atlas · routing
+        <span className="d-dot" style={{ background: atlas.color }} /> {atlas.name} · routing
       </span>
       {chain.map((id) => {
         const e = EXPERT_BY_ID[id]

@@ -6,6 +6,7 @@
 import { useEffect } from 'react'
 import type { ReactElement } from 'react'
 import type { PermissionPrompt } from '@/stores/chat'
+import { STUDIO_DATA } from '@/data/studio-data'
 
 // Render the tool input as a readable command / path block (full JSON only as a fallback).
 function formatInput(toolName: string, input: unknown): string {
@@ -56,7 +57,7 @@ export function ApprovalDialog({
             <TerminalIcon />
           </span>
           <span className="ap-title">
-            Hex wants to run <span className="ap-tool">{prompt.toolName}</span>
+            {STUDIO_DATA.EXPERT_BY_ID.hex?.name ?? 'Flynn'} wants to run <span className="ap-tool">{prompt.toolName}</span>
           </span>
         </div>
         {prompt.reason ? <div className="ap-reason">{prompt.reason}</div> : null}

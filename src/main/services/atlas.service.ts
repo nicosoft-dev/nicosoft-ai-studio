@@ -36,7 +36,9 @@ import {
   ATLAS_ROUTER_PROMPT,
   ATLAS_SYNTHESIS_PROMPT,
   DISPATCHABLE_ROLE_IDS,
-  buildRolePrompt
+  buildRolePrompt,
+  displayName,
+  roleIdFromName
 } from '../agent/roles/prompts'
 
 export interface RouteDecision {
@@ -176,7 +178,7 @@ export async function run(input: AtlasRunInput, cb: AtlasCallbacks, signal: Abor
       if (move.action === 'add') {
         roles = [...roles, move.role]
         fullChain = [...roles, 'atlas']
-        emitAtlasIntro(input.convId, `Bringing in ${move.role.charAt(0).toUpperCase() + move.role.slice(1)} for a perspective the others can't cover.`, cb)
+        emitAtlasIntro(input.convId, `Bringing in ${displayName(move.role)} for a perspective the others can't cover.`, cb)
       }
       // 'continue' (or 'add' after pulling the new expert) → next round
     }
@@ -266,9 +268,9 @@ export async function route(userInput: string, history: convRepo.MessageRow[], s
   //    ATLAS_ROUTER_PROMPT) nor via the LLM router. Users reach custom roles by clicking them in the
   //    sidebar (direct chat path). Extending Atlas to dispatch into custom roles requires plumbing
   //    custom-role names into the router prompt + buildRolePrompt fallback for arbitrary ids.
-  const mention = /^@(\w+)/.exec(userInput)
+  const mention = /^@(\p{L}+)/u.exec(userInput)
   if (mention) {
-    const id = mention[1].toLowerCase()
+    const id = roleIdFromName(mention[1]) // accepts the display name (@Flynn) or the raw id (@hex)
     if (enabled.includes(id as (typeof enabled)[number])) {
       return { mode: 'single', role: id, reason: 'explicit @mention' }
     }
@@ -305,7 +307,7 @@ function buildRouterMessages(
   const sysParts = [
     ATLAS_ROUTER_PROMPT,
     '',
-    `Currently available experts: ${enabled.join(', ')}. Route ONLY to these — others are disabled.`
+    `Currently available experts: ${enabled.map(displayName).join(', ')}. Route ONLY to these — others are disabled.`
   ]
   const messages: ChatMessage[] = [{ role: 'system', content: sysParts.join('\n') }]
   // Recent context: the last N USER turns (skip assistants entirely — past expert names in their
@@ -349,26 +351,21 @@ export function parseRouteDecision(raw: string, enabled: readonly string[]): Rou
       if (obj.mode === 'direct') {
         return { mode: 'direct', reason }
       }
-      if (obj.mode === 'single' && typeof obj.role === 'string' && enabled.includes(obj.role)) {
-        return { mode: 'single', role: obj.role, reason, intro }
+      if (obj.mode === 'single' && typeof obj.role === 'string') {
+        const rid = roleIdFromName(obj.role)
+        if (enabled.includes(rid)) return { mode: 'single', role: rid, reason, intro }
       }
-      if (
-        (obj.mode === 'pipeline' || obj.mode === 'parallel') &&
-        Array.isArray(obj.roles) &&
-        obj.roles.length >= 2 &&
-        obj.roles.length <= 3 &&
-        obj.roles.every((r: unknown) => typeof r === 'string' && enabled.includes(r))
-      ) {
-        return { mode: obj.mode, roles: obj.roles as string[], reason, intro }
+      if ((obj.mode === 'pipeline' || obj.mode === 'parallel') && Array.isArray(obj.roles)) {
+        const rids = obj.roles.filter((r): r is string => typeof r === 'string').map(roleIdFromName)
+        if (rids.length >= 2 && rids.length <= 3 && rids.every((r) => enabled.includes(r))) {
+          return { mode: obj.mode, roles: rids, reason, intro }
+        }
       }
-      if (
-        obj.mode === 'council' &&
-        Array.isArray(obj.roles) &&
-        obj.roles.length >= 2 &&
-        obj.roles.length <= 3 &&
-        obj.roles.every((r: unknown) => typeof r === 'string' && enabled.includes(r))
-      ) {
-        return { mode: 'council', roles: obj.roles as string[], reason, intro }
+      if (obj.mode === 'council' && Array.isArray(obj.roles)) {
+        const rids = obj.roles.filter((r): r is string => typeof r === 'string').map(roleIdFromName)
+        if (rids.length >= 2 && rids.length <= 3 && rids.every((r) => enabled.includes(r))) {
+          return { mode: 'council', roles: rids, reason, intro }
+        }
       }
     } catch {
       /* try next candidate */
@@ -377,7 +374,7 @@ export function parseRouteDecision(raw: string, enabled: readonly string[]): Rou
   // Final lenient parse: scan first role mention; default to iris (or first enabled) so Atlas never
   // dead-ends.
   const lower = trimmed.toLowerCase()
-  const hit = enabled.find((r) => lower.includes(r))
+  const hit = enabled.find((r) => lower.includes(r) || lower.includes(displayName(r).toLowerCase()))
   return { mode: 'single', role: hit ?? enabled[0] ?? 'iris', reason: 'lenient parse' }
 }
 
@@ -542,14 +539,14 @@ function messageAttachments(raw: unknown): ChatAttachment[] {
 // (correctly) ask "what are you trying to do?" because the prompt looks like an answer, not a task.
 function buildHandoffPrompt(originalQuery: string, priorSteps: { role: string; text: string }[], nextRoleId: string): string {
   const sections = [`Original user request:\n${originalQuery}`, '', 'Prior pipeline steps:']
-  for (const s of priorSteps) sections.push('', `## ${s.role}`, s.text)
+  for (const s of priorSteps) sections.push('', `## ${displayName(s.role)}`, s.text)
   sections.push('', `Now continue the user's task as ${nextRoleId}. Build on the prior step's output — don't repeat what's already been said, and don't ask the user to restate the question.`)
   return sections.join('\n')
 }
 
 function buildSynthesisInput(originalQuery: string, outputs: { role: string; text: string }[]): string {
   const sections = [`Original user message:\n${originalQuery}`, '', 'Expert outputs in order:']
-  for (const o of outputs) sections.push('', `## ${o.role}`, o.text)
+  for (const o of outputs) sections.push('', `## ${displayName(o.role)}`, o.text)
   sections.push('', 'Now produce ONE coherent reply for the user. Follow the synthesis rules in your system prompt.')
   return sections.join('\n')
 }
@@ -558,12 +555,12 @@ function buildSynthesisInput(originalQuery: string, outputs: { role: string; tex
 // role personas like Hex's "dispatch mode" wording make them try to route or defer instead of answering
 // (observed in e2e: Hex replied "Routing this…" rather than giving its take).
 function buildPanelPrompt(question: string, roleId: string): string {
-  return `${question}\n\n---\nYou are one of several experts answering this independently. Give YOUR own substantive take from your specialty as ${roleId} — don't route it, don't defer to other experts, don't ask who should handle it. Atlas compares everyone's answers afterward.`
+  return `${question}\n\n---\nYou are one of several experts answering this independently. Give YOUR own substantive take from your specialty as ${displayName(roleId)} — don't route it, don't defer to other experts, don't ask who should handle it. Atlas compares everyone's answers afterward.`
 }
 
 function buildParallelSynthesisInput(originalQuery: string, outputs: { role: string; text: string }[]): string {
   const sections = [`Original user question:\n${originalQuery}`, '', 'Each expert answered INDEPENDENTLY (a panel, not a pipeline):']
-  for (const o of outputs) sections.push('', `## ${o.role}`, o.text)
+  for (const o of outputs) sections.push('', `## ${displayName(o.role)}`, o.text)
   sections.push('', 'Now synthesize the panel for the user. Follow the rules in your system prompt — lead with your recommendation, surface agreement vs divergence, attribute distinct points.')
   return sections.join('\n')
 }
@@ -571,8 +568,8 @@ function buildParallelSynthesisInput(originalQuery: string, outputs: { role: str
 // B2 council round 2+: each expert sees everyone's prior-round positions and critiques/refines.
 function buildCritiquePrompt(question: string, positions: { role: string; text: string }[], roleId: string): string {
   const sections = [`Original question:\n${question}`, '', `The experts' positions so far (including yours):`]
-  for (const p of positions) sections.push('', `## ${p.role}${p.role === roleId ? ' (you)' : ''}`, p.text)
-  sections.push('', `You are ${roleId}. Critique and refine. Where another expert is wrong or missed something, say so directly and explain why. Where they convinced you, concede and update. Then restate YOUR position — sharper, accounting for the others. Don't agree just to agree; don't dig in out of stubbornness. Be substantive and concise, and don't label your answer with a round number.`)
+  for (const p of positions) sections.push('', `## ${displayName(p.role)}${p.role === roleId ? ' (you)' : ''}`, p.text)
+  sections.push('', `You are ${displayName(roleId)}. Critique and refine. Where another expert is wrong or missed something, say so directly and explain why. Where they convinced you, concede and update. Then restate YOUR position — sharper, accounting for the others. Don't agree just to agree; don't dig in out of stubbornness. Be substantive and concise, and don't label your answer with a round number.`)
   return sections.join('\n')
 }
 
@@ -580,19 +577,19 @@ function buildFacilitateInput(question: string, positions: { role: string; text:
   const sections = [
     `Question:\n${question}`,
     '',
-    `Current panel: ${panel.join(', ')}`,
-    `Available to add: ${available.length ? available.join(', ') : '(none)'}`,
+    `Current panel: ${panel.map(displayName).join(', ')}`,
+    `Available to add: ${available.length ? available.map(displayName).join(', ') : '(none)'}`,
     '',
     'Current expert positions:'
   ]
-  for (const p of positions) sections.push('', `## ${p.role}`, p.text)
+  for (const p of positions) sections.push('', `## ${displayName(p.role)}`, p.text)
   sections.push('', 'What is the next move? Respond with ONLY the JSON object.')
   return sections.join('\n')
 }
 
 function buildCouncilSynthesisInput(question: string, positions: { role: string; text: string }[]): string {
   const sections = [`Original question:\n${question}`, '', 'Final expert positions after the debate:']
-  for (const p of positions) sections.push('', `## ${p.role}`, p.text)
+  for (const p of positions) sections.push('', `## ${displayName(p.role)}`, p.text)
   sections.push('', 'Now write the final verdict for the user. Follow the rules in your system prompt — lead with the resolved answer, explain how disagreement resolved, attribute decisive moves.')
   return sections.join('\n')
 }
@@ -626,7 +623,10 @@ async function facilitate(question: string, positions: { role: string; text: str
     const m = result.text.match(/\{[\s\S]*\}/)
     if (m) {
       const obj = JSON.parse(m[0]) as { action?: unknown; role?: unknown }
-      if (obj.action === 'add' && typeof obj.role === 'string' && available.includes(obj.role)) return { action: 'add', role: obj.role }
+      if (obj.action === 'add' && typeof obj.role === 'string') {
+        const rid = roleIdFromName(obj.role)
+        if (available.includes(rid)) return { action: 'add', role: rid }
+      }
       if (obj.action === 'continue') return { action: 'continue' }
     }
   } catch {
