@@ -286,10 +286,10 @@ function Composer({
         <div className={'composer2' + (ready ? '' : ' disabled')}>
           <div className="cmp-toolbar">
             <ModelPicker models={b.models} value={b.model} onChange={b.onModel} disabled={!ready} />
-            <ThinkingPicker family={b.family} model={b.model} depth={effectiveDepth} onChange={b.onDepth} disabled={!ready} />
             {roleHasImageTool(expert.id) ? (
               <ImageModelPicker models={b.imageModels} value={b.imageModel} onChange={b.onImageModel} disabled={!ready} />
             ) : null}
+            <ThinkingPicker family={b.family} model={b.model} depth={effectiveDepth} onChange={b.onDepth} disabled={!ready} />
             {b.contextLength > 0 ? (
               <span className={'cmp-tokens' + (tokenAmber ? ' amber' : '')}>
                 {fmtTokens(usedTokens)} / {fmtTokens(b.contextLength)}
