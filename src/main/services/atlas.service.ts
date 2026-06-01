@@ -40,6 +40,9 @@ export interface RouteDecision {
   role?: string
   roles?: string[]
   reason: string
+  // Atlas's coordinating voice, shown as an Atlas message before the expert(s) answer. Only present on
+  // LLM-routed turns — @mention fast-path and config/error fallbacks have none (no LLM call to make it).
+  intro?: string
 }
 
 export interface AtlasRunInput {
@@ -69,6 +72,7 @@ export async function run(input: AtlasRunInput, cb: AtlasCallbacks, signal: Abor
     // tells the user who answered). The first/only step gets the full conversation history (and any
     // user-attached images) so it can answer multi-turn requests with continuity.
     cb.onDispatch([decision.role!], decision.reason)
+    if (decision.intro) emitAtlasIntro(input.convId, decision.intro, cb)
     const out = await runRoleStep({
       convId: input.convId,
       roleId: decision.role!,
@@ -87,6 +91,7 @@ export async function run(input: AtlasRunInput, cb: AtlasCallbacks, signal: Abor
   // the synthesis step. Example: a 2-expert pipeline echo→hex → chain = ['echo','hex','atlas'].
   const fullChain = [...decision.roles!, 'atlas']
   cb.onDispatch(fullChain, decision.reason)
+  if (decision.intro) emitAtlasIntro(input.convId, decision.intro, cb)
   let lastTokens = 0
   let lastRoleId = decision.roles![decision.roles!.length - 1]
   let lastEndpointId = ''
@@ -205,16 +210,15 @@ function buildRouterMessages(
   // Reinforce the JSON contract on the LAST user message — OAuth gateways (nicosoft/*, Claude Code
   // identity injection) may overwrite system prompts, so the routing instructions MUST also live in a
   // user message to survive. (Lesson from Batch 2.)
-  const reinforcer = `\n\n---\nRoute the above. Respond with ONLY a JSON object — no markdown, no explanation, no leading text. Format:\n{"mode":"single","role":"<id>","reason":"<≤8 words>"}\nor\n{"mode":"pipeline","roles":["<id>","<id>"],"reason":"<≤8 words>"}`
+  const reinforcer = `\n\n---\nRoute the above. Respond with ONLY a JSON object — no markdown, no explanation, no leading text. Format:\n{"mode":"single","role":"<id>","intro":"<one sentence to the user>","reason":"<≤8 words>"}\nor\n{"mode":"pipeline","roles":["<id>","<id>"],"intro":"<one sentence>","reason":"<≤8 words>"}`
   if (lastUserInHistory >= 0 && messages[lastUserInHistory].content === userInput) {
     messages[lastUserInHistory] = { ...messages[lastUserInHistory], content: userInput + reinforcer }
   } else {
     messages.push({ role: 'user', content: userInput + reinforcer })
   }
-  // No assistant prefill: nsai's Claude OAuth upstream rejects it ("This model does not support
-  // assistant message prefill. The conversation must end with a user message."). The reinforcer above
-  // already forces JSON-only output and parseRouteDecision tolerates fences / stray prose, so a
-  // prose-wrapped JSON object still parses. The message list now always ends with a user turn.
+  // No assistant prefill: Sonnet 4.6 / Opus 4.6+ dropped prefill support (the API returns 400 "This
+  // model does not support assistant message prefill"). The reinforcer above already forces JSON-only
+  // output and parseRouteDecision tolerates fences / stray prose, so ending on a user turn parses fine.
   return messages
 }
 
@@ -229,10 +233,11 @@ export function parseRouteDecision(raw: string, enabled: readonly string[]): Rou
 
   for (const c of candidates) {
     try {
-      const obj = JSON.parse(c) as { mode?: string; role?: unknown; roles?: unknown; reason?: unknown }
+      const obj = JSON.parse(c) as { mode?: string; role?: unknown; roles?: unknown; reason?: unknown; intro?: unknown }
       const reason = typeof obj.reason === 'string' ? obj.reason : 'routed'
+      const intro = typeof obj.intro === 'string' && obj.intro.trim() ? obj.intro.trim() : undefined
       if (obj.mode === 'single' && typeof obj.role === 'string' && enabled.includes(obj.role)) {
-        return { mode: 'single', role: obj.role, reason }
+        return { mode: 'single', role: obj.role, reason, intro }
       }
       if (
         obj.mode === 'pipeline' &&
@@ -241,7 +246,7 @@ export function parseRouteDecision(raw: string, enabled: readonly string[]): Rou
         obj.roles.length <= 3 &&
         obj.roles.every((r: unknown) => typeof r === 'string' && enabled.includes(r))
       ) {
-        return { mode: 'pipeline', roles: obj.roles as string[], reason }
+        return { mode: 'pipeline', roles: obj.roles as string[], reason, intro }
       }
       // mode=council from the spec gracefully degrades to its first role (v0.3 feature).
       if (obj.mode === 'council' && Array.isArray(obj.roles) && obj.roles.length > 0) {
@@ -260,6 +265,21 @@ export function parseRouteDecision(raw: string, enabled: readonly string[]): Rou
 }
 
 // ------- Dispatch (per-role step) -------
+
+// Atlas's coordinating voice. The router already produced `intro` alongside the route decision (no
+// extra LLM call); we surface it as Atlas's own step — onStepStart/onDelta/onStepDone mirror a real
+// dispatched step so the renderer draws an Atlas bubble — then persist it. Turns single-dispatch from a
+// silent passthrough into a visible "Atlas acknowledges + hands off" beat before the expert answers.
+// Carries NO dispatch chain: the intro is Atlas's opening voice, not part of the dispatch flow, and a
+// chain would make the renderer's isSynthesis() mis-tag it as the synthesis step (only the trailing
+// Atlas merge is synthesis). The dispatch badge attaches from the first expert step onward.
+function emitAtlasIntro(convId: string, intro: string, cb: AtlasCallbacks): void {
+  const atlasModel = roleRepo.getBinding('atlas')?.model ?? ''
+  cb.onStepStart('atlas', null, atlasModel)
+  cb.onDelta('atlas', intro)
+  convService.append(convId, { author: 'expert', expertId: 'atlas', model: atlasModel, content: intro })
+  cb.onStepDone('atlas', intro, 0)
+}
 
 interface RunStepOptions {
   convId: string
