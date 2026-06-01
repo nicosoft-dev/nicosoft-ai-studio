@@ -140,7 +140,7 @@
 /* Streaming "thinking" readout — a steady dot in the role's color (breathing opacity, NO spin/scale)
    followed by a Claude-Code-style action verb · elapsed · token estimate. The avatar deliberately no
    longer pulses (its .streaming class is now a no-op); this row owns the live indicator. */
-.thinking-readout { display: inline-flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 12.5px; color: var(--text-3); margin-top: 2px; }
+.thinking-readout { display: inline-flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 12.5px; color: var(--text-3); margin-top: 10px; }
 .thinking-readout .tr-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--seg-color, var(--accent)); flex: 0 0 auto; animation: tr-breathe 1.4s ease-in-out infinite; }
 .thinking-readout .tr-verb { color: var(--text-2); }
 .thinking-readout .tr-sep { color: var(--text-4); }

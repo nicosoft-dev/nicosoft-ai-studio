@@ -73,6 +73,7 @@ const r = await page.evaluate(() => {
     dotBg: dotCs?.backgroundColor,
     dotAnim: dotCs?.animationName,
     dotTransform: dotCs?.transform,
+    marginTop: getComputedStyle(el).marginTop,
     avatarAnim: av ? getComputedStyle(av).animationName : 'no-streaming-avatar'
   }
 })
@@ -84,7 +85,8 @@ assert.equal(r.dotAnim, 'tr-breathe', 'dot breathes (no spin/scale keyframe)')
 assert.ok(r.dotTransform === 'none' || r.dotTransform === 'matrix(1, 0, 0, 1, 0, 0)', `dot not transformed (${r.dotTransform})`)
 assert.ok(r.dotBg && r.dotBg !== 'rgba(0, 0, 0, 0)', `dot has a role color (${r.dotBg})`)
 assert.ok(r.avatarAnim === 'none' || r.avatarAnim === 'no-streaming-avatar', `avatar no longer pulses (${r.avatarAnim})`)
-console.log('✓ thinking readout: dot+verb, breathing not spinning, avatar static')
+assert.equal(r.marginTop, '10px', `readout sits a little below the content (marginTop ${r.marginTop})`)
+console.log('✓ thinking readout: dot+verb, breathing not spinning, avatar static, 10px gap above')
 
 // Wait until the model emits body text so the readout shows the full "verb · elapsed · ↓ tokens".
 await page
