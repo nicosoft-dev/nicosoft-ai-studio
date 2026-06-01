@@ -26,11 +26,18 @@ export function list(): EndpointDto[] {
   return endpointRepo.list().map(toDto)
 }
 
+// Endpoints store a BARE origin (no /v1, /v1beta…); each adapter appends its own path
+// ({base}/v1/messages · {base}/v1/responses · {base}/v1beta/models/…). Strip a trailing version segment
+// + slashes so a user pasting "https://api.x.com/v1" can't double it to /v1/v1/… → 404 route not found.
+function normalizeBaseUrl(url: string): string {
+  return url.trim().replace(/\/+$/, '').replace(/\/(v1beta|v1alpha|v1)$/i, '')
+}
+
 export function add(input: EndpointInput): EndpointDto {
   const row = endpointRepo.create({
     name: input.name,
     protocol: input.protocol,
-    baseUrl: input.baseUrl,
+    baseUrl: normalizeBaseUrl(input.baseUrl),
     defaultModel: input.defaultModel ?? undefined,
     availableModels: input.availableModels ?? [],
     enabled: input.enabled ?? true
@@ -43,7 +50,7 @@ export function update(id: string, patch: Partial<EndpointInput>): EndpointDto |
   const row = endpointRepo.update(id, {
     name: patch.name,
     protocol: patch.protocol,
-    baseUrl: patch.baseUrl,
+    baseUrl: patch.baseUrl !== undefined ? normalizeBaseUrl(patch.baseUrl) : undefined,
     defaultModel: patch.defaultModel,
     availableModels: patch.availableModels,
     enabled: patch.enabled
