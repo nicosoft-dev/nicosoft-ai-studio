@@ -100,6 +100,21 @@ export const useChat = create<ChatState>((set, get) => {
     })
   }
 
+  // Atlas parallel panel: experts stream CONCURRENTLY, so "the last bubble" (appendDelta) would
+  // interleave their text. Route each delta to the streaming bubble tagged with its roleId instead.
+  const appendDeltaToRole = (convId: string, roleId: string, text: string): void => {
+    set((s) => {
+      const msgs = (s.byConversation[convId] ?? []).map((m) => ({ ...m }))
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === 'assistant' && msgs[i].streaming && msgs[i].expertId === roleId) {
+          msgs[i] = { ...msgs[i], text: msgs[i].text + text }
+          return { byConversation: { ...s.byConversation, [convId]: msgs } }
+        }
+      }
+      return s // no matching streaming bubble yet (step:start creates it first) — drop rather than mis-route
+    })
+  }
+
   const ensureListeners = (): void => {
     if (listening) return
     listening = true
@@ -259,17 +274,20 @@ export const useChat = create<ChatState>((set, get) => {
     })
     at.onDelta((d) => {
       const meta = atlasMeta.get(d.streamId)
-      if (meta) appendDelta(meta.convId, d.text)
+      if (meta) appendDeltaToRole(meta.convId, d.roleId, d.text)
     })
     at.onStepDone((d) => {
       const meta = atlasMeta.get(d.streamId)
       if (!meta) return
       set((s) => {
         const msgs = (s.byConversation[meta.convId] ?? []).map((m) => ({ ...m }))
-        const cur = msgs[msgs.length - 1]
-        if (cur && cur.role === 'assistant' && cur.expertId === d.roleId) {
-          cur.text = d.text // step:done is authoritative; the delta accumulator was a preview
-          cur.streaming = false
+        // Find THIS role's streaming bubble — parallel panels finish out of order, so the last bubble
+        // isn't necessarily this step's. step:done text is authoritative over the delta accumulator.
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          if (msgs[i].role === 'assistant' && msgs[i].streaming && msgs[i].expertId === d.roleId) {
+            msgs[i] = { ...msgs[i], text: d.text, streaming: false }
+            break
+          }
         }
         return { byConversation: { ...s.byConversation, [meta.convId]: msgs } }
       })

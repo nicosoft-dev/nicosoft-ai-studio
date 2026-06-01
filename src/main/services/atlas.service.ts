@@ -30,6 +30,7 @@ import { pickSmallModel } from './model-select'
 import { LlmError, type ChatAttachment, type ChatMessage } from '../llm/types'
 import {
   ATLAS_DIRECT_PROMPT,
+  ATLAS_PARALLEL_SYNTHESIS_PROMPT,
   ATLAS_ROUTER_PROMPT,
   ATLAS_SYNTHESIS_PROMPT,
   DISPATCHABLE_ROLE_IDS,
@@ -37,7 +38,7 @@ import {
 } from '../agent/roles/prompts'
 
 export interface RouteDecision {
-  mode: 'direct' | 'single' | 'pipeline'
+  mode: 'direct' | 'single' | 'pipeline' | 'parallel'
   role?: string
   roles?: string[]
   reason: string
@@ -104,6 +105,40 @@ export async function run(input: AtlasRunInput, cb: AtlasCallbacks, signal: Abor
     })
     fireSideEffects(input.convId, decision.role!, out.endpointId, out.model, out.inputTokens)
     return { inputTokens: out.inputTokens }
+  }
+
+  if (decision.mode === 'parallel') {
+    // B1: N experts answer the SAME question INDEPENDENTLY + concurrently (diversity is the point — they
+    // don't see each other), then Atlas synthesizes a multi-perspective comparison. The renderer routes
+    // each expert's deltas by roleId so they stream side-by-side. One failure drops out (filter) rather
+    // than sinking the whole panel.
+    const fullChain = [...decision.roles!, 'atlas']
+    cb.onDispatch(fullChain, decision.reason)
+    if (decision.intro) emitAtlasIntro(input.convId, decision.intro, cb)
+    const settled = await Promise.all(
+      decision.roles!.map((roleId) =>
+        runRoleStep({ convId: input.convId, roleId, prompt: buildPanelPrompt(input.prompt, roleId), dispatch: fullChain, includeHistory: false, cb, signal })
+          .then((out) => ({ role: roleId, ...out }))
+          .catch(() => null)
+      )
+    )
+    if (signal.aborted) throw new LlmError('network', 'aborted mid-parallel')
+    const outputs = settled.filter((o): o is NonNullable<typeof o> => !!o && !!o.text)
+    if (outputs.length === 0) throw new LlmError('upstream', 'parallel panel produced no output')
+    const synthInput = buildParallelSynthesisInput(input.prompt, outputs.map((o) => ({ role: o.role, text: o.text })))
+    const synth = await runRoleStep({
+      convId: input.convId,
+      roleId: 'atlas',
+      prompt: synthInput,
+      dispatch: fullChain,
+      includeHistory: false,
+      isParallelSynthesis: true,
+      cb,
+      signal
+    })
+    const last = outputs[outputs.length - 1]
+    fireSideEffects(input.convId, last.role, last.endpointId, last.model, last.inputTokens)
+    return { inputTokens: synth.inputTokens }
   }
 
   // Pipeline: chain stored on each step = [...experts, 'atlas']. The renderer's DispatchBadge prefixes
@@ -263,13 +298,13 @@ export function parseRouteDecision(raw: string, enabled: readonly string[]): Rou
         return { mode: 'single', role: obj.role, reason, intro }
       }
       if (
-        obj.mode === 'pipeline' &&
+        (obj.mode === 'pipeline' || obj.mode === 'parallel') &&
         Array.isArray(obj.roles) &&
         obj.roles.length >= 2 &&
         obj.roles.length <= 3 &&
         obj.roles.every((r: unknown) => typeof r === 'string' && enabled.includes(r))
       ) {
-        return { mode: 'pipeline', roles: obj.roles as string[], reason, intro }
+        return { mode: obj.mode, roles: obj.roles as string[], reason, intro }
       }
       // mode=council from the spec gracefully degrades to its first role (v0.3 feature).
       if (obj.mode === 'council' && Array.isArray(obj.roles) && obj.roles.length > 0) {
@@ -322,10 +357,13 @@ interface RunStepOptions {
   // isDirect=true → Atlas answers the turn himself (B0): use ATLAS_DIRECT_PROMPT instead of a role
   // section. Memory recall still runs (Atlas's own memories help), unlike synthesis.
   isDirect?: boolean
+  // isParallelSynthesis=true → Atlas merges a parallel panel (B1): use ATLAS_PARALLEL_SYNTHESIS_PROMPT,
+  // skip memory recall like normal synthesis.
+  isParallelSynthesis?: boolean
 }
 
 async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputTokens: number; endpointId: string; model: string }> {
-  const { convId, roleId, prompt, dispatch, cb, signal, includeHistory = false, isSynthesis = false, isDirect = false } = opts
+  const { convId, roleId, prompt, dispatch, cb, signal, includeHistory = false, isSynthesis = false, isDirect = false, isParallelSynthesis = false } = opts
   const binding = roleRepo.getBinding(roleId)
   if (!binding?.endpointId || !binding.model) {
     throw new LlmError('bad_request', `role "${roleId}" has no endpoint binding`)
@@ -336,11 +374,17 @@ async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputT
   const apiKey = keychain.getApiKey(binding.endpointId)
   if (!apiKey) throw new LlmError('bad_key', `no API key for role "${roleId}"`)
 
-  const systemPrompt = isDirect ? ATLAS_DIRECT_PROMPT : isSynthesis ? ATLAS_SYNTHESIS_PROMPT : buildRolePrompt(roleId)
+  const systemPrompt = isDirect
+    ? ATLAS_DIRECT_PROMPT
+    : isParallelSynthesis
+      ? ATLAS_PARALLEL_SYNTHESIS_PROMPT
+      : isSynthesis
+        ? ATLAS_SYNTHESIS_PROMPT
+        : buildRolePrompt(roleId)
   if (!systemPrompt) throw new LlmError('bad_request', `unknown role "${roleId}"`)
 
   const parts = [systemPrompt]
-  if (!isSynthesis) {
+  if (!isSynthesis && !isParallelSynthesis) {
     // Inject memories + summary the same way chat.service does, so dispatched roles see what they've
     // learned about the user. Synthesis skips this (see RunStepOptions doc).
     const memories = await memoryService.recall({ convId, roleId, endpointId: binding.endpointId, model: binding.model })
@@ -443,6 +487,20 @@ function buildSynthesisInput(originalQuery: string, outputs: { role: string; tex
   const sections = [`Original user message:\n${originalQuery}`, '', 'Expert outputs in order:']
   for (const o of outputs) sections.push('', `## ${o.role}`, o.text)
   sections.push('', 'Now produce ONE coherent reply for the user. Follow the synthesis rules in your system prompt.')
+  return sections.join('\n')
+}
+
+// Each parallel-panel expert gets the question + a nudge that they're one independent voice. Without it,
+// role personas like Hex's "dispatch mode" wording make them try to route or defer instead of answering
+// (observed in e2e: Hex replied "Routing this…" rather than giving its take).
+function buildPanelPrompt(question: string, roleId: string): string {
+  return `${question}\n\n---\nYou are one of several experts answering this independently. Give YOUR own substantive take from your specialty as ${roleId} — don't route it, don't defer to other experts, don't ask who should handle it. Atlas compares everyone's answers afterward.`
+}
+
+function buildParallelSynthesisInput(originalQuery: string, outputs: { role: string; text: string }[]): string {
+  const sections = [`Original user question:\n${originalQuery}`, '', 'Each expert answered INDEPENDENTLY (a panel, not a pipeline):']
+  for (const o of outputs) sections.push('', `## ${o.role}`, o.text)
+  sections.push('', 'Now synthesize the panel for the user. Follow the rules in your system prompt — lead with your recommendation, surface agreement vs divergence, attribute distinct points.')
   return sections.join('\n')
 }
 
