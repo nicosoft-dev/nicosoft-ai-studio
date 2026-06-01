@@ -18,15 +18,14 @@ import type {
 } from '@/types'
 
 const EXPERTS: Expert[] = [
-  { id: 'atlas', name: 'Atlas', color: 'var(--exp-atlas)', specialty: 'Coordinator — routes & merges', personality: 'Calm air-traffic-controller', model: 'claude-haiku-4', family: 'anthropic', coordinator: true },
-  { id: 'iris', name: 'Iris', color: 'var(--exp-iris)', specialty: 'Generalist — chat & brainstorming', personality: 'Warm, curious front door', model: 'gpt-5-mini', family: 'openai' },
+  { id: 'atlas', name: 'Atlas', color: 'var(--exp-atlas)', specialty: 'Coordinator — routes & merges', personality: 'Calm air-traffic-controller', model: 'claude-sonnet-4.6', family: 'anthropic', coordinator: true },
+  { id: 'iris', name: 'Iris', color: 'var(--exp-iris)', specialty: 'Generalist — chat & brainstorming', personality: 'Warm, curious front door', model: 'gpt-5.5', family: 'openai' },
   { id: 'hex', name: 'Hex', color: 'var(--exp-hex)', specialty: 'Software engineer — code', personality: 'Precise, direct, no pleasantries', model: 'claude-sonnet-4.6', family: 'anthropic' },
   { id: 'lyra', name: 'Lyra', color: 'var(--exp-lyra)', specialty: 'Designer — images & posters', personality: 'Creative, opinionated', model: 'imagen-4', family: 'gemini' },
-  { id: 'echo', name: 'Echo', color: 'var(--exp-echo)', specialty: 'Translator — any language pair', personality: 'Precise, culturally aware', model: 'gemini-2.5-flash', family: 'gemini' },
-  { id: 'sage', name: 'Sage', color: 'var(--exp-sage)', specialty: 'Editor — summarize & condense', personality: 'Structured, no padding', model: 'gemini-2.5-flash', family: 'gemini' },
-  { id: 'quant', name: 'Quant', color: 'var(--exp-quant)', specialty: 'Data analyst — stats & charts', personality: 'Rigorous, honest about uncertainty', model: 'gpt-5', family: 'openai' },
-  { id: 'mercury', name: 'Mercury', color: 'var(--exp-mercury)', specialty: 'Email & scheduling', personality: 'Efficient, situationally appropriate', model: 'gpt-5-mini', family: 'openai' },
-  { id: 'ci', name: 'CI', color: 'oklch(0.72 0.045 235)', specialty: 'Custom — CI/CD & release assistant', personality: 'Methodical; checks the pipeline before you ask', model: null, family: null, custom: true, unconfigured: true }
+  { id: 'echo', name: 'Echo', color: 'var(--exp-echo)', specialty: 'Translator — any language pair', personality: 'Precise, culturally aware', model: 'gemini-3.1-flash-lite', family: 'gemini' },
+  { id: 'sage', name: 'Sage', color: 'var(--exp-sage)', specialty: 'Editor — summarize & condense', personality: 'Structured, no padding', model: 'gemini-3.1-pro', family: 'gemini' },
+  { id: 'quant', name: 'Quant', color: 'var(--exp-quant)', specialty: 'Data analyst — stats & charts', personality: 'Rigorous, honest about uncertainty', model: 'gpt-5.5', family: 'openai' },
+  { id: 'mercury', name: 'Mercury', color: 'var(--exp-mercury)', specialty: 'Email & scheduling', personality: 'Efficient, situationally appropriate', model: 'gpt-5-mini', family: 'openai' }
 ]
 
 const EXPERT_BY_ID: Record<string, Expert> = Object.fromEntries(EXPERTS.map((e) => [e.id, e]))
@@ -36,7 +35,7 @@ const USER_PROFILE = { name: 'Nico' }
 const MEMORY: MemoryData = {
   selfLearning: {
     master: true,
-    perExpert: { atlas: true, iris: true, hex: true, lyra: true, echo: true, sage: true, quant: true, mercury: true, ci: false }
+    perExpert: { atlas: true, iris: true, hex: true, lyra: true, echo: true, sage: true, quant: true, mercury: true }
   },
   shared: [
     { id: 's1', text: 'Goes by Nico; prefers terse, code-first answers over prose.' },
@@ -71,8 +70,7 @@ const MEMORY: MemoryData = {
     sage: { role: [{ id: 'sg1', text: 'Wants action items as bullets, max three, no preamble.' }], collab: [] },
     iris: { role: [{ id: 'i1', text: 'Likes 2–3 framed options before committing to one.' }], collab: [] },
     lyra: { role: [{ id: 'l1', text: 'Default vibe: flat, restrained, no gradients.' }], collab: [] },
-    mercury: { role: [{ id: 'm1', text: 'Signs emails simply; proposes three time slots by default.' }], collab: [] },
-    ci: { role: [], collab: [] }
+    mercury: { role: [{ id: 'm1', text: 'Signs emails simply; proposes three time slots by default.' }], collab: [] }
   }
 }
 
@@ -96,10 +94,9 @@ const EXTENSIONS: ExtensionsData = {
       enabled: true,
       bundles: [
         { type: 'skill', name: 'code-review' },
-        { type: 'mcp', name: 'GitHub' },
-        { type: 'role', name: 'CI' }
+        { type: 'mcp', name: 'GitHub' }
       ],
-      summary: '1 skill · 1 MCP · 1 role'
+      summary: '1 skill · 1 MCP'
     }
   ]
 }
@@ -226,8 +223,7 @@ const GREETINGS: Record<string, Greeting> = {
   echo: { greeting: 'I translate any language pair and localize copy. Paste text and tell me the target language.', chips: ['Translate landing page to German', 'Localize for ja-JP', 'Is this idiomatic?'] },
   sage: { greeting: 'I summarize, condense, and take notes. Drop in a long doc or transcript.', chips: ['Summarize this thread', 'Turn notes into action items', 'Condense to 100 words'] },
   quant: { greeting: 'I run the numbers — stats, math, and chart recommendations. Bring your data.', chips: ['Analyze Q1 churn', 'Is this difference significant?', 'Recommend a chart'] },
-  mercury: { greeting: 'I draft emails, replies, and agendas. Tell me the recipient and the gist.', chips: ['Reply to this investor', 'Draft a meeting agenda', 'Polish this cold email'] },
-  ci: { greeting: "I'm CI — your release assistant. I watch builds, draft changelogs, and flag flaky pipelines. Bind me to an endpoint to get started.", chips: ['Summarize the last failed build', 'Draft release notes', 'Why is this pipeline slow?'] }
+  mercury: { greeting: 'I draft emails, replies, and agendas. Tell me the recipient and the gist.', chips: ['Reply to this investor', 'Draft a meeting agenda', 'Polish this cold email'] }
 }
 
 const HISTORY: HistoryGroup[] = [

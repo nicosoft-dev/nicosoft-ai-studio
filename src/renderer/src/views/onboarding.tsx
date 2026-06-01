@@ -12,7 +12,7 @@ import type { EndpointDto } from '@/lib/api'
 
 type Proto = EndpointDto['protocol']
 const PROTO_BASE: Record<Proto, string> = {
-  openai: 'https://api.openai.com/v1',
+  openai: 'https://api.openai.com',
   anthropic: 'https://api.anthropic.com',
   gemini: 'https://generativelanguage.googleapis.com',
   custom: 'https://'

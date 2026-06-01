@@ -14,7 +14,7 @@ import type { EndpointDto, EndpointInput, ModelInfo } from '@/lib/api'
 
 /* — Add / Edit endpoint dialog (controlled) — */
 const PROTO_BASE: Record<string, string> = {
-  openai: "https://api.openai.com/v1",
+  openai: "https://api.openai.com",
   anthropic: "https://api.anthropic.com",
   gemini: "https://generativelanguage.googleapis.com",
   custom: "https://",
