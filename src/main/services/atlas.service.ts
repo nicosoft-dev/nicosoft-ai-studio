@@ -28,7 +28,6 @@ import { chat as llmChat } from '../llm/client'
 import { countContext } from './token-count.service'
 import { pickSmallModel } from './model-select'
 import { LlmError, type ChatAttachment, type ChatMessage } from '../llm/types'
-import type { Protocol } from '../domain'
 import {
   ATLAS_ROUTER_PROMPT,
   ATLAS_SYNTHESIS_PROMPT,
@@ -167,14 +166,18 @@ export async function route(userInput: string, history: convRepo.MessageRow[], s
   const apiKey = keychain.getApiKey(binding.endpointId)
   if (!apiKey) return { mode: 'single', role: enabled[0], reason: 'no api key' }
 
-  const messages = buildRouterMessages(userInput, history, ep.protocol, enabled)
+  const messages = buildRouterMessages(userInput, history, enabled)
   try {
     const result = await llmChat(
       { protocol: ep.protocol, baseUrl: ep.baseUrl, apiKey, model: binding.model, messages, signal },
       () => {} // collect, don't stream
     )
     return parseRouteDecision(result.text, enabled)
-  } catch {
+  } catch (e) {
+    // Router LLM failed — fall back to the first enabled role so Atlas never dead-ends, but DON'T
+    // swallow silently: a persistent failure here makes every turn degrade to one role, which looks
+    // like a routing-quality problem while actually being a broken router. Surface it.
+    console.warn('[atlas] router LLM call failed, falling back to', enabled[0], '—', e instanceof Error ? e.message : e)
     return { mode: 'single', role: enabled[0], reason: 'router error' }
   }
 }
@@ -182,7 +185,6 @@ export async function route(userInput: string, history: convRepo.MessageRow[], s
 function buildRouterMessages(
   userInput: string,
   history: convRepo.MessageRow[],
-  protocol: Protocol,
   enabled: readonly string[]
 ): ChatMessage[] {
   const sysParts = [
@@ -209,17 +211,18 @@ function buildRouterMessages(
   } else {
     messages.push({ role: 'user', content: userInput + reinforcer })
   }
-  // Anthropic has no JSON mode — prefill the assistant turn with "{" so it continues writing JSON.
-  // The opening brace is consumed by the prefill (model's response won't include it), so the parser
-  // tries both raw and "{ + raw" variants.
-  if (protocol === 'anthropic') messages.push({ role: 'assistant', content: '{' })
+  // No assistant prefill: nsai's Claude OAuth upstream rejects it ("This model does not support
+  // assistant message prefill. The conversation must end with a user message."). The reinforcer above
+  // already forces JSON-only output and parseRouteDecision tolerates fences / stray prose, so a
+  // prose-wrapped JSON object still parses. The message list now always ends with a user turn.
   return messages
 }
 
 export function parseRouteDecision(raw: string, enabled: readonly string[]): RouteDecision {
   const trimmed = raw.trim()
-  // Three JSON candidates: raw, with leading "{" restored (anthropic prefill), and the first {...}
-  // substring (handles models that wrap JSON in markdown fences or add prose).
+  // JSON candidates, tried in order: the raw text, then the first {...} substring (handles models that
+  // fence the JSON or wrap it in prose). The "{"-prefixed variant is a cheap guard for the rare model
+  // that drops the opening brace.
   const candidates: string[] = [trimmed, '{' + trimmed]
   const objMatch = trimmed.match(/\{[\s\S]*\}/)
   if (objMatch) candidates.push(objMatch[0])
