@@ -29,9 +29,9 @@ import { countContext } from './token-count.service'
 import { pickSmallModel } from './model-select'
 import { LlmError, type ChatAttachment, type ChatMessage } from '../llm/types'
 import {
-  ATLAS_CONVERGENCE_PROMPT,
   ATLAS_COUNCIL_SYNTHESIS_PROMPT,
   ATLAS_DIRECT_PROMPT,
+  ATLAS_FACILITATOR_PROMPT,
   ATLAS_PARALLEL_SYNTHESIS_PROMPT,
   ATLAS_ROUTER_PROMPT,
   ATLAS_SYNTHESIS_PROMPT,
@@ -144,22 +144,24 @@ export async function run(input: AtlasRunInput, cb: AtlasCallbacks, signal: Abor
   }
 
   if (decision.mode === 'council') {
-    // B2: a multi-round DEBATE. Round 1 = independent proposals (like parallel); round 2+ = each expert
-    // sees everyone's prior positions and critiques/refines (adversarial). After each round Atlas judges
-    // convergence (pure judgment). MAX_ROUNDS is a runaway backstop, NOT the convergence strategy —
-    // normally Atlas stops at 2-3. Final: Atlas writes the converged verdict.
+    // B3: Atlas FACILITATES a live debate. Round 1 = proposals; later rounds = critique. After each
+    // round Atlas decides the next move — converge, continue with the current panel, or pull in ONE
+    // missing expert (dynamic panel). MAX_ROUNDS is a runaway backstop, NOT the strategy. A freshly
+    // added expert proposes fresh on its first turn (tracked via `seen`), then critiques.
     const MAX_ROUNDS = 6
-    const roles = decision.roles!
-    const fullChain = [...roles, 'atlas']
+    let roles = [...decision.roles!]
+    let fullChain = [...roles, 'atlas']
     cb.onDispatch(fullChain, decision.reason)
     if (decision.intro) emitAtlasIntro(input.convId, decision.intro, cb)
 
+    const seen = new Set<string>()
     let positions: { role: string; text: string }[] = []
     for (let round = 1; round <= MAX_ROUNDS; round++) {
       const prev = positions
       const settled = await Promise.all(
         roles.map((roleId) => {
-          const prompt = round === 1 ? buildPanelPrompt(input.prompt, roleId) : buildCritiquePrompt(input.prompt, prev, roleId)
+          const prompt = seen.has(roleId) ? buildCritiquePrompt(input.prompt, prev, roleId) : buildPanelPrompt(input.prompt, roleId)
+          seen.add(roleId)
           return runRoleStep({ convId: input.convId, roleId, prompt, dispatch: fullChain, includeHistory: false, cb, signal })
             .then((out) => ({ role: roleId, text: out.text }))
             .catch(() => null)
@@ -168,8 +170,15 @@ export async function run(input: AtlasRunInput, cb: AtlasCallbacks, signal: Abor
       if (signal.aborted) throw new LlmError('network', 'aborted mid-council')
       positions = settled.filter((p): p is { role: string; text: string } => !!p && !!p.text)
       if (positions.length === 0) throw new LlmError('upstream', 'council produced no positions')
-      if (positions.length === 1) break // only one voice left → nothing left to debate
-      if (await checkConvergence(input.prompt, positions, round, signal)) break
+      if (positions.length === 1 || round === MAX_ROUNDS) break
+      const move = await facilitate(input.prompt, positions, roles, signal)
+      if (move.action === 'converge') break
+      if (move.action === 'add') {
+        roles = [...roles, move.role]
+        fullChain = [...roles, 'atlas']
+        emitAtlasIntro(input.convId, `Bringing in ${move.role.charAt(0).toUpperCase() + move.role.slice(1)} for a perspective the others can't cover.`, cb)
+      }
+      // 'continue' (or 'add' after pulling the new expert) → next round
     }
 
     const synthInput = buildCouncilSynthesisInput(input.prompt, positions)
@@ -567,10 +576,17 @@ function buildCritiquePrompt(question: string, positions: { role: string; text: 
   return sections.join('\n')
 }
 
-function buildConvergenceInput(question: string, positions: { role: string; text: string }[], round: number): string {
-  const sections = [`Question:\n${question}`, '', `Round ${round} — current expert positions:`]
+function buildFacilitateInput(question: string, positions: { role: string; text: string }[], panel: string[], available: string[]): string {
+  const sections = [
+    `Question:\n${question}`,
+    '',
+    `Current panel: ${panel.join(', ')}`,
+    `Available to add: ${available.length ? available.join(', ') : '(none)'}`,
+    '',
+    'Current expert positions:'
+  ]
   for (const p of positions) sections.push('', `## ${p.role}`, p.text)
-  sections.push('', 'Has the debate converged? Respond with ONLY the JSON object.')
+  sections.push('', 'What is the next move? Respond with ONLY the JSON object.')
   return sections.join('\n')
 }
 
@@ -581,30 +597,42 @@ function buildCouncilSynthesisInput(question: string, positions: { role: string;
   return sections.join('\n')
 }
 
-// B2: after each council round Atlas judges convergence (its own binding, no prefill — Sonnet 4.6).
-// Returns true to stop, false to run another round. Any failure → true (stop safely; MAX_ROUNDS also caps).
-async function checkConvergence(question: string, positions: { role: string; text: string }[], round: number, signal: AbortSignal): Promise<boolean> {
+// B3: after each council round Atlas facilitates — returns the next move (converge / continue / add a
+// missing expert). Atlas's own binding, no prefill (Sonnet 4.6). availableToAdd = enabled experts not on
+// the panel, capped by MAX_PANEL. Any failure → converge (stop safely; MAX_ROUNDS also caps).
+type FacilitateMove = { action: 'converge' } | { action: 'continue' } | { action: 'add'; role: string }
+async function facilitate(question: string, positions: { role: string; text: string }[], panel: string[], signal: AbortSignal): Promise<FacilitateMove> {
+  const MAX_PANEL = 4
   const binding = roleRepo.getBinding('atlas')
-  if (!binding?.endpointId || !binding.model) return true
+  if (!binding?.endpointId || !binding.model) return { action: 'converge' }
   const ep = endpointRepo.getById(binding.endpointId)
-  if (!ep || !ep.enabled) return true
+  if (!ep || !ep.enabled) return { action: 'converge' }
   const apiKey = keychain.getApiKey(binding.endpointId)
-  if (!apiKey) return true
+  if (!apiKey) return { action: 'converge' }
+  const disabled = disabledRoleIds()
+  // Only experts that can actually speak: not disabled, not already on the panel, AND have a binding —
+  // Lyra (image role, no chat binding) would just fail + get filtered, leaving a dangling "Bringing in
+  // Lyra" note. Excluding it here keeps Atlas from pulling in someone who can't contribute.
+  const available =
+    panel.length >= MAX_PANEL
+      ? []
+      : DISPATCHABLE_ROLE_IDS.filter((r) => !disabled.has(r) && !panel.includes(r) && !!roleRepo.getBinding(r)?.endpointId)
   const messages: ChatMessage[] = [
-    { role: 'system', content: ATLAS_CONVERGENCE_PROMPT },
-    { role: 'user', content: buildConvergenceInput(question, positions, round) }
+    { role: 'system', content: ATLAS_FACILITATOR_PROMPT },
+    { role: 'user', content: buildFacilitateInput(question, positions, panel, available) }
   ]
   try {
     const result = await llmChat({ protocol: ep.protocol, baseUrl: ep.baseUrl, apiKey, model: binding.model, messages, signal }, () => {})
     const m = result.text.match(/\{[\s\S]*\}/)
     if (m) {
-      const obj = JSON.parse(m[0]) as { converged?: unknown }
-      return obj.converged === true
+      const obj = JSON.parse(m[0]) as { action?: unknown; role?: unknown }
+      if (obj.action === 'add' && typeof obj.role === 'string' && available.includes(obj.role)) return { action: 'add', role: obj.role }
+      if (obj.action === 'continue') return { action: 'continue' }
     }
   } catch {
     /* fall through — couldn't judge */
   }
-  return false // unparseable → keep debating (bounded by MAX_ROUNDS)
+  return { action: 'converge' } // unparseable / explicit converge / anything unexpected → stop safely
 }
 
 // ------- Helpers -------

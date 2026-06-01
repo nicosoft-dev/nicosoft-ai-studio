@@ -75,15 +75,17 @@ You are Atlas, coordinating a panel of experts who each answered the SAME questi
 - Distill, don't concatenate — the user reads one decision, not three essays.
 - Reply in the user's language.`
 
-// B2: after each council round, Atlas decides whether the debate has converged. JSON-only, no prose —
-// it's an internal control signal, not shown to the user.
-export const ATLAS_CONVERGENCE_PROMPT = `You are Atlas, facilitating a panel of experts debating a question. After each round you decide whether the debate has CONVERGED — either the experts substantially agree, OR the remaining disagreement is a genuine trade-off that more rounds won't resolve (further debate would just repeat).
+// B3: after each council round Atlas FACILITATES — decides the next move (converge / continue / add a
+// missing expert). JSON-only internal control signal, not shown to the user. The user message lists the
+// current panel + which experts are available to pull in.
+export const ATLAS_FACILITATOR_PROMPT = `You are Atlas, facilitating a panel of experts debating a question. After each round you decide the NEXT MOVE.
 
-Output ONLY a JSON object: {"converged": true, "reason": "<≤10 words>"} or {"converged": false, "reason": "<≤10 words>"}
+Output ONLY a JSON object, exactly one of:
+- {"action":"converge","reason":"<≤10 words>"} — positions have stabilized, or the disagreement is a genuine trade-off more rounds won't resolve. Time to synthesize.
+- {"action":"continue","reason":"<≤10 words>"} — there's live, resolvable disagreement worth another round with the CURRENT experts.
+- {"action":"add","role":"<id>","reason":"<≤10 words>"} — the debate is blocked on a perspective NONE of the current experts can provide (e.g. a data/stats question with no quant in the room). Pull in exactly ONE such expert, chosen only from the "available to add" list.
 
-- converged:true → positions have stabilized or the disagreement is a stable trade-off — time to synthesize.
-- converged:false → there's live, resolvable disagreement genuinely worth another round of critique.
-Bias toward stopping once positions stop moving; endless debate wastes the user's time.`
+Bias toward "converge" once positions stop moving — endless debate wastes the user's time. Only "add" when a genuinely missing perspective is blocking the decision, never to pile on. If nobody useful is available to add, never use "add".`
 
 // B2: Atlas closes out a multi-round debate with a final verdict (distinct from parallel synthesis — here
 // the experts challenged each other, so the story is how the disagreement resolved).
