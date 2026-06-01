@@ -33,7 +33,9 @@ const NS_GENERATE_IMAGE: ToolDeclaration = {
   description:
     'Generate an image from a detailed text prompt. Call this whenever the user wants a picture, poster, ' +
     'illustration, avatar, thumbnail, or any visual. Write a vivid, specific prompt in English (image ' +
-    'models produce higher quality from English); your conversation with the user stays in their language.',
+    'models produce higher quality from English); your conversation with the user stays in their language. ' +
+    'The image is produced asynchronously and attached to the conversation automatically — first tell the ' +
+    'user what you are about to create, then call this tool; never claim the image is already shown.',
   parameters: {
     type: 'object',
     properties: {
@@ -106,7 +108,7 @@ async function execGenerateImage(
   apiKey: string,
   args: Record<string, unknown>,
   signal: AbortSignal
-): Promise<{ attachment: MessageAttachmentDto; response: Record<string, unknown> }> {
+): Promise<MessageAttachmentDto> {
   const imageModel = input.imageModel || DEFAULT_IMAGE_MODEL
   const caps = imageModelCaps(imageModel)
   if (!caps) throw new LlmError('bad_request', `"${imageModel}" is not a recognized image model`)
@@ -124,8 +126,7 @@ async function execGenerateImage(
     signal
   })
   const img = result.images[0]
-  const attachment = persistBase64(input.convId, img.base64, img.mime)
-  return { attachment, response: { success: true, note: result.note ?? 'image generated' } }
+  return persistBase64(input.convId, img.base64, img.mime)
 }
 
 export async function run(input: ImageToolRunInput, cb: ImageToolCallbacks, signal: AbortSignal): Promise<{ promptTokens: number }> {
@@ -141,6 +142,11 @@ export async function run(input: ImageToolRunInput, cb: ImageToolCallbacks, sign
   let inTokens = 0
   let outTokens = 0
 
+  // Image generations run ASYNCHRONOUSLY so the model replies with text first (text-first UX): each
+  // ns_generate_image call gets a "generating" functionResponse immediately — no blocking on the
+  // multi-second render — so the model speaks in the next round while the image lands later via
+  // cb.onImage. The turn awaits all pending generations before persisting so no attachment is lost.
+  const pending: Promise<void>[] = []
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const result = await chatGemini(
       { protocol: 'gemini', baseUrl: ep.baseUrl, apiKey, model: input.model, messages, thinking: input.thinking, tools: [NS_GENERATE_IMAGE], signal },
@@ -157,18 +163,28 @@ export async function run(input: ImageToolRunInput, cb: ImageToolCallbacks, sign
     const toolResults: ToolResult[] = []
     for (const tc of result.toolCalls) {
       if (tc.name !== NS_GENERATE_IMAGE.name) continue
-      cb.onImageStart() // surface a loading placeholder before the (multi-second) generation call
-      try {
-        const { attachment, response } = await execGenerateImage(input, ep.baseUrl, apiKey, tc.args, signal)
-        attachments.push(attachment)
-        cb.onImage(attachment)
-        toolResults.push({ id: tc.id, name: tc.name, result: response })
-      } catch (e) {
-        toolResults.push({ id: tc.id, name: tc.name, result: { success: false, error: e instanceof Error ? e.message : 'image generation failed' } })
-      }
+      cb.onImageStart() // loading placeholder; the finished image fills it in asynchronously via cb.onImage
+      pending.push(
+        execGenerateImage(input, ep.baseUrl, apiKey, tc.args, signal)
+          .then((attachment) => {
+            attachments.push(attachment)
+            cb.onImage(attachment)
+          })
+          .catch(() => {
+            // Generation failed — the unfulfilled placeholder is dropped when the turn finishes (onDone).
+            // The model already told the user it was generating, so there's no synchronous error to inject.
+          })
+      )
+      toolResults.push({
+        id: tc.id,
+        name: tc.name,
+        result: { success: true, status: 'Image generation started; it will appear in the conversation automatically when ready.' }
+      })
     }
     messages.push({ role: 'user', content: '', toolResults })
   }
+
+  await Promise.allSettled(pending) // every async image is captured before the turn is persisted
 
   usageRepo.record({ model: input.model, provider: 'gemini', inTokens, outTokens })
 
