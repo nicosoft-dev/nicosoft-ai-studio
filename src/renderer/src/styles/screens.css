@@ -767,6 +767,9 @@
 .ext-more { flex: 0 0 auto; }
 .ext-more-wrap { position: relative; flex: 0 0 auto; }
 .ext-empty { padding: 26px 16px; text-align: center; font-size: 12.5px; color: var(--text-4); }
+/* plugin-installed skill/mcp: "via <plugin>" marker + locked (disabled) toggle */
+.ext-owned { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; color: var(--text-3); background: var(--bg-2); border: 1px solid var(--border-1); border-radius: 4px; padding: 1px 5px; }
+.switch.disabled { opacity: 0.45; cursor: not-allowed; }
 .mcp-scope-roles { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .scope-pick {
   display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 999px;

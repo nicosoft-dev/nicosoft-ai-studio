@@ -51,7 +51,8 @@ import type {
   McpServerInput,
   McpTestResult,
   SkillDto,
-  SkillInput
+  SkillInput,
+  PluginDto
 } from '../main/ipc/contracts'
 
 // Typed bridge exposed to the renderer as `window.api`. Window controls (Batch 0) + Batch 1
@@ -207,6 +208,14 @@ const api = {
       ipcRenderer.invoke('skills:update', id, patch),
     remove: (id: string): Promise<void> => ipcRenderer.invoke('skills:remove', id),
     pickDir: (): Promise<string | null> => ipcRenderer.invoke('skills:pickDir')
+  },
+  plugins: {
+    list: (): Promise<PluginDto[]> => ipcRenderer.invoke('plugins:list'),
+    install: (dirPath: string): Promise<PluginDto> => ipcRenderer.invoke('plugins:install', dirPath),
+    uninstall: (id: string): Promise<void> => ipcRenderer.invoke('plugins:uninstall', id),
+    toggle: (id: string, enabled: boolean): Promise<PluginDto | null> =>
+      ipcRenderer.invoke('plugins:toggle', id, enabled),
+    pickDir: (): Promise<string | null> => ipcRenderer.invoke('plugins:pickDir')
   }
 }
 

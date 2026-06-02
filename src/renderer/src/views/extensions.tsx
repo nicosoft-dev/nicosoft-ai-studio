@@ -13,15 +13,30 @@ import { ImageModelPicker } from '@/components/composer-controls'
 import { McpDialog, SkillDialog } from '@/components/dialogs'
 import { useRoleBinding } from '@/lib/use-role-binding'
 import { STUDIO_DATA } from '@/data/studio-data'
-import type { McpServerDto, SkillDto } from '@/lib/api'
+import type { McpServerDto, SkillDto, PluginDto } from '@/lib/api'
 import type { PluginBundle } from '@/types'
 
 /* — small flat switch — */
-function Toggle({ on, onClick }: { on: boolean; onClick: () => void }): ReactElement {
+function Toggle({ on, onClick, disabled }: { on: boolean; onClick: () => void; disabled?: boolean }): ReactElement {
   return (
-    <button className={"switch" + (on ? " on" : "")} onClick={onClick} role="switch" aria-checked={on}>
+    <button
+      className={"switch" + (on ? " on" : "") + (disabled ? " disabled" : "")}
+      onClick={disabled ? undefined : onClick}
+      role="switch"
+      aria-checked={on}
+      disabled={disabled}
+    >
       <span className="knob" />
     </button>
+  );
+}
+
+/* — "via <plugin>" marker on a plugin-installed skill/mcp (locked: managed from the Plugins tab) — */
+function OwnedTag({ name }: { name: string }): ReactElement {
+  return (
+    <span className="ext-owned" title={`Installed by the ${name} plugin — manage it from the Plugins tab`}>
+      <Icons.box size={11} /> {name}
+    </span>
   );
 }
 
@@ -53,12 +68,17 @@ function ExtTabHead({ help, action, onAdd }: { help: string; action?: string; on
 /* ——— MCP (real data via window.api.mcp) ——— */
 function MCPTab({ onCount }: { onCount: (n: number) => void }): ReactElement {
   const [servers, setServers] = useState<McpServerDto[]>([]);
+  const [plugins, setPlugins] = useState<PluginDto[]>([]);
   const [dialog, setDialog] = useState<{ editing: McpServerDto | null } | null>(null);
   const [menu, setMenu] = useState<string | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
 
-  const reload = (): void => void window.api.mcp.list().then((s) => { setServers(s); onCount(s.length); });
+  const reload = (): void => {
+    void window.api.mcp.list().then((s) => { setServers(s); onCount(s.length); });
+    void window.api.plugins.list().then(setPlugins);
+  };
   useEffect(() => { reload(); }, []);
+  const pluginName = (id: string | null): string => plugins.find((p) => p.id === id)?.name ?? "plugin";
 
   const onToggle = (m: McpServerDto): void => {
     void window.api.mcp
@@ -87,6 +107,7 @@ function MCPTab({ onCount }: { onCount: (n: number) => void }): ReactElement {
         ) : (
           servers.map((m) => {
             const ok = m.status === "connected";
+            const owned = !!m.ownerPluginId;
             const TI = m.transport === "stdio" ? Icons.terminal : Icons.link;
             return (
               <div className={"ext-row" + (m.enabled ? "" : " off")} key={m.id}>
@@ -94,6 +115,7 @@ function MCPTab({ onCount }: { onCount: (n: number) => void }): ReactElement {
                 <div className="ext-main">
                   <div className="ext-line1">
                     <span className="ext-name">{m.name}</span>
+                    {owned ? <OwnedTag name={pluginName(m.ownerPluginId)} /> : null}
                     <HealthDot status={ok ? "healthy" : m.status === "error" ? "failing" : "off"} />
                     <span className={"ext-status " + (ok ? "ok" : m.status === "error" ? "err" : "")}>
                       {testing === m.id ? "testing…" : m.status}
@@ -104,23 +126,25 @@ function MCPTab({ onCount }: { onCount: (n: number) => void }): ReactElement {
                 <div className="ext-right">
                   <span className="ext-tools">{ok ? m.toolCount + " tools" : "—"}</span>
                   <ScopeChip scope={m.scope} />
-                  <Toggle on={m.enabled} onClick={() => onToggle(m)} />
+                  <Toggle on={m.enabled} onClick={() => onToggle(m)} disabled={owned} />
                 </div>
-                <div className="ext-more-wrap">
-                  <button className="icon-btn ext-more" onClick={() => setMenu(menu === m.id ? null : m.id)}>
-                    <Icons.more size={16} />
-                  </button>
-                  {menu === m.id ? (
-                    <>
-                      <div className="menu-backdrop" onClick={() => setMenu(null)} />
-                      <div className="row-menu right">
-                        <div className="rm-item" onClick={() => { setDialog({ editing: m }); setMenu(null); }}>Edit</div>
-                        <div className="rm-item" onClick={() => onTest(m.id)}>Test connection</div>
-                        <div className="rm-item danger" onClick={() => onRemove(m.id)}>Remove</div>
-                      </div>
-                    </>
-                  ) : null}
-                </div>
+                {owned ? null : (
+                  <div className="ext-more-wrap">
+                    <button className="icon-btn ext-more" onClick={() => setMenu(menu === m.id ? null : m.id)}>
+                      <Icons.more size={16} />
+                    </button>
+                    {menu === m.id ? (
+                      <>
+                        <div className="menu-backdrop" onClick={() => setMenu(null)} />
+                        <div className="row-menu right">
+                          <div className="rm-item" onClick={() => { setDialog({ editing: m }); setMenu(null); }}>Edit</div>
+                          <div className="rm-item" onClick={() => onTest(m.id)}>Test connection</div>
+                          <div className="rm-item danger" onClick={() => onRemove(m.id)}>Remove</div>
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+                )}
               </div>
             );
           })
@@ -136,11 +160,16 @@ function MCPTab({ onCount }: { onCount: (n: number) => void }): ReactElement {
 /* ——— Skills (real data via window.api.skills) ——— */
 function SkillsTab({ onCount }: { onCount: (n: number) => void }): ReactElement {
   const [skills, setSkills] = useState<SkillDto[]>([]);
+  const [plugins, setPlugins] = useState<PluginDto[]>([]);
   const [dialog, setDialog] = useState<{ editing: SkillDto | null } | null>(null);
   const [menu, setMenu] = useState<string | null>(null);
 
-  const reload = (): void => void window.api.skills.list().then((s) => { setSkills(s); onCount(s.length); });
+  const reload = (): void => {
+    void window.api.skills.list().then((s) => { setSkills(s); onCount(s.length); });
+    void window.api.plugins.list().then(setPlugins);
+  };
   useEffect(() => { reload(); }, []);
+  const pluginName = (id: string | null): string => plugins.find((p) => p.id === id)?.name ?? "plugin";
 
   const onToggle = (s: SkillDto): void => {
     void window.api.skills.update(s.id, { source: s.source, enabled: !s.enabled }).then(reload);
@@ -157,36 +186,42 @@ function SkillsTab({ onCount }: { onCount: (n: number) => void }): ReactElement 
         {skills.length === 0 ? (
           <div className="ext-empty">No skills yet — import a SKILL.md folder or write one in studio.</div>
         ) : (
-          skills.map((s) => (
-            <div className={"ext-row" + (s.enabled ? "" : " off")} key={s.id}>
-              <span className="ext-lead"><Icons.zap size={15} /></span>
-              <div className="ext-main">
-                <div className="ext-line1">
-                  <span className="ext-name">{s.name}</span>
-                  <span className="ext-source">{s.source === "imported" ? "imported" : "studio"}</span>
+          skills.map((s) => {
+            const owned = !!s.ownerPluginId;
+            return (
+              <div className={"ext-row" + (s.enabled ? "" : " off")} key={s.id}>
+                <span className="ext-lead"><Icons.zap size={15} /></span>
+                <div className="ext-main">
+                  <div className="ext-line1">
+                    <span className="ext-name">{s.name}</span>
+                    <span className="ext-source">{s.source === "imported" ? "imported" : "studio"}</span>
+                    {owned ? <OwnedTag name={pluginName(s.ownerPluginId)} /> : null}
+                  </div>
+                  <div className="ext-line2">{s.description}{s.whenToUse ? ` · ${s.whenToUse}` : ""}</div>
                 </div>
-                <div className="ext-line2">{s.description}{s.whenToUse ? ` · ${s.whenToUse}` : ""}</div>
+                <div className="ext-right">
+                  <ScopeChip scope={s.scope} />
+                  <Toggle on={s.enabled} onClick={() => onToggle(s)} disabled={owned} />
+                </div>
+                {owned ? null : (
+                  <div className="ext-more-wrap">
+                    <button className="icon-btn ext-more" onClick={() => setMenu(menu === s.id ? null : s.id)}>
+                      <Icons.more size={16} />
+                    </button>
+                    {menu === s.id ? (
+                      <>
+                        <div className="menu-backdrop" onClick={() => setMenu(null)} />
+                        <div className="row-menu right">
+                          <div className="rm-item" onClick={() => { setDialog({ editing: s }); setMenu(null); }}>Edit</div>
+                          <div className="rm-item danger" onClick={() => onRemove(s.id)}>Remove</div>
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+                )}
               </div>
-              <div className="ext-right">
-                <ScopeChip scope={s.scope} />
-                <Toggle on={s.enabled} onClick={() => onToggle(s)} />
-              </div>
-              <div className="ext-more-wrap">
-                <button className="icon-btn ext-more" onClick={() => setMenu(menu === s.id ? null : s.id)}>
-                  <Icons.more size={16} />
-                </button>
-                {menu === s.id ? (
-                  <>
-                    <div className="menu-backdrop" onClick={() => setMenu(null)} />
-                    <div className="row-menu right">
-                      <div className="rm-item" onClick={() => { setDialog({ editing: s }); setMenu(null); }}>Edit</div>
-                      <div className="rm-item danger" onClick={() => onRemove(s.id)}>Remove</div>
-                    </div>
-                  </>
-                ) : null}
-              </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
       {dialog ? (
