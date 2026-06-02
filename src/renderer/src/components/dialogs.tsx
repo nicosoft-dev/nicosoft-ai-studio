@@ -10,7 +10,7 @@ import { useRoles } from '@/stores/roles'
 import { useChat } from '@/stores/chat'
 import { useCustomRoles } from '@/stores/custom-roles'
 import type { Expert } from '@/types'
-import type { EndpointDto, EndpointInput, ModelInfo } from '@/lib/api'
+import type { EndpointDto, EndpointInput, ModelInfo, McpServerDto, McpServerInput, McpTransport } from '@/lib/api'
 
 /* — Add / Edit endpoint dialog (controlled) — */
 const PROTO_BASE: Record<string, string> = {
@@ -181,6 +181,186 @@ export function EndpointDialog({
           <div className="df-spacer" />
           <button className="btn ghost sm" onClick={onClose}>Cancel</button>
           <button className="btn primary sm" onClick={save}>Save</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* — Add / Edit MCP server dialog (controlled) — */
+export function McpDialog({
+  initial,
+  onClose,
+  onSaved
+}: {
+  initial?: McpServerDto | null
+  onClose: () => void
+  onSaved: () => void
+}): ReactElement {
+  const { EXPERTS } = STUDIO_DATA
+  const [name, setName] = useState(initial?.name ?? '')
+  const [transport, setTransport] = useState<McpTransport>(initial?.transport ?? 'stdio')
+  const [endpointOrCmd, setEndpointOrCmd] = useState(initial?.endpointOrCmd ?? '')
+  const [argsText, setArgsText] = useState((initial?.args ?? []).join(' '))
+  const [secretsText, setSecretsText] = useState('')
+  const [scopeAll, setScopeAll] = useState(initial ? initial.scope === 'all' : true)
+  const [scopeRoles, setScopeRoles] = useState<string[]>(Array.isArray(initial?.scope) ? initial.scope : [])
+  const [testState, setTestState] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle')
+  const [testMsg, setTestMsg] = useState('')
+  const editing = !!initial
+
+  const buildInput = (): McpServerInput => {
+    const secrets: Record<string, string> = {}
+    for (const line of secretsText.split('\n')) {
+      const m = line.match(/^\s*([^=\s]+)\s*=\s*(.*)$/)
+      if (m) secrets[m[1]] = m[2].trim()
+    }
+    return {
+      name: name || 'Untitled',
+      transport,
+      endpointOrCmd: endpointOrCmd.trim(),
+      args: transport === 'stdio' ? argsText.split(/\s+/).filter(Boolean) : [],
+      scope: scopeAll ? 'all' : scopeRoles,
+      enabled: initial?.enabled ?? true,
+      ...(Object.keys(secrets).length ? { secrets } : {})
+    }
+  }
+
+  const save = async (): Promise<void> => {
+    if (initial) await window.api.mcp.update(initial.id, buildInput())
+    else await window.api.mcp.add(buildInput())
+    onSaved()
+  }
+
+  const test = async (): Promise<void> => {
+    if (!initial) {
+      setTestState('fail')
+      setTestMsg('Save the server first, then test the connection.')
+      return
+    }
+    setTestState('testing')
+    setTestMsg('')
+    await window.api.mcp.update(initial.id, buildInput()) // pick up edits before testing
+    const r = await window.api.mcp.test(initial.id)
+    if (r.ok) {
+      setTestState('ok')
+      setTestMsg(`${r.toolCount ?? 0} tools`)
+    } else {
+      setTestState('fail')
+      setTestMsg(r.error ?? 'Connection failed')
+    }
+  }
+
+  const toggleRole = (id: string): void =>
+    setScopeRoles((rs) => (rs.includes(id) ? rs.filter((r) => r !== id) : [...rs, id]))
+
+  return (
+    <div className="overlay" onMouseDown={onClose}>
+      <div className="dialog" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="dialog-head">
+          <span className="dh-title">{editing ? 'Edit MCP server' : 'Add MCP server'}</span>
+          <button className="icon-btn" onClick={onClose}>
+            <Icons.x size={16} />
+          </button>
+        </div>
+        <div className="dialog-body">
+          <div>
+            <label className="field-label">Name</label>
+            <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="filesystem" />
+          </div>
+          <div>
+            <label className="field-label">Transport</label>
+            <div className="segmented">
+              {(['stdio', 'http'] as const).map((t) => (
+                <button key={t} className={transport === t ? 'active' : ''} onClick={() => setTransport(t)}>
+                  {t === 'stdio' ? 'stdio (local)' : 'HTTP'}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="field-label">{transport === 'stdio' ? 'Command' : 'URL'}</label>
+            <input
+              className="input mono"
+              value={endpointOrCmd}
+              onChange={(e) => setEndpointOrCmd(e.target.value)}
+              placeholder={transport === 'stdio' ? 'npx' : 'https://mcp.example.com'}
+            />
+          </div>
+          {transport === 'stdio' ? (
+            <div>
+              <label className="field-label">
+                Arguments <span style={{ color: 'var(--text-4)', fontWeight: 400 }}>· space-separated</span>
+              </label>
+              <input
+                className="input mono"
+                value={argsText}
+                onChange={(e) => setArgsText(e.target.value)}
+                placeholder="-y @modelcontextprotocol/server-filesystem /path"
+              />
+            </div>
+          ) : null}
+          <div>
+            <label className="field-label">
+              {transport === 'stdio' ? 'Environment' : 'Headers'}{' '}
+              <span style={{ color: 'var(--text-4)', fontWeight: 400 }}>· KEY=value per line · kept in keychain</span>
+            </label>
+            <textarea
+              className="input mono"
+              rows={2}
+              value={secretsText}
+              onChange={(e) => setSecretsText(e.target.value)}
+              placeholder={
+                editing ? '•••••• (leave blank to keep)' : transport === 'stdio' ? 'API_TOKEN=…' : 'Authorization=Bearer …'
+              }
+            />
+          </div>
+          <div>
+            <label className="field-label">Scope</label>
+            <div className="segmented">
+              <button className={scopeAll ? 'active' : ''} onClick={() => setScopeAll(true)}>
+                All experts
+              </button>
+              <button className={!scopeAll ? 'active' : ''} onClick={() => setScopeAll(false)}>
+                Specific
+              </button>
+            </div>
+            {!scopeAll ? (
+              <div className="mcp-scope-roles">
+                {EXPERTS.map((e) => (
+                  <button
+                    key={e.id}
+                    className={'scope-pick' + (scopeRoles.includes(e.id) ? ' on' : '')}
+                    onClick={() => toggleRole(e.id)}
+                  >
+                    <Avatar expert={e} size={16} /> {e.name}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          {testState === 'ok' && (
+            <div className="test-success">
+              <Icons.check size={15} /> Connected · {testMsg}
+            </div>
+          )}
+          {testState === 'fail' && (
+            <div className="rb-needs">
+              <Icons.alert size={14} /> {testMsg}
+            </div>
+          )}
+        </div>
+        <div className="dialog-foot">
+          <button className="btn secondary sm" onClick={() => void test()} disabled={testState === 'testing'}>
+            {testState === 'testing' ? 'Testing…' : 'Test connection'}
+          </button>
+          <div className="df-spacer" />
+          <button className="btn ghost sm" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn primary sm" onClick={() => void save()}>
+            Save
+          </button>
         </div>
       </div>
     </div>

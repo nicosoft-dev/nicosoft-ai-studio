@@ -10,8 +10,10 @@ import type { ReactElement } from 'react'
 import { Icons } from '@/components/icons'
 import { Avatar, HealthDot } from '@/components/primitives'
 import { ImageModelPicker } from '@/components/composer-controls'
+import { McpDialog } from '@/components/dialogs'
 import { useRoleBinding } from '@/lib/use-role-binding'
 import { STUDIO_DATA } from '@/data/studio-data'
+import type { McpServerDto } from '@/lib/api'
 import type { PluginBundle } from '@/types'
 
 /* — small flat switch — */
@@ -48,38 +50,85 @@ function ExtTabHead({ help, action, onAdd }: { help: string; action?: string; on
   );
 }
 
-/* ——— MCP ——— */
-function MCPTab(): ReactElement {
-  const { EXTENSIONS } = STUDIO_DATA;
+/* ——— MCP (real data via window.api.mcp) ——— */
+function MCPTab({ onCount }: { onCount: (n: number) => void }): ReactElement {
+  const [servers, setServers] = useState<McpServerDto[]>([]);
+  const [dialog, setDialog] = useState<{ editing: McpServerDto | null } | null>(null);
+  const [menu, setMenu] = useState<string | null>(null);
+  const [testing, setTesting] = useState<string | null>(null);
+
+  const reload = (): void => void window.api.mcp.list().then((s) => { setServers(s); onCount(s.length); });
+  useEffect(() => { reload(); }, []);
+
+  const onToggle = (m: McpServerDto): void => {
+    void window.api.mcp
+      .update(m.id, {
+        name: m.name, transport: m.transport, endpointOrCmd: m.endpointOrCmd,
+        args: m.args, scope: m.scope, enabled: !m.enabled
+      })
+      .then(reload);
+  };
+  const onTest = (id: string): void => {
+    setMenu(null);
+    setTesting(id);
+    void window.api.mcp.test(id).then(() => { setTesting(null); reload(); });
+  };
+  const onRemove = (id: string): void => {
+    setMenu(null);
+    void window.api.mcp.remove(id).then(reload);
+  };
+
   return (
     <div className="ext-tab">
-      <ExtTabHead help="External tools & data sources your experts can call." action="Add MCP server" />
+      <ExtTabHead help="External tools & data sources your experts can call." action="Add MCP server" onAdd={() => setDialog({ editing: null })} />
       <div className="ext-list">
-        {EXTENSIONS.mcp.map((m) => {
-          const ok = m.status === "connected";
-          const TI = m.transport === "stdio" ? Icons.terminal : Icons.link;
-          return (
-            <div className="ext-row" key={m.name}>
-              <span className="ext-lead"><TI size={16} /></span>
-              <div className="ext-main">
-                <div className="ext-line1">
-                  <span className="ext-name">{m.name}</span>
-                  <HealthDot status={ok ? "healthy" : "failing"} />
-                  <span className={"ext-status " + (ok ? "ok" : "err")}>
-                    {ok ? "connected" : "error · " + m.error}
-                  </span>
+        {servers.length === 0 ? (
+          <div className="ext-empty">No MCP servers yet — add one to give your agents external tools.</div>
+        ) : (
+          servers.map((m) => {
+            const ok = m.status === "connected";
+            const TI = m.transport === "stdio" ? Icons.terminal : Icons.link;
+            return (
+              <div className={"ext-row" + (m.enabled ? "" : " off")} key={m.id}>
+                <span className="ext-lead"><TI size={16} /></span>
+                <div className="ext-main">
+                  <div className="ext-line1">
+                    <span className="ext-name">{m.name}</span>
+                    <HealthDot status={ok ? "healthy" : m.status === "error" ? "failing" : "off"} />
+                    <span className={"ext-status " + (ok ? "ok" : m.status === "error" ? "err" : "")}>
+                      {testing === m.id ? "testing…" : m.status}
+                    </span>
+                  </div>
+                  <div className="ext-line2 mono">{[m.endpointOrCmd, ...m.args].join(" ")}</div>
                 </div>
-                <div className="ext-line2 mono">{m.endpoint}</div>
+                <div className="ext-right">
+                  <span className="ext-tools">{ok ? m.toolCount + " tools" : "—"}</span>
+                  <ScopeChip scope={m.scope} />
+                  <Toggle on={m.enabled} onClick={() => onToggle(m)} />
+                </div>
+                <div className="ext-more-wrap">
+                  <button className="icon-btn ext-more" onClick={() => setMenu(menu === m.id ? null : m.id)}>
+                    <Icons.more size={16} />
+                  </button>
+                  {menu === m.id ? (
+                    <>
+                      <div className="menu-backdrop" onClick={() => setMenu(null)} />
+                      <div className="row-menu right">
+                        <div className="rm-item" onClick={() => { setDialog({ editing: m }); setMenu(null); }}>Edit</div>
+                        <div className="rm-item" onClick={() => onTest(m.id)}>Test connection</div>
+                        <div className="rm-item danger" onClick={() => onRemove(m.id)}>Remove</div>
+                      </div>
+                    </>
+                  ) : null}
+                </div>
               </div>
-              <div className="ext-right">
-                <span className="ext-tools">{ok ? m.tools + " tools" : "—"}</span>
-                <ScopeChip scope={m.scope} />
-              </div>
-              <button className="icon-btn ext-more"><Icons.more size={16} /></button>
-            </div>
-          );
-        })}
+            );
+          })
+        )}
       </div>
+      {dialog ? (
+        <McpDialog initial={dialog.editing} onClose={() => setDialog(null)} onSaved={() => { setDialog(null); reload(); }} />
+      ) : null}
     </div>
   );
 }
@@ -200,7 +249,8 @@ function ToolsTab(): ReactElement {
 export function ExtensionsView(): ReactElement {
   const { EXTENSIONS } = STUDIO_DATA;
   const [tab, setTab] = useState("mcp");
-  const counts: Record<string, number> = { mcp: EXTENSIONS.mcp.length, skills: EXTENSIONS.skills.length, plugins: EXTENSIONS.plugins.length, tools: 1 };
+  const [mcpCount, setMcpCount] = useState(0); // real server count, fed by MCPTab.onCount
+  const counts: Record<string, number> = { mcp: mcpCount, skills: EXTENSIONS.skills.length, plugins: EXTENSIONS.plugins.length, tools: 1 };
   return (
     <div className="main-col">
       <div className="conv-header">
@@ -212,16 +262,23 @@ export function ExtensionsView(): ReactElement {
           <button className={tab === "tools" ? "active" : ""} onClick={() => setTab("tools")}>Tools</button>
         </div>
         <span className="conv-sub" style={{ marginLeft: "auto" }}>
-          {counts[tab]} {tab === "tools" ? (counts[tab] === 1 ? "tool" : "tools") : "installed"}
+          {counts[tab]}{" "}
+          {tab === "tools"
+            ? counts[tab] === 1 ? "tool" : "tools"
+            : tab === "mcp"
+              ? counts[tab] === 1 ? "server" : "servers"
+              : "installed"}
         </span>
       </div>
       <div className="ext-body">
         <div className="ext-inner">
-          {tab === "mcp" && <MCPTab />}
+          {tab === "mcp" && <MCPTab onCount={setMcpCount} />}
           {tab === "skills" && <SkillsTab />}
           {tab === "plugins" && <PluginsTab />}
           {tab === "tools" && <ToolsTab />}
-          {tab !== "tools" ? <div className="ext-foot">Mock framework · connections are illustrative</div> : null}
+          {tab === "skills" || tab === "plugins" ? (
+            <div className="ext-foot">Mock framework · connections are illustrative</div>
+          ) : null}
         </div>
       </div>
     </div>
