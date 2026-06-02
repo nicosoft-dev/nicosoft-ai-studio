@@ -5,10 +5,12 @@
    Skills = packaged workflows the model triggers
    Plugins = bundles that install a whole set
    ============================================================ */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactElement } from 'react'
 import { Icons } from '@/components/icons'
 import { Avatar, HealthDot } from '@/components/primitives'
+import { ImageModelPicker } from '@/components/composer-controls'
+import { useRoleBinding } from '@/lib/use-role-binding'
 import { STUDIO_DATA } from '@/data/studio-data'
 import type { PluginBundle } from '@/types'
 
@@ -37,11 +39,11 @@ function ScopeChip({ scope }: { scope: 'all' | string[] }): ReactElement {
   );
 }
 
-function ExtTabHead({ help, action, onAdd }: { help: string; action: string; onAdd?: () => void }): ReactElement {
+function ExtTabHead({ help, action, onAdd }: { help: string; action?: string; onAdd?: () => void }): ReactElement {
   return (
     <div className="ext-tabhead">
       <span className="ext-help">{help}</span>
-      <button className="btn secondary sm" onClick={onAdd}><Icons.plus size={14} /> {action}</button>
+      {action ? <button className="btn secondary sm" onClick={onAdd}><Icons.plus size={14} /> {action}</button> : null}
     </div>
   );
 }
@@ -153,10 +155,52 @@ function PluginsTab(): ReactElement {
   );
 }
 
+/* ——— Tools (built-in ns_ tools) ——— */
+const TOOLS_ENABLED_KEY = 'tools.generate_image.enabled';
+function ToolsTab(): ReactElement {
+  const { EXPERT_BY_ID } = STUDIO_DATA;
+  const designer = EXPERT_BY_ID['designer'];
+  const b = useRoleBinding(designer);
+  const [enabled, setEnabled] = useState(true);
+  useEffect(() => {
+    void window.api.settings.get<boolean>(TOOLS_ENABLED_KEY).then((v) => { if (v !== null) setEnabled(v); });
+  }, []);
+  const toggle = (): void => {
+    const next = !enabled;
+    setEnabled(next);
+    void window.api.settings.set(TOOLS_ENABLED_KEY, next);
+  };
+  return (
+    <div className="ext-tab">
+      <ExtTabHead help="Built-in tools your experts can call — the ns_ prefix marks reusable tools any agent can be granted." />
+      <div className="ext-list">
+        <div className={"ext-row tool" + (enabled ? "" : " off")}>
+          <span className="ext-lead"><Icons.image size={16} /></span>
+          <div className="ext-main">
+            <div className="ext-line1">
+              <span className="ext-name">Generate Image</span>
+              <span className="ext-name mono">ns_generate_image</span>
+            </div>
+            <div className="ext-line2">Create posters, illustrations, avatars and thumbnails</div>
+            <div className="tool-config">
+              <span className="tool-config-label">Default model</span>
+              <ImageModelPicker models={b.imageModels} value={b.imageModel} onChange={b.onImageModel} disabled={!enabled} />
+            </div>
+          </div>
+          <div className="ext-right">
+            <ScopeChip scope={['designer']} />
+            <Toggle on={enabled} onClick={toggle} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ExtensionsView(): ReactElement {
   const { EXTENSIONS } = STUDIO_DATA;
   const [tab, setTab] = useState("mcp");
-  const counts: Record<string, number> = { mcp: EXTENSIONS.mcp.length, skills: EXTENSIONS.skills.length, plugins: EXTENSIONS.plugins.length };
+  const counts: Record<string, number> = { mcp: EXTENSIONS.mcp.length, skills: EXTENSIONS.skills.length, plugins: EXTENSIONS.plugins.length, tools: 1 };
   return (
     <div className="main-col">
       <div className="conv-header">
@@ -165,15 +209,19 @@ export function ExtensionsView(): ReactElement {
           <button className={tab === "mcp" ? "active" : ""} onClick={() => setTab("mcp")}>MCP</button>
           <button className={tab === "skills" ? "active" : ""} onClick={() => setTab("skills")}>Skills</button>
           <button className={tab === "plugins" ? "active" : ""} onClick={() => setTab("plugins")}>Plugins</button>
+          <button className={tab === "tools" ? "active" : ""} onClick={() => setTab("tools")}>Tools</button>
         </div>
-        <span className="conv-sub" style={{ marginLeft: "auto" }}>{counts[tab]} installed</span>
+        <span className="conv-sub" style={{ marginLeft: "auto" }}>
+          {counts[tab]} {tab === "tools" ? (counts[tab] === 1 ? "tool" : "tools") : "installed"}
+        </span>
       </div>
       <div className="ext-body">
         <div className="ext-inner">
           {tab === "mcp" && <MCPTab />}
           {tab === "skills" && <SkillsTab />}
           {tab === "plugins" && <PluginsTab />}
-          <div className="ext-foot">Mock framework · connections are illustrative</div>
+          {tab === "tools" && <ToolsTab />}
+          {tab !== "tools" ? <div className="ext-foot">Mock framework · connections are illustrative</div> : null}
         </div>
       </div>
     </div>

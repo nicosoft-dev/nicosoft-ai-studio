@@ -546,7 +546,9 @@ export const useChat = create<ChatState>((set, get) => {
         return
       }
 
-      if (roleHasImageTool(expertId)) {
+      // ns_generate_image can be toggled off in Extensions → Tools; when off, the designer falls through
+      // to the plain chat path below (no image generation). Non-designer roles short-circuit the read.
+      if (roleHasImageTool(expertId) && ((await window.api.settings.get<boolean>('tools.generate_image.enabled')) ?? true)) {
         // Designer path: persist the user turn (chat-path style), then run the chat + ns_generate_image
         // loop. Generated images come back as nsai-media:// attachments on the assistant turn (persisted
         // by image_tool.service). The image backend defaults server-side; B5/B7 let the user pick it.
