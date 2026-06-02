@@ -49,7 +49,8 @@ function toDto(row: McpServerRow): McpServerDto {
     enabled: row.enabled,
     toolCount: row.toolCount,
     status: row.status,
-    hasSecrets: Object.keys(getSecrets(row.id)).length > 0
+    hasSecrets: Object.keys(getSecrets(row.id)).length > 0,
+    ownerPluginId: row.ownerPluginId
   }
 }
 
@@ -57,14 +58,15 @@ export function list(): McpServerDto[] {
   return mcpRepo.list().map(toDto)
 }
 
-export async function add(input: McpServerInput): Promise<McpServerDto> {
+export async function add(input: McpServerInput, ownerPluginId?: string): Promise<McpServerDto> {
   const row = mcpRepo.create({
     name: input.name,
     transport: input.transport,
     endpointOrCmd: input.endpointOrCmd,
     args: input.args,
     scope: input.scope,
-    enabled: input.enabled
+    enabled: input.enabled,
+    ownerPluginId: ownerPluginId ?? null
   })
   setSecrets(row.id, input.secrets)
   if (row.enabled) await connectOne(row.id)
@@ -93,6 +95,20 @@ export async function remove(id: string): Promise<void> {
   await manager.disconnect(id)
   keychain.deleteApiKey(secretKey(id))
   mcpRepo.remove(id)
+}
+
+// Toggle only the enabled flag, connecting/disconnecting accordingly (plugin enable/disable cascade).
+export async function setEnabled(id: string, enabled: boolean): Promise<McpServerDto | null> {
+  const row = mcpRepo.getById(id)
+  if (!row) return null
+  mcpRepo.update(id, { enabled })
+  if (enabled) {
+    await connectOne(id)
+  } else {
+    await manager.disconnect(id)
+    mcpRepo.update(id, { status: 'idle', toolCount: 0 })
+  }
+  return toDto(mcpRepo.getById(id) as McpServerRow)
 }
 
 // Connect once and report — used by the Test button. Updates status/tool_count either way.

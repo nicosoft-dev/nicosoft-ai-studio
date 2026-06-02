@@ -385,6 +385,7 @@ export interface McpServerDto {
   toolCount: number
   status: McpStatus
   hasSecrets: boolean // env/headers present in keychain — the values themselves never cross the wire
+  ownerPluginId: string | null // non-null when installed by a plugin (locked in the UI)
 }
 
 export interface McpServerInput {
@@ -416,6 +417,7 @@ export interface SkillDto {
   dirPath: string | null // imported: the skill folder; builtin: null
   scope: SkillScope
   enabled: boolean
+  ownerPluginId: string | null // non-null when installed by a plugin (locked in the UI)
 }
 
 export interface SkillInput {
@@ -427,4 +429,28 @@ export interface SkillInput {
   dirPath?: string // imported only
   scope?: SkillScope
   enabled?: boolean
+}
+
+export type PluginBundleType = 'skill' | 'mcp' | 'role'
+
+export interface PluginBundleDto {
+  type: PluginBundleType
+  id: string // the installed resource's id (skill / mcp server / custom role)
+  name: string
+}
+
+export interface PluginDto {
+  id: string
+  name: string
+  description: string
+  version: string
+  author: string
+  bundles: PluginBundleDto[]
+  enabled: boolean
+}
+
+export interface PluginInstallResult {
+  ok: boolean
+  plugin?: PluginDto
+  error?: string
 }

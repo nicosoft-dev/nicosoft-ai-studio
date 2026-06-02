@@ -15,6 +15,7 @@ export interface McpServerRow {
   enabled: boolean
   toolCount: number
   status: McpStatus
+  ownerPluginId: string | null
   createdAt: string
 }
 
@@ -25,6 +26,7 @@ export interface McpServerCreateInput {
   args?: string[]
   scope?: McpScope
   enabled?: boolean
+  ownerPluginId?: string | null
 }
 
 export interface McpServerUpdatePatch {
@@ -48,6 +50,7 @@ interface McpServerRaw {
   enabled: number
   tool_count: number
   status: McpStatus
+  owner_plugin_id: string | null
   created_at: string
 }
 
@@ -70,6 +73,7 @@ function mapRow(raw: McpServerRaw): McpServerRow {
     enabled: raw.enabled === 1,
     toolCount: raw.tool_count,
     status: raw.status,
+    ownerPluginId: raw.owner_plugin_id,
     createdAt: raw.created_at
   }
 }
@@ -93,8 +97,8 @@ export function create(input: McpServerCreateInput): McpServerRow {
   const createdAt = new Date().toISOString()
   getDb()
     .prepare(
-      `INSERT INTO mcp_servers (id, name, transport, endpoint_or_cmd, args, scope, enabled, tool_count, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'idle', ?)`
+      `INSERT INTO mcp_servers (id, name, transport, endpoint_or_cmd, args, scope, enabled, tool_count, status, owner_plugin_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'idle', ?, ?)`
     )
     .run(
       id,
@@ -104,6 +108,7 @@ export function create(input: McpServerCreateInput): McpServerRow {
       JSON.stringify(input.args ?? []),
       JSON.stringify(input.scope ?? 'all'),
       (input.enabled ?? true) ? 1 : 0,
+      input.ownerPluginId ?? null,
       createdAt
     )
   return getById(id) as McpServerRow

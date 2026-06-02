@@ -35,7 +35,8 @@ function toDto(row: SkillRow): SkillDto {
     body: row.source === 'builtin' ? row.body : null,
     dirPath: row.dirPath,
     scope: row.scope,
-    enabled: row.enabled
+    enabled: row.enabled,
+    ownerPluginId: row.ownerPluginId
   }
 }
 
@@ -48,14 +49,14 @@ export function list(): SkillDto[] {
   return skillRepo.list().map(toDto)
 }
 
-export function add(input: SkillInput): SkillDto {
-  const row = input.source === 'imported' ? createImported(input) : createBuiltin(input)
+export function add(input: SkillInput, ownerPluginId?: string): SkillDto {
+  const row = input.source === 'imported' ? createImported(input, ownerPluginId) : createBuiltin(input, ownerPluginId)
   register(row)
   return toDto(row)
 }
 
 // Imported: parse the folder's SKILL.md (throws on missing file / empty body) and snapshot its fields.
-function createImported(input: SkillInput): SkillRow {
+function createImported(input: SkillInput, ownerPluginId?: string): SkillRow {
   if (!input.dirPath) throw new Error('Imported skill needs a folder path')
   const parsed = loadSkillDir(input.dirPath)
   return skillRepo.create({
@@ -67,12 +68,13 @@ function createImported(input: SkillInput): SkillRow {
     dirPath: input.dirPath,
     allowedTools: parsed.allowedTools,
     scope: input.scope ?? 'all',
-    enabled: input.enabled ?? true
+    enabled: input.enabled ?? true,
+    ownerPluginId: ownerPluginId ?? null
   })
 }
 
 // Builtin: author the instructions directly in studio. Name + body are required.
-function createBuiltin(input: SkillInput): SkillRow {
+function createBuiltin(input: SkillInput, ownerPluginId?: string): SkillRow {
   const name = (input.name ?? '').trim()
   if (!name) throw new Error('Skill needs a name')
   if (!(input.body ?? '').trim()) throw new Error('Skill needs instructions')
@@ -85,7 +87,8 @@ function createBuiltin(input: SkillInput): SkillRow {
     dirPath: null,
     allowedTools: [],
     scope: input.scope ?? 'all',
-    enabled: input.enabled ?? true
+    enabled: input.enabled ?? true,
+    ownerPluginId: ownerPluginId ?? null
   })
 }
 
@@ -118,6 +121,14 @@ export function update(id: string, patch: SkillInput): SkillDto | null {
     }
   }
   const updated = skillRepo.update(id, repatch)
+  if (!updated) return null
+  register(updated)
+  return toDto(updated)
+}
+
+// Toggle only the enabled flag + re-register (used by the plugin enable/disable cascade).
+export function setEnabled(id: string, enabled: boolean): SkillDto | null {
+  const updated = skillRepo.update(id, { enabled })
   if (!updated) return null
   register(updated)
   return toDto(updated)

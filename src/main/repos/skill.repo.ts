@@ -17,6 +17,7 @@ export interface SkillRow {
   allowedTools: string[]
   scope: SkillScope
   enabled: boolean
+  ownerPluginId: string | null
   createdAt: string
 }
 
@@ -30,6 +31,7 @@ export interface SkillCreateInput {
   allowedTools: string[]
   scope: SkillScope
   enabled: boolean
+  ownerPluginId?: string | null
 }
 
 export interface SkillUpdatePatch {
@@ -54,6 +56,7 @@ interface SkillRaw {
   allowed_tools: string
   scope: string
   enabled: number
+  owner_plugin_id: string | null
   created_at: string | null
 }
 
@@ -77,6 +80,7 @@ function mapRow(raw: SkillRaw): SkillRow {
     allowedTools: parseJson<string[]>(raw.allowed_tools, []),
     scope: parseJson<SkillScope>(raw.scope, 'all'),
     enabled: raw.enabled === 1,
+    ownerPluginId: raw.owner_plugin_id,
     createdAt: raw.created_at ?? ''
   }
 }
@@ -100,8 +104,8 @@ export function create(input: SkillCreateInput): SkillRow {
   const createdAt = new Date().toISOString()
   getDb()
     .prepare(
-      `INSERT INTO skills (id, name, description, when_to_use, source, body, dir_path, allowed_tools, scope, enabled, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO skills (id, name, description, when_to_use, source, body, dir_path, allowed_tools, scope, enabled, owner_plugin_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -114,6 +118,7 @@ export function create(input: SkillCreateInput): SkillRow {
       JSON.stringify(input.allowedTools),
       JSON.stringify(input.scope),
       input.enabled ? 1 : 0,
+      input.ownerPluginId ?? null,
       createdAt
     )
   return getById(id) as SkillRow

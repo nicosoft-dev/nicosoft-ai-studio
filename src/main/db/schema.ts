@@ -163,6 +163,7 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
   enabled         INTEGER NOT NULL DEFAULT 1,
   tool_count      INTEGER NOT NULL DEFAULT 0,
   status          TEXT NOT NULL DEFAULT 'idle',   -- connected | error | idle
+  owner_plugin_id TEXT,                            -- set when installed by a plugin (locked in the UI)
   created_at      TEXT NOT NULL
 );
 
@@ -177,6 +178,7 @@ CREATE TABLE IF NOT EXISTS skills (
   allowed_tools TEXT NOT NULL DEFAULT '[]',        -- JSON string[]
   scope         TEXT NOT NULL DEFAULT '"all"',     -- JSON: "all" | string[]
   enabled       INTEGER NOT NULL DEFAULT 1,
+  owner_plugin_id TEXT,                            -- set when installed by a plugin (locked in the UI)
   created_at    TEXT
 );
 
@@ -184,9 +186,13 @@ CREATE TABLE IF NOT EXISTS plugins (
   id          TEXT PRIMARY KEY,
   name        TEXT NOT NULL,
   description TEXT,
-  bundles     TEXT NOT NULL DEFAULT '[]',         -- JSON
-  source      TEXT,
-  enabled     INTEGER NOT NULL DEFAULT 1
+  version     TEXT,
+  author      TEXT,
+  dir_path    TEXT,
+  bundles     TEXT NOT NULL DEFAULT '[]',         -- JSON [{type,id,name}] of installed resources
+  source      TEXT NOT NULL DEFAULT 'imported',
+  enabled     INTEGER NOT NULL DEFAULT 1,
+  created_at  TEXT
 );
 
 CREATE TABLE IF NOT EXISTS usage_events (
