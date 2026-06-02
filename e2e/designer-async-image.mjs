@@ -3,7 +3,7 @@
 // loop and text only showed after the image). Samples the DOM to time when reply text first appears vs
 // when the finished image lands, and asserts text leads. MANUAL — real LLM + image backend.
 // The binding written here mirrors the studio DEFAULT designer config (gemini-pro-latest +
-// nano-banana-pro-preview, the DEFAULT_IMAGE_MODEL; no thinking depth) so running this e2e just re-sets
+// nano-banana-pro-preview = DEFAULT_IMAGE_MODEL; thinking depth = high) so running this e2e just re-sets
 // the values that are already the default — zero config pollution. Override the chat model with
 // DESIGNER_MODEL=gemini-2.5-flash for the most stable function-calling when debugging.
 import { _electron } from 'playwright'
@@ -29,7 +29,7 @@ await page.evaluate(
     for (const ep of eps) if (!ep.hasKey && key) await window.api.endpoints.update(ep.id, { apiKey: key })
     const gemini = (await window.api.endpoints.list()).find((e) => e.protocol === 'gemini')
     if (!gemini) throw new Error('need a gemini-protocol endpoint')
-    await window.api.roles.setBinding('designer', { endpointId: gemini.id, model, imageModel: 'nano-banana-pro-preview' })
+    await window.api.roles.setBinding('designer', { endpointId: gemini.id, model, imageModel: 'nano-banana-pro-preview', thinkingDepth: 'high' })
   },
   { key: NS_KEY, model: CHAT_MODEL }
 )
