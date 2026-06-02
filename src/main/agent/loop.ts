@@ -73,7 +73,8 @@ function toToolSchema(tool: Tool, defer: boolean): ToolSchema {
   const schema: ToolSchema = {
     name: tool.name,
     description: tool.prompt(),
-    input_schema: z.toJSONSchema(tool.inputSchema) as Record<string, unknown>,
+    // MCP tools supply a ready JSON Schema; everything else derives it from the zod inputSchema.
+    input_schema: tool.inputJSONSchema ?? (z.toJSONSchema(tool.inputSchema) as Record<string, unknown>),
   }
   if (defer) schema.defer_loading = true
   return schema

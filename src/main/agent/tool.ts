@@ -26,6 +26,10 @@ export interface ToolDef<In extends z.ZodTypeAny = z.ZodTypeAny, Out = unknown> 
   name: string
   prompt(): string
   inputSchema: In
+  // Optional ready-made JSON Schema declared to the model verbatim, bypassing z.toJSONSchema(inputSchema).
+  // MCP tools set this (the server already provides JSON Schema); core tools leave it undefined and a
+  // permissive zod inputSchema (z.record(z.unknown())) lets execution.ts:runOne's safeParse pass through.
+  inputJSONSchema?: Record<string, unknown>
   isReadOnly?(input: z.infer<In>): boolean
   isConcurrencySafe?(input: z.infer<In>): boolean
   isDestructive?(input: z.infer<In>): boolean
