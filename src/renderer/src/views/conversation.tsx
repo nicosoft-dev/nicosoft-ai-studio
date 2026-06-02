@@ -186,12 +186,14 @@ function Composer({
   expert,
   value,
   setValue,
-  onOpenSettings
+  onOpenSettings,
+  focusNonce
 }: {
   expert: Expert
   value: string
   setValue: (v: string) => void
   onOpenSettings?: () => void
+  focusNonce?: number
 }): ReactElement {
   const chat = useChat()
   const b = useRoleBinding(expert)
@@ -200,6 +202,11 @@ function Composer({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const [attach, setAttach] = useState<ImageAttachment[]>([])
+
+  // A Refine action (from the image viewer) bumps focusNonce → pull focus into the composer.
+  useEffect(() => {
+    if (focusNonce) taRef.current?.focus()
+  }, [focusNonce])
 
   const activeConv = chat.activeConv
   const streaming = activeConv ? (chat.streaming[activeConv] ?? false) : false
@@ -356,6 +363,7 @@ export function ChatView({ expert, onOpenSettings }: { expert: Expert; onOpenSet
   const listRef = useRef<HTMLDivElement>(null)
   const [value, setValue] = useState('')
   const [viewer, setViewer] = useState<{ items: ViewerImage[]; index: number } | null>(null)
+  const [focusNonce, setFocusNonce] = useState(0)
 
   useEffect(() => {
     const el = listRef.current
@@ -363,6 +371,14 @@ export function ChatView({ expert, onOpenSettings }: { expert: Expert; onOpenSet
   }, [messages])
 
   const openImage = (items: ViewerImage[], index: number): void => setViewer({ items, index })
+  const downloadImage = (img: ViewerImage): void => void window.api.media.save(img.url, img.name)
+  // Refine: close the viewer, seed the composer with a refine lead-in and focus it. The designer keeps
+  // the prior image + its prompt in context, so the user just types the change and sends → regenerate.
+  const refineImage = (): void => {
+    setViewer(null)
+    setValue((v) => (v.trim() ? v : 'Refine the image above — '))
+    setFocusNonce((n) => n + 1)
+  }
 
   return (
     <div className="main-col">
@@ -401,7 +417,7 @@ export function ChatView({ expert, onOpenSettings }: { expert: Expert; onOpenSet
           ) : null}
         </div>
       </div>
-      <Composer expert={expert} value={value} setValue={setValue} onOpenSettings={onOpenSettings} />
+      <Composer expert={expert} value={value} setValue={setValue} onOpenSettings={onOpenSettings} focusNonce={focusNonce} />
       {permission && activeConv ? (
         <ApprovalDialog
           prompt={permission}
@@ -415,6 +431,8 @@ export function ChatView({ expert, onOpenSettings }: { expert: Expert; onOpenSet
           index={viewer.index}
           onClose={() => setViewer(null)}
           onStep={(d) => setViewer((v) => (v ? { ...v, index: (v.index + d + v.items.length) % v.items.length } : v))}
+          onDownload={downloadImage}
+          onRefine={roleHasImageTool(expert.id) ? refineImage : undefined}
         />
       ) : null}
     </div>

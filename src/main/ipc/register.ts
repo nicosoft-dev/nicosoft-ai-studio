@@ -8,6 +8,7 @@ import { registerSettingsHandlers } from './settings.handler'
 import { registerChatHandlers } from './chat.handler'
 import { registerMemoryHandlers } from './memory.handler'
 import { registerImageToolHandlers } from './image-tool.handler'
+import { registerMediaHandlers } from './media.handler'
 
 // Single entry point — main/index.ts calls this once on app ready.
 export function registerIpc(): void {
@@ -21,4 +22,5 @@ export function registerIpc(): void {
   registerRoleHandlers()
   registerConversationHandlers()
   registerMemoryHandlers()
+  registerMediaHandlers()
 }

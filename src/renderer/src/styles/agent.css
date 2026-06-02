@@ -317,7 +317,6 @@ button.path-chip:disabled {
   border-radius: var(--r-md);
   box-shadow: var(--shadow-float);
 }
-.iv-close,
 .iv-nav {
   position: absolute;
   display: inline-flex;
@@ -329,15 +328,39 @@ button.path-chip:disabled {
   border: 1px solid var(--border-2);
   cursor: pointer;
 }
-.iv-close:hover,
 .iv-nav:hover {
   background: var(--bg-3);
 }
-.iv-close {
+.iv-actions {
+  position: absolute;
   top: 18px;
   right: 18px;
-  width: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 1;
+}
+.iv-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   height: 36px;
+  padding: 0 13px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-1);
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  cursor: pointer;
+}
+.iv-action:hover {
+  background: var(--bg-3);
+}
+.iv-action.iv-icon-only {
+  width: 36px;
+  padding: 0;
+  justify-content: center;
 }
 .iv-nav {
   top: 50%;

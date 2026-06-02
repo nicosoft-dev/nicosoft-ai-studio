@@ -182,6 +182,10 @@ const api = {
     update: (input: MemoryUpdateInput): Promise<void> => ipcRenderer.invoke('memory:update', input),
     remove: (id: string): Promise<void> => ipcRenderer.invoke('memory:remove', id),
     onTurn: (ctx: MemoryOnTurnInput): Promise<void> => ipcRenderer.invoke('memory:onTurn', ctx)
+  },
+  media: {
+    // Save a generated image (nsai-media:// ref) to a user-chosen path; returns the path or null.
+    save: (url: string, name: string): Promise<string | null> => ipcRenderer.invoke('media:save', url, name)
   }
 }
 
