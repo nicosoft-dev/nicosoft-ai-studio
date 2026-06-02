@@ -10,7 +10,7 @@ import type { ReactElement } from 'react'
 import { Icons } from '@/components/icons'
 import { Avatar, HealthDot } from '@/components/primitives'
 import { ImageModelPicker } from '@/components/composer-controls'
-import { McpDialog, SkillDialog } from '@/components/dialogs'
+import { McpDialog, SkillDialog, PluginDialog } from '@/components/dialogs'
 import { useRoleBinding } from '@/lib/use-role-binding'
 import { STUDIO_DATA } from '@/data/studio-data'
 import type { McpServerDto, SkillDto, PluginDto } from '@/lib/api'
@@ -233,43 +233,80 @@ function SkillsTab({ onCount }: { onCount: (n: number) => void }): ReactElement 
 
 /* ——— Plugins ——— */
 const BUNDLE_ICON: Record<PluginBundle['type'], string> = { skill: "zap", mcp: "terminal", role: "users" };
-function PluginsTab(): ReactElement {
-  const { EXTENSIONS } = STUDIO_DATA;
-  const [enabled, setEnabled] = useState(EXTENSIONS.plugins.map((p) => p.enabled));
-  const toggle = (i: number): void => setEnabled((prev) => prev.map((v, j) => (j === i ? !v : v)));
+function PluginsTab({ onCount }: { onCount: (n: number) => void }): ReactElement {
+  const [plugins, setPlugins] = useState<PluginDto[]>([]);
+  const [dialog, setDialog] = useState(false);
+  const [menu, setMenu] = useState<string | null>(null);
+
+  const reload = (): void => void window.api.plugins.list().then((p) => { setPlugins(p); onCount(p.length); });
+  useEffect(() => { reload(); }, []);
+
+  const onToggle = (p: PluginDto): void => void window.api.plugins.toggle(p.id, !p.enabled).then(reload);
+  const onUninstall = (id: string): void => { setMenu(null); void window.api.plugins.uninstall(id).then(reload); };
+
   return (
     <div className="ext-tab">
-      <ExtTabHead help="Bundles that install a whole set — skills, MCP servers and roles — at once." action="Browse plugins" />
+      <ExtTabHead help="Bundles that install a whole set — skills, MCP servers and roles — at once." action="Install plugin" onAdd={() => setDialog(true)} />
       <div className="ext-list">
-        {EXTENSIONS.plugins.map((p, i) => (
-          <div className={"ext-row plugin" + (enabled[i] ? "" : " off")} key={p.name}>
-            <span className="ext-lead"><Icons.box size={16} /></span>
-            <div className="ext-main">
-              <div className="ext-line1">
-                <span className="ext-name">{p.name}</span>
-                <span className="ext-source">{p.source}</span>
+        {plugins.length === 0 ? (
+          <div className="ext-empty">No plugins yet — install one to add a bundle of skills, MCP servers and roles.</div>
+        ) : (
+          plugins.map((p) => (
+            <div className={"ext-row plugin" + (p.enabled ? "" : " off")} key={p.id}>
+              <span className="ext-lead"><Icons.box size={16} /></span>
+              <div className="ext-main">
+                <div className="ext-line1">
+                  <span className="ext-name">{p.name}</span>
+                  {p.version ? <span className="ext-source">v{p.version}</span> : null}
+                </div>
+                {p.description ? <div className="ext-line2">{p.description}</div> : null}
+                <div className="bundle-chips">
+                  {p.bundles.map((b) => {
+                    const BI = Icons[BUNDLE_ICON[b.type]];
+                    return (
+                      <span className="bundle-chip" key={b.id}>
+                        <BI size={11} /><span className="bc-type">{b.type}</span>{b.name}
+                      </span>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="ext-line2">{p.desc}</div>
-              <div className="bundle-chips">
-                {p.bundles.map((b, j) => {
-                  const BI = Icons[BUNDLE_ICON[b.type]];
-                  return (
-                    <span className="bundle-chip" key={j}>
-                      <BI size={11} /><span className="bc-type">{b.type}</span>{b.name}
-                    </span>
-                  );
-                })}
+              <div className="ext-right">
+                <span className="ext-summary">{bundleSummary(p.bundles)}</span>
+                <Toggle on={p.enabled} onClick={() => onToggle(p)} />
+              </div>
+              <div className="ext-more-wrap">
+                <button className="icon-btn ext-more" onClick={() => setMenu(menu === p.id ? null : p.id)}>
+                  <Icons.more size={16} />
+                </button>
+                {menu === p.id ? (
+                  <>
+                    <div className="menu-backdrop" onClick={() => setMenu(null)} />
+                    <div className="row-menu right">
+                      <div className="rm-item danger" onClick={() => onUninstall(p.id)}>Uninstall</div>
+                    </div>
+                  </>
+                ) : null}
               </div>
             </div>
-            <div className="ext-right">
-              <span className="ext-summary">{p.summary}</span>
-              <Toggle on={enabled[i]} onClick={() => toggle(i)} />
-            </div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
+      {dialog ? (
+        <PluginDialog onClose={() => setDialog(false)} onInstalled={() => { setDialog(false); reload(); }} />
+      ) : null}
     </div>
   );
+}
+
+function bundleSummary(bundles: PluginDto["bundles"]): string {
+  const c = { skill: 0, mcp: 0, role: 0 };
+  for (const b of bundles) c[b.type]++;
+  const parts: string[] = [];
+  if (c.skill) parts.push(`${c.skill} skill${c.skill > 1 ? "s" : ""}`);
+  if (c.mcp) parts.push(`${c.mcp} MCP`);
+  if (c.role) parts.push(`${c.role} role${c.role > 1 ? "s" : ""}`);
+  return parts.join(" · ") || "empty";
 }
 
 /* ——— Tools (built-in ns_ tools) ——— */
@@ -315,11 +352,11 @@ function ToolsTab(): ReactElement {
 }
 
 export function ExtensionsView(): ReactElement {
-  const { EXTENSIONS } = STUDIO_DATA;
   const [tab, setTab] = useState("mcp");
   const [mcpCount, setMcpCount] = useState(0); // real server count, fed by MCPTab.onCount
   const [skillCount, setSkillCount] = useState(0); // real skill count, fed by SkillsTab.onCount
-  const counts: Record<string, number> = { mcp: mcpCount, skills: skillCount, plugins: EXTENSIONS.plugins.length, tools: 1 };
+  const [pluginCount, setPluginCount] = useState(0); // real plugin count, fed by PluginsTab.onCount
+  const counts: Record<string, number> = { mcp: mcpCount, skills: skillCount, plugins: pluginCount, tools: 1 };
   return (
     <div className="main-col">
       <div className="conv-header">
@@ -343,11 +380,8 @@ export function ExtensionsView(): ReactElement {
         <div className="ext-inner">
           {tab === "mcp" && <MCPTab onCount={setMcpCount} />}
           {tab === "skills" && <SkillsTab onCount={setSkillCount} />}
-          {tab === "plugins" && <PluginsTab />}
+          {tab === "plugins" && <PluginsTab onCount={setPluginCount} />}
           {tab === "tools" && <ToolsTab />}
-          {tab === "plugins" ? (
-            <div className="ext-foot">Mock framework · connections are illustrative</div>
-          ) : null}
         </div>
       </div>
     </div>

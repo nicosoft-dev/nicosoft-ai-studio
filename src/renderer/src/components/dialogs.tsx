@@ -635,6 +635,85 @@ export function SkillDialog({
   )
 }
 
+/* — Install plugin dialog — */
+export function PluginDialog({
+  onClose,
+  onInstalled
+}: {
+  onClose: () => void
+  onInstalled: () => void
+}): ReactElement {
+  const [dirPath, setDirPath] = useState('')
+  const [installing, setInstalling] = useState(false)
+  const [err, setErr] = useState('')
+
+  const pickDir = async (): Promise<void> => {
+    const p = await window.api.plugins.pickDir()
+    if (p) {
+      setDirPath(p)
+      setErr('')
+    }
+  }
+
+  const install = async (): Promise<void> => {
+    if (!dirPath.trim()) return
+    setInstalling(true)
+    setErr('')
+    try {
+      await window.api.plugins.install(dirPath.trim())
+      onInstalled()
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setErr(msg.split(/Error:\s*/).filter(Boolean).pop() ?? msg)
+      setInstalling(false)
+    }
+  }
+
+  return (
+    <div className="overlay" onMouseDown={onClose}>
+      <div className="dialog" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="dialog-head">
+          <span className="dh-title">Install plugin</span>
+          <button className="icon-btn" onClick={onClose}>
+            <Icons.x size={16} />
+          </button>
+        </div>
+        <div className="dialog-body">
+          <div>
+            <label className="field-label">
+              Plugin folder <span style={{ color: 'var(--text-4)', fontWeight: 400 }}>· must contain plugin.json</span>
+            </label>
+            <div className="skill-pickrow">
+              <input className="input mono" value={dirPath} onChange={(e) => setDirPath(e.target.value)} placeholder="/path/to/plugin" />
+              <button className="btn secondary sm" onClick={() => void pickDir()}>
+                Browse…
+              </button>
+            </div>
+          </div>
+          <div className="scope-note">
+            Installs the plugin&apos;s skills, MCP servers and roles. Skills + MCP are scoped to all experts (active for
+            those that have an agent); the roles are added to your sidebar.
+          </div>
+          {err ? (
+            <div className="dialog-err">
+              <Icons.alert size={14} /> {err}
+            </div>
+          ) : null}
+        </div>
+        <div className="dialog-foot">
+          <div className="df-spacer" />
+          <button className="btn ghost sm" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn primary sm" onClick={() => void install()} disabled={!dirPath.trim() || installing}>
+            {installing ? 'Installing…' : 'Install'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* — Custom role editor — */
 const ROLE_SWATCHES = [
   "var(--exp-generalist)", "var(--exp-engineer)", "var(--exp-designer)", "var(--exp-translator)",
