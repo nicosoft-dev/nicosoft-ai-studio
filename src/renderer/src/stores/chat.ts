@@ -576,6 +576,7 @@ export const useChat = create<ChatState>((set, get) => {
             model,
             prompt: text,
             cwd: cwd ?? '',
+            roleId: expertId,
             thinking,
             contextWindow,
             images: images?.map((i) => ({ dataUrl: i.dataUrl, mime: i.mime }))

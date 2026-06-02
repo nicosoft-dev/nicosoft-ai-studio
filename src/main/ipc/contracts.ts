@@ -78,6 +78,9 @@ export interface AgentRunInput {
   prompt: string
   cwd: string // the project directory Engineer operates in (its tools are confined here)
   convId: string // the conversation this run belongs to; drives persistence + ~/.nsai/sessions/<convId>/
+  // The role driving this run — selects which scoped MCP tools get injected. Defaults to 'engineer'
+  // (the only agent role today); custom agent roles pass their own id.
+  roleId?: string
   contextWindow?: number // model context window, drives compaction threshold (default 200K)
   // Resolved thinking directive (Anthropic extended thinking); budgetTokens drives the thinking budget.
   thinking?: { effort?: 'minimal' | 'none' | 'low' | 'medium' | 'high' | 'xhigh'; budgetTokens?: number }
@@ -364,4 +367,38 @@ export interface MemoryOnTurnInput {
   roleId: string
   endpointId: string
   model: string
+}
+
+// ---- MCP (Extensions) ----
+export type McpTransport = 'stdio' | 'http'
+export type McpScope = 'all' | string[] // 'all', or an explicit list of role ids
+export type McpStatus = 'connected' | 'error' | 'idle'
+
+export interface McpServerDto {
+  id: string
+  name: string
+  transport: McpTransport
+  endpointOrCmd: string // stdio command | http url
+  args: string[] // stdio args (http: [])
+  scope: McpScope
+  enabled: boolean
+  toolCount: number
+  status: McpStatus
+  hasSecrets: boolean // env/headers present in keychain — the values themselves never cross the wire
+}
+
+export interface McpServerInput {
+  name: string
+  transport: McpTransport
+  endpointOrCmd: string
+  args?: string[]
+  scope?: McpScope
+  enabled?: boolean
+  secrets?: Record<string, string> // env (stdio) or headers (http) — written to keychain, never persisted
+}
+
+export interface McpTestResult {
+  ok: boolean
+  toolCount?: number
+  error?: string
 }

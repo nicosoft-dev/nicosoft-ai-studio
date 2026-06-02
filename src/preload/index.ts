@@ -46,7 +46,10 @@ import type {
   MemoryDto,
   MemoryAddInput,
   MemoryUpdateInput,
-  MemoryOnTurnInput
+  MemoryOnTurnInput,
+  McpServerDto,
+  McpServerInput,
+  McpTestResult
 } from '../main/ipc/contracts'
 
 // Typed bridge exposed to the renderer as `window.api`. Window controls (Batch 0) + Batch 1
@@ -186,6 +189,14 @@ const api = {
   media: {
     // Save a generated image (nsai-media:// ref) to a user-chosen path; returns the path or null.
     save: (url: string, name: string): Promise<string | null> => ipcRenderer.invoke('media:save', url, name)
+  },
+  mcp: {
+    list: (): Promise<McpServerDto[]> => ipcRenderer.invoke('mcp:list'),
+    add: (input: McpServerInput): Promise<McpServerDto> => ipcRenderer.invoke('mcp:add', input),
+    update: (id: string, patch: McpServerInput): Promise<McpServerDto | null> =>
+      ipcRenderer.invoke('mcp:update', id, patch),
+    remove: (id: string): Promise<void> => ipcRenderer.invoke('mcp:remove', id),
+    test: (id: string): Promise<McpTestResult> => ipcRenderer.invoke('mcp:test', id)
   }
 }
 

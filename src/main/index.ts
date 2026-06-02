@@ -4,6 +4,7 @@ import { getDb } from './db/connection'
 import { registerIpc } from './ipc/register'
 import { registerMediaProtocol, MEDIA_PRIVILEGED_SCHEME } from './media/protocol'
 import { runIdleSweep } from './services/memory.service'
+import { connectEnabled as connectMcpServers } from './services/mcp.service'
 
 // Privileged schemes MUST be declared before app.whenReady. nsai-media:// serves local image files
 // (media/storage.ts) so attachments load by reference instead of base64-inlining into the DB/DOM.
@@ -60,6 +61,8 @@ app.whenReady().then(() => {
   getDb() // open SQLite + run migrations (idempotent) before any IPC handler can hit it
   registerMediaProtocol() // nsai-media:// → local image files, before the window loads any attachment
   registerIpc()
+  // Connect every enabled MCP server (best effort) so their tools are ready when an agent role runs.
+  void connectMcpServers().catch(() => {})
   createWindow()
   // Idle memory-extraction sweep: every minute, extract for conversations whose idle timer elapsed.
   setInterval(() => void runIdleSweep().catch(() => {}), 60_000)

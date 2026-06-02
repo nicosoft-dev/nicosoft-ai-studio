@@ -157,7 +157,8 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
   id              TEXT PRIMARY KEY,
   name            TEXT NOT NULL,
   transport       TEXT NOT NULL,                  -- stdio | http
-  endpoint_or_cmd TEXT NOT NULL,
+  endpoint_or_cmd TEXT NOT NULL,                  -- stdio command | http url
+  args            TEXT NOT NULL DEFAULT '[]',     -- JSON string[] (stdio args; http unused)
   scope           TEXT NOT NULL DEFAULT '"all"',  -- JSON: "all" | string[]
   enabled         INTEGER NOT NULL DEFAULT 1,
   tool_count      INTEGER NOT NULL DEFAULT 0,

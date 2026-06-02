@@ -31,6 +31,7 @@ import * as memoryService from './memory.service'
 import * as compressionService from './compression.service'
 import { pickSmallModel } from './model-select'
 import { countAnthropic } from './token-count.service'
+import { manager as mcpManager } from './mcp.service'
 
 const ENGINEER_ROLE_ID = 'engineer' // this version's agent is Engineer-only
 
@@ -56,6 +57,10 @@ export async function run(
 
   const convId = input.convId
   const runId = ulid()
+  // MCP tools scoped to this role get appended to the core set — generic across any agent role (the
+  // injection is by roleId + scope, never hardwired). Engineer is the only agent role today.
+  const roleId = input.roleId ?? ENGINEER_ROLE_ID
+  const tools = [...CORE_TOOLS, ...mcpManager.toolsForRole(roleId)]
 
   // ① Persist the user turn (tagged with run_id) so context assembly + extraction read it from the DB.
   const userImages = (input.images ?? []).map((i) => ({ url: i.dataUrl }))
@@ -87,7 +92,7 @@ export async function run(
 
   // Exact prompt tokens for this turn (system + seed + tool schemas) — free via count_tokens, falls
   // back to a small-model probe then chars/4. Drives the composer readout + the compression threshold.
-  const toolSchemas = buildToolsParam(CORE_TOOLS, input.model)
+  const toolSchemas = buildToolsParam(tools, input.model)
   const promptTokens = await countAnthropic({
     baseUrl: ep.baseUrl,
     apiKey: key,
@@ -123,7 +128,7 @@ export async function run(
     model: input.model,
     system,
     messages: seed,
-    tools: CORE_TOOLS,
+    tools,
     ctx,
     contextWindow: input.contextWindow ?? 200_000,
     thinking: input.thinking,
