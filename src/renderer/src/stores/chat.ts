@@ -502,19 +502,24 @@ export const useChat = create<ChatState>((set, get) => {
       set({ activeConv: convId })
       if (get().byConversation[convId]) return // already loaded
       // Load messages + (for agent conversations) rebuild tool cards from the transcript, keyed by run_id.
-      const [rows, tools] = await Promise.all([
+      const [rows, transcript] = await Promise.all([
         window.api.conversations.messages(convId),
         window.api.agent.transcript(convId)
       ])
-      const mapped: ChatMessage[] = rows.map((m) => ({
-        id: m.id,
-        role: m.author === 'user' ? 'user' : 'assistant',
-        text: m.content,
-        images: m.attachments.length ? m.attachments.map((a) => ({ url: a.url, name: a.name ?? 'image' })) : undefined,
-        tools: m.author !== 'user' && m.runId && tools[m.runId]?.length ? tools[m.runId] : undefined,
-        expertId: m.author === 'user' ? null : m.expertId,
-        dispatch: m.dispatch
-      }))
+      const mapped: ChatMessage[] = rows.map((m) => {
+        const run = m.author !== 'user' && m.runId ? transcript[m.runId] : undefined
+        return {
+          id: m.id,
+          role: m.author === 'user' ? 'user' : 'assistant',
+          text: m.content,
+          images: m.attachments.length ? m.attachments.map((a) => ({ url: a.url, name: a.name ?? 'image' })) : undefined,
+          tools: run?.tools.length ? run.tools : undefined,
+          servers: run?.servers.length ? run.servers : undefined,
+          citations: run?.citations.length ? run.citations : undefined,
+          expertId: m.author === 'user' ? null : m.expertId,
+          dispatch: m.dispatch
+        }
+      })
       // Seed the composer readout from the most recent assistant turn's measured prompt tokens.
       const lastCtx = [...rows].reverse().find((m) => m.author !== 'user' && m.inputTokens > 0)?.inputTokens
       set((s) => ({

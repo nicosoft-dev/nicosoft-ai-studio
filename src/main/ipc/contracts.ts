@@ -166,6 +166,13 @@ export interface ToolCallDto {
   status: 'running' | 'done' | 'error'
   result?: string
 }
+// One run's UI artifacts rebuilt from its transcript when reopening a past conversation: the tool
+// cards plus web_search's server-side activity (searched / visited sites) and the answer's citations.
+export interface RunTranscript {
+  tools: ToolCallDto[]
+  servers: { serverType: string; query?: string; url?: string }[]
+  citations: { url: string; title?: string }[]
+}
 
 // === Coordinator (router + multi-expert dispatch) ===
 // `coordinator:run` starts a routed turn for the conversation. The user message (+ any image attachments)

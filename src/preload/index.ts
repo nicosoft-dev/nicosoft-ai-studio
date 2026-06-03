@@ -19,6 +19,7 @@ import type {
   AgentDone,
   AgentErrorDto,
   ToolCallDto,
+  RunTranscript,
   CoordinatorRunInputDto,
   CoordinatorDispatchEvent,
   CoordinatorStepStart,
@@ -119,7 +120,7 @@ const api = {
     onPermissionCancel: (cb: (d: AgentPermissionCancel) => void): (() => void) => agentListen('agent:permission:cancel', cb),
     onDone: (cb: (d: AgentDone) => void): (() => void) => agentListen('agent:done', cb),
     onError: (cb: (d: AgentErrorDto) => void): (() => void) => agentListen('agent:error', cb),
-    transcript: (convId: string): Promise<Record<string, ToolCallDto[]>> =>
+    transcript: (convId: string): Promise<Record<string, RunTranscript>> =>
       ipcRenderer.invoke('agent:transcript', convId)
   },
 

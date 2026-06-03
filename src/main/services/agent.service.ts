@@ -21,7 +21,7 @@ import { buildRolePrompt } from '../agent/roles/prompts'
 import { enterPlanModeTool } from '../agent/tools/enter-plan-mode'
 import { exitPlanModeTool } from '../agent/tools/exit-plan-mode'
 import type { Tool } from '../agent/tool'
-import type { AgentRunInput, ToolCallDto } from '../ipc/contracts'
+import type { AgentRunInput, ToolCallDto, RunTranscript } from '../ipc/contracts'
 import * as keychain from '../keychain/keychain'
 import { LlmError } from '../llm/types'
 import { resolveToDataUrl } from '../media/storage'
@@ -302,7 +302,7 @@ function finalAssistantText(messages: AgentMessage[]): string {
 // transcript. Returns {} for a non-agent conversation (no transcript file). Contract: one assistant
 // message per run (this service persists only the final reply), so all of a run's tools attach to that
 // single message — if that ever changes, the renderer needs a per-message key, not just run_id.
-export function readTranscript(convId: string): Record<string, ToolCallDto[]> {
+export function readTranscript(convId: string): Record<string, RunTranscript> {
   const file = join(homedir(), '.nsai', 'sessions', convId, 'transcript.jsonl')
   if (!existsSync(file)) return {}
   let lines: string[]
@@ -311,7 +311,8 @@ export function readTranscript(convId: string): Record<string, ToolCallDto[]> {
   } catch {
     return {}
   }
-  const byRun: Record<string, ToolCallDto[]> = {}
+  const byRun: Record<string, RunTranscript> = {}
+  const citeSeen: Record<string, Set<string>> = {} // per-run url dedup for citations
   for (const line of lines) {
     if (!line) continue
     let obj: { t?: string; runId?: string; event?: { type?: string; message?: { content?: unknown[] } } }
@@ -323,16 +324,38 @@ export function readTranscript(convId: string): Record<string, ToolCallDto[]> {
     if (obj.t !== 'event' || !obj.runId || !obj.event) continue
     const content = obj.event.message?.content
     if (!Array.isArray(content)) continue
+    const run = (byRun[obj.runId] ??= { tools: [], servers: [], citations: [] })
     if (obj.event.type === 'assistant') {
-      for (const b of content as { type?: string; id?: string; name?: string; input?: unknown }[]) {
+      for (const b of content as {
+        type?: string
+        id?: string
+        name?: string
+        input?: unknown
+        action?: { query?: string; url?: string }
+        citations?: { url?: string; title?: string }[]
+      }[]) {
         if (b.type === 'tool_use' && b.id) {
-          ;(byRun[obj.runId] ??= []).push({ id: b.id, name: b.name ?? '', input: b.input, status: 'running' })
+          run.tools.push({ id: b.id, name: b.name ?? '', input: b.input, status: 'running' })
+        } else if (b.type === 'web_search_call') {
+          // search → query, open_page → url (visited site). reasoning/other server blocks aren't shown.
+          const sv: { serverType: string; query?: string; url?: string } = { serverType: b.type }
+          if (b.action?.query) sv.query = b.action.query
+          if (b.action?.url) sv.url = b.action.url
+          run.servers.push(sv)
+        } else if (b.type === 'text' && Array.isArray(b.citations)) {
+          const seen = (citeSeen[obj.runId] ??= new Set())
+          for (const c of b.citations) {
+            if (c.url && !seen.has(c.url)) {
+              seen.add(c.url)
+              run.citations.push({ url: c.url, title: c.title })
+            }
+          }
         }
       }
     } else if (obj.event.type === 'tool_results') {
       for (const b of content as { type?: string; tool_use_id?: string; content?: unknown; is_error?: boolean }[]) {
         if (b.type !== 'tool_result' || !b.tool_use_id) continue
-        const t = byRun[obj.runId]?.find((x) => x.id === b.tool_use_id)
+        const t = run.tools.find((x) => x.id === b.tool_use_id)
         if (t) {
           t.status = b.is_error ? 'error' : 'done'
           t.result = typeof b.content === 'string' ? b.content : JSON.stringify(b.content)
