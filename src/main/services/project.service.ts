@@ -1,4 +1,6 @@
 import * as repo from '../repos/project.repo'
+import * as rolesService from './roles.service'
+import * as titleService from './title.service'
 import type {
   ProjectDto,
   ProjectTaskDto,
@@ -60,9 +62,29 @@ export function get(id: string): ProjectDto | null {
   return p ? assemble(p, repo.listTasks(p.id), repo.listTests(p.id)) : null
 }
 
-export function create(input: ProjectCreateInput): ProjectDto {
-  const p = repo.insertProject({ title: input.title, goal: input.goal ?? null, cwd: input.cwd ?? null })
+// Create a project. A blank title is auto-generated from the goal via the title service — a small/fast
+// model on the coordinator's endpoint, falling back to its MAIN model when there's no smaller sibling,
+// then to a goal truncation. Covers New Project (blank name) + coordinator-created projects.
+export async function create(input: ProjectCreateInput): Promise<ProjectDto> {
+  const title = input.title?.trim() || (await generateName(input.goal ?? ''))
+  const p = repo.insertProject({ title, goal: input.goal ?? null, cwd: input.cwd ?? null })
   return assemble(p, [], [])
+}
+
+async function generateName(goal: string): Promise<string> {
+  const fallback =
+    goal
+      .split('\n')
+      .map((l) => l.trim())
+      .find(Boolean)
+      ?.slice(0, 57) || 'Untitled project'
+  const b = rolesService.getBinding('coordinator')
+  if (!b?.endpointId || !b.model || !goal.trim()) return fallback
+  try {
+    return await titleService.generate({ firstMessage: goal, endpointId: b.endpointId, model: b.model })
+  } catch {
+    return fallback
+  }
 }
 
 export function remove(id: string): void {

@@ -1,7 +1,5 @@
 import * as projectService from './project.service'
 import * as convRepo from '../repos/conversation.repo'
-import * as rolesService from './roles.service'
-import * as titleService from './title.service'
 import type { ProjectTaskDto } from '../ipc/contracts'
 
 // Bridges a coordinator COLLABORATE turn to a Project (doc 19 §1, phase 5b). A collaboration IS project
@@ -30,7 +28,8 @@ export async function ensureProjectForCollab(
   if (conv?.projectId) return mapOrSeedTasks(conv.projectId, roles)
 
   const cwd = roles.map((r) => cwdByRole?.[r]).find((c): c is string => !!c) ?? null
-  const project = projectService.create({ title: await projectTitle(prompt), goal: prompt, cwd })
+  // Blank title → project.service.create generates it from the goal (small model → main model → truncate).
+  const project = await projectService.create({ title: '', goal: prompt, cwd })
   const taskByRole: Record<string, string> = {}
   for (const roleId of roles) {
     taskByRole[roleId] = projectService.addTask(project.id, { title: taskTitle(roleId), assigneeRoleId: roleId }).id
@@ -38,20 +37,6 @@ export async function ensureProjectForCollab(
   convRepo.setProjectId(convId, project.id)
   projectService.setPhase(project.id, 'executing')
   return { projectId: project.id, taskByRole }
-}
-
-// Generate a concise project name from the prompt via the title service: a small/fast model on the
-// coordinator's own endpoint, falling back to the coordinator's MAIN model when the endpoint has no
-// smaller sibling (user ask), and to a plain truncation when there's no usable binding or the call
-// fails. Titling never blocks project creation.
-async function projectTitle(prompt: string): Promise<string> {
-  const b = rolesService.getBinding('coordinator')
-  if (!b?.endpointId || !b.model) return deriveTitle(prompt)
-  try {
-    return await titleService.generate({ firstMessage: prompt, endpointId: b.endpointId, model: b.model })
-  } catch {
-    return deriveTitle(prompt)
-  }
 }
 
 // Mark the given roles' tasks done; if every task in the project is now done, advance the phase to done.
@@ -83,14 +68,4 @@ function mapOrSeedTasks(projectId: string, roles: string[]): CollabProject {
 
 function taskTitle(roleId: string): string {
   return `${roleId.charAt(0).toUpperCase()}${roleId.slice(1)} contribution`
-}
-
-// First non-empty line of the prompt, trimmed to a sane title length.
-function deriveTitle(prompt: string): string {
-  const firstLine =
-    prompt
-      .split('\n')
-      .map((l) => l.trim())
-      .find(Boolean) ?? 'Untitled project'
-  return firstLine.length > 60 ? firstLine.slice(0, 57) + '…' : firstLine
 }
