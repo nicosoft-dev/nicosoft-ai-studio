@@ -30,6 +30,7 @@ import type {
 } from './types'
 
 export interface RunAgentParams {
+  protocol: 'anthropic' | 'openai'
   baseUrl: string
   apiKey: string
   model: string
@@ -119,7 +120,7 @@ export async function* runAgent(
   // was, so the running estimate = tokensFromUsage(lastUsage) + char/4 of messages added since.
   let lastUsage: Usage | undefined
   let lastUsageAt = 0
-  const compactConfig: CompactConfig = { baseUrl, apiKey, model, signal: ctx.signal }
+  const compactConfig: CompactConfig = { protocol: params.protocol, baseUrl, apiKey, model, signal: ctx.signal }
   const threshold = autocompactThreshold(contextWindow)
   let reactiveCompacted = false // bounce guard: if a send overflows right after a reactive compact, fail
 
@@ -134,6 +135,7 @@ export async function* runAgent(
     (signal: AbortSignal): SpawnSubAgent =>
     async ({ prompt }) => {
       const sub = runAgent({
+        protocol: params.protocol,
         baseUrl,
         apiKey,
         model,
@@ -204,7 +206,7 @@ export async function* runAgent(
       // Stream the turn: each tool_use block is yielded as it finishes, so execution starts
       // immediately (read-only tools batch in parallel) instead of waiting for the whole message.
       const gen = callWithTools(
-        { baseUrl, apiKey, model, system, messages, tools: toolSchemas, maxTokens, thinking: params.thinking, signal: ctx.signal },
+        { protocol: params.protocol, baseUrl, apiKey, model, system, messages, tools: toolSchemas, maxTokens, thinking: params.thinking, signal: ctx.signal },
         params.onStream,
       )
       for (;;) {

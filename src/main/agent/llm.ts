@@ -4,6 +4,7 @@
 // Reuses the shared SSE plumbing. See docs/nicosoft-studio/12-hex-coding-agent.md §2.4.
 
 import { iterSSE, openStream, parseJSON, toLlmError } from '../llm/_shared'
+import { callWithToolsOpenAI } from './llm-openai'
 import type { ThinkingParam } from '../llm/types'
 import type {
   AgentMessage,
@@ -19,6 +20,7 @@ const PROVIDER = 'anthropic'
 const ANTHROPIC_VERSION = '2023-06-01'
 
 export interface AgentLlmRequest {
+  protocol: 'anthropic' | 'openai'
   baseUrl: string
   apiKey: string
   model: string
@@ -69,7 +71,7 @@ type Accum =
 
 // POST /v1/messages (Anthropic protocol) with tools. Yields each completed tool_use block as it
 // finishes (content_block_stop); returns the assembled AssistantTurn when the stream ends.
-export async function* callWithTools(
+async function* callWithToolsAnthropic(
   req: AgentLlmRequest,
   onEvent?: (e: AgentLlmEvent) => void,
 ): AsyncGenerator<ToolUseBlock, AssistantTurn, void> {
@@ -194,6 +196,16 @@ export async function* callWithTools(
     else content.push(b.raw as ServerBlock)
   }
   return { content, stopReason, usage: { inTokens, outTokens, cacheReadTokens, cacheCreationTokens } }
+}
+
+// Protocol dispatcher: the loop calls this; it routes to the Anthropic or OpenAI tool-use adapter by
+// req.protocol. Both yield ToolUseBlock + return AssistantTurn, so the loop stays protocol-agnostic.
+export async function* callWithTools(
+  req: AgentLlmRequest,
+  onEvent?: (e: AgentLlmEvent) => void,
+): AsyncGenerator<ToolUseBlock, AssistantTurn, void> {
+  if (req.protocol === 'openai') return yield* callWithToolsOpenAI(req, onEvent)
+  return yield* callWithToolsAnthropic(req, onEvent)
 }
 
 // Drain the generator to a full turn — for callers that don't stream tool execution (autocompact).

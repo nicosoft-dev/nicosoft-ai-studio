@@ -127,6 +127,7 @@ export async function run(
   }
 
   const gen = runAgent({
+    protocol: 'anthropic', // Engineer is Anthropic-only today (gated above); OpenAI roles wire in at stage B
     baseUrl: ep.baseUrl,
     apiKey: key,
     model: input.model,

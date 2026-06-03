@@ -149,6 +149,7 @@ const COMPACT_SUFFIX =
   'summary or recap; pick up the work.'
 
 export interface CompactConfig {
+  protocol: 'anthropic' | 'openai'
   baseUrl: string
   apiKey: string
   model: string
@@ -161,6 +162,7 @@ export async function autocompact(messages: AgentMessage[], config: CompactConfi
   try {
     const transcript = messagesToTranscript(messages)
     const turn = await collectTurn({
+      protocol: config.protocol,
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
       model: config.model, // session model — quality over cost
