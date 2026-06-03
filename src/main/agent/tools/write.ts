@@ -1,7 +1,8 @@
 // Write tool — create or overwrite a file. Overwriting an existing file requires having Read it first
 // (stale-write guard), so the agent never clobbers changes it hasn't seen.
 
-import { stat, writeFile } from 'node:fs/promises'
+import { mkdir, stat, writeFile } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import { z } from 'zod'
 import { confineReal } from '../confine'
 import { buildTool } from '../tool'
@@ -29,6 +30,9 @@ export const writeTool = buildTool<typeof inputSchema, WriteOutput>({
     const abs = await confineReal(ctx.cwd, input.file_path)
     const existing = await stat(abs).catch(() => null)
     if (existing) await ensureFresh(ctx, abs, input.file_path) // don't clobber an unseen file
+    // Create parent dirs so writing frontend/port.txt doesn't ENOENT just because frontend/ doesn't exist
+    // yet (the agent shouldn't have to mkdir first). abs is already confined to cwd, so this can't escape.
+    if (!existing) await mkdir(dirname(abs), { recursive: true })
     await writeFile(abs, input.content, 'utf-8')
     const st = await stat(abs)
     ctx.readFileState.set(abs, { content: input.content, mtimeMs: st.mtimeMs })

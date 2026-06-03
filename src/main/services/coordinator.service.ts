@@ -23,8 +23,13 @@ import * as roleRepo from '../repos/role.repo'
 import * as keychain from '../keychain/keychain'
 import * as memoryService from './memory.service'
 import * as convService from './conversation.service'
+import * as rolesService from './roles.service'
 import * as compressionService from './compression.service'
 import { chat as llmChat } from '../llm/client'
+import * as agentService from './agent.service'
+import type { AgentEvent } from '../agent/loop'
+import type { PermissionRequest, PermissionDecision } from '../agent/context'
+import type { MemoryRow } from '../repos/memory.repo'
 import { countContext } from './token-count.service'
 import { pickSmallModel } from './model-select'
 import { LlmError, type ChatAttachment, type ChatMessage } from '../llm/types'
@@ -43,7 +48,7 @@ import {
 } from '../agent/roles/prompts'
 
 export interface RouteDecision {
-  mode: 'direct' | 'single' | 'pipeline' | 'parallel' | 'council'
+  mode: 'direct' | 'single' | 'pipeline' | 'parallel' | 'council' | 'collaborate'
   role?: string
   roles?: string[]
   reason: string
@@ -55,6 +60,10 @@ export interface RouteDecision {
 export interface CoordinatorRunInput {
   convId: string
   prompt: string
+  // Per-role working dirs (the renderer's cwdByExpert). An agent-dispatched expert uses cwdByRole[roleId]
+  // as its loop cwd; unset → it runs cwd-less (Read dropped for non-dev roles; web/think still work — doc
+  // 19 §14). Real project-scoped cwd lands in stage 5.
+  cwdByRole?: Record<string, string>
 }
 
 export interface CoordinatorCallbacks {
@@ -62,6 +71,13 @@ export interface CoordinatorCallbacks {
   onStepStart: (roleId: string, dispatch: string[] | null, model: string) => void
   onDelta: (roleId: string, text: string) => void
   onStepDone: (roleId: string, text: string, inputTokens: number) => void
+  // Agent-dispatched experts (engineer/shuri/generalist/analyst/scheduler) run a full tool-using loop —
+  // these surface its tool activity + approval prompts to the coordinator UI. Tool-less steps (designer/
+  // translator/editor + every coordinator-self synthesis turn) never fire them, so they're optional.
+  onToolStart?: (roleId: string, id: string, name: string) => void
+  onToolEvent?: (roleId: string, ev: AgentEvent) => void
+  // Tagged with roleId so a parallel/council turn's approval dialog can name the expert that's asking.
+  requestPermission?: (roleId: string, req: PermissionRequest, signal?: AbortSignal) => Promise<PermissionDecision>
 }
 
 const ROUTER_HISTORY_LIMIT = 4 // last N messages handed to the router for context
@@ -105,6 +121,7 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
       prompt: input.prompt,
       dispatch: null,
       includeHistory: true,
+      cwd: input.cwdByRole?.[decision.role!],
       cb,
       signal
     })
@@ -122,7 +139,7 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
     if (decision.intro) emitCoordinatorIntro(input.convId, decision.intro, cb)
     const settled = await Promise.all(
       decision.roles!.map((roleId) =>
-        runRoleStep({ convId: input.convId, roleId, prompt: buildPanelPrompt(input.prompt, roleId), dispatch: fullChain, includeHistory: false, cb, signal })
+        runRoleStep({ convId: input.convId, roleId, prompt: buildPanelPrompt(input.prompt, roleId), dispatch: fullChain, includeHistory: false, cwd: input.cwdByRole?.[roleId], cb, signal })
           .then((out) => ({ role: roleId, ...out }))
           .catch(() => null)
       )
@@ -165,7 +182,7 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
         roles.map((roleId) => {
           const prompt = seen.has(roleId) ? buildCritiquePrompt(input.prompt, prev, roleId) : buildPanelPrompt(input.prompt, roleId)
           seen.add(roleId)
-          return runRoleStep({ convId: input.convId, roleId, prompt, dispatch: fullChain, includeHistory: false, cb, signal })
+          return runRoleStep({ convId: input.convId, roleId, prompt, dispatch: fullChain, includeHistory: false, cwd: input.cwdByRole?.[roleId], cb, signal })
             .then((out) => ({ role: roleId, text: out.text }))
             .catch(() => null)
         })
@@ -199,6 +216,32 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
     return { inputTokens: synth.inputTokens }
   }
 
+  if (decision.mode === 'collaborate') {
+    // Collaboration: 2-3 agent experts BUILD together, running concurrently + coordinating live via
+    // send_message / assign_task / wait (consult — doc 19 §5 / §11 phase 3). Each is a persistent, mailbox-
+    // driven agent loop; the coordinator then synthesizes their combined result. Their consult calls + tool
+    // steps stream to the UI through the same per-role callbacks the dispatch path uses.
+    const fullChain = [...decision.roles!, 'coordinator']
+    cb.onDispatch(fullChain, decision.reason)
+    if (decision.intro) emitCoordinatorIntro(input.convId, decision.intro, cb)
+    const outputs = await runCollaboration(input, decision.roles!, fullChain, cb, signal)
+    if (signal.aborted) throw new LlmError('network', 'aborted mid-collaboration')
+    if (outputs.length === 0) throw new LlmError('upstream', 'collaboration produced no output')
+    const synthInput = buildParallelSynthesisInput(input.prompt, outputs)
+    const synth = await runRoleStep({
+      convId: input.convId,
+      roleId: 'coordinator',
+      prompt: synthInput,
+      dispatch: fullChain,
+      includeHistory: false,
+      isParallelSynthesis: true,
+      cb,
+      signal
+    })
+    fireSideEffects(input.convId, 'coordinator', synth.endpointId, synth.model, synth.inputTokens)
+    return { inputTokens: synth.inputTokens }
+  }
+
   // Pipeline: chain stored on each step = [...experts, 'coordinator']. The renderer's DispatchBadge prefixes
   // its own "Coordinator · routing →" label, so we don't include the leading coordinator; the trailing 'coordinator' is
   // the synthesis step. Example: a 2-expert pipeline translator→engineer → chain = ['translator','engineer','coordinator'].
@@ -223,6 +266,7 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
       prompt: stepPrompt,
       dispatch: fullChain,
       includeHistory: i === 0,
+      cwd: input.cwdByRole?.[roleId],
       cb,
       signal
     })
@@ -277,7 +321,7 @@ export async function route(userInput: string, history: convRepo.MessageRow[], s
     }
   }
 
-  const binding = roleRepo.getBinding('coordinator')
+  const binding = rolesService.getBinding('coordinator')
   if (!binding?.endpointId || !binding.model) return { mode: 'single', role: enabled[0], reason: 'coordinator not configured' }
   const ep = endpointRepo.getById(binding.endpointId)
   if (!ep || !ep.enabled) return { mode: 'single', role: enabled[0], reason: 'endpoint missing' }
@@ -368,6 +412,15 @@ export function parseRouteDecision(raw: string, enabled: readonly string[]): Rou
           return { mode: 'council', roles: rids, reason, intro }
         }
       }
+      if (obj.mode === 'collaborate' && Array.isArray(obj.roles)) {
+        const rids = obj.roles.filter((r): r is string => typeof r === 'string').map(roleIdFromName)
+        // Collaboration experts must be AGENT roles (they need tools + the consult tools); 2-3 like the
+        // other multi-expert modes. A non-agent role (designer/translator/…) can't run the collab loop, so
+        // a decision naming one falls through to the lenient default below.
+        if (rids.length >= 2 && rids.length <= 3 && rids.every((r) => enabled.includes(r) && agentService.AGENT_ROLE_IDS.has(r))) {
+          return { mode: 'collaborate', roles: rids, reason, intro }
+        }
+      }
     } catch {
       /* try next candidate */
     }
@@ -389,7 +442,7 @@ export function parseRouteDecision(raw: string, enabled: readonly string[]): Rou
 // chain would make the renderer's isSynthesis() mis-tag it as the synthesis step (only the trailing
 // Coordinator merge is synthesis). The dispatch badge attaches from the first expert step onward.
 function emitCoordinatorIntro(convId: string, intro: string, cb: CoordinatorCallbacks): void {
-  const coordinatorModel = roleRepo.getBinding('coordinator')?.model ?? ''
+  const coordinatorModel = rolesService.getBinding('coordinator')?.model ?? ''
   cb.onStepStart('coordinator', null, coordinatorModel)
   cb.onDelta('coordinator', intro)
   convService.append(convId, { author: 'expert', expertId: 'coordinator', model: coordinatorModel, content: intro })
@@ -403,6 +456,8 @@ interface RunStepOptions {
   dispatch: string[] | null
   cb: CoordinatorCallbacks
   signal: AbortSignal
+  // Working dir for an agent-dispatched expert (cwdByRole[roleId]). Ignored by tool-less llmChat roles.
+  cwd?: string
   // includeHistory=true → seed messages with prior conversation turns (after the latest summary's
   // covered_up_to boundary). Used for single-mode and the FIRST step of a pipeline so the dispatched
   // role can answer multi-turn requests with continuity. False for pipeline step 2+ and synthesis —
@@ -423,8 +478,8 @@ interface RunStepOptions {
 }
 
 async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputTokens: number; endpointId: string; model: string }> {
-  const { convId, roleId, prompt, dispatch, cb, signal, includeHistory = false, isSynthesis = false, isDirect = false, isParallelSynthesis = false, isCouncilSynthesis = false } = opts
-  const binding = roleRepo.getBinding(roleId)
+  const { convId, roleId, prompt, dispatch, cb, signal, cwd, includeHistory = false, isSynthesis = false, isDirect = false, isParallelSynthesis = false, isCouncilSynthesis = false } = opts
+  const binding = rolesService.getBinding(roleId)
   if (!binding?.endpointId || !binding.model) {
     throw new LlmError('bad_request', `role "${roleId}" has no endpoint binding`)
   }
@@ -434,6 +489,79 @@ async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputT
   const apiKey = keychain.getApiKey(binding.endpointId)
   if (!apiKey) throw new LlmError('bad_key', `no API key for role "${roleId}"`)
 
+  const isCoordinatorSelf = isDirect || isSynthesis || isParallelSynthesis || isCouncilSynthesis
+
+  // Recall memories + summary ONCE — both the agent loop and the llmChat path inject them so dispatched
+  // roles see what they've learned about the user. Synthesis turns skip recall (the synthesis prompt
+  // merges the experts' outputs faithfully; coordinator's own facts would only blur the merge).
+  let memories: MemoryRow[] = []
+  let summaryContent: string | null = null
+  if (!isSynthesis && !isParallelSynthesis && !isCouncilSynthesis) {
+    memories = await memoryService.recall({ convId, roleId, endpointId: binding.endpointId, model: binding.model })
+    summaryContent = summaryRepo.getLatest(convId)?.content ?? null
+  }
+
+  cb.onStepStart(roleId, dispatch, binding.model)
+
+  // Agent-dispatched experts (engineer/shuri/generalist/analyst/scheduler) run a FULL tool-using agent
+  // loop — the dispatch upgrade (doc 19 §11 phase 2), not a single llmChat turn. runDispatchedAgent owns
+  // the loop + transcript but NOT persistence: we persist the step here (tagged with the dispatch chain)
+  // so the renderer draws one badge spanning the run, exactly like the llmChat path below.
+  // The loop speaks Anthropic Messages or OpenAI Responses; a Gemini-backed expert can't run it yet, so it
+  // falls through to the single-turn llmChat path below (mirrors agent.service.run's protocol gate).
+  const agentProtocol: 'anthropic' | 'openai' | null =
+    ep.protocol === 'anthropic' ? 'anthropic' : ep.protocol === 'openai' || ep.protocol === 'custom' ? 'openai' : null
+  if (agentProtocol && agentService.AGENT_ROLE_IDS.has(roleId) && !isCoordinatorSelf) {
+    let text = ''
+    const agentCb: agentService.AgentCallbacks = {
+      onStream: (ev) => {
+        if (ev.type === 'text') {
+          text += ev.delta
+          cb.onDelta(roleId, ev.delta)
+        } else if (ev.type === 'tool_use_start') {
+          cb.onToolStart?.(roleId, ev.id, ev.name)
+        }
+      },
+      onEvent: (ev) => cb.onToolEvent?.(roleId, ev),
+      // phase 2: dispatched-tool approvals still pop to the USER (doc 19 §14; coordinator-proxy approval is
+      // phase 4). If the handler wires no bridge (e.g. headless), default-deny so a write can't hang on an
+      // answer that never comes.
+      requestPermission: cb.requestPermission ? (req, sig) => cb.requestPermission!(roleId, req, sig) : () => Promise.resolve({ allow: false })
+    }
+    const res = await agentService.runDispatchedAgent(
+      {
+        convId,
+        roleId,
+        prompt,
+        cwd: cwd ?? '',
+        protocol: agentProtocol,
+        baseUrl: ep.baseUrl,
+        apiKey,
+        model: binding.model,
+        includeHistory,
+        memories,
+        summary: summaryContent
+      },
+      agentCb,
+      signal
+    )
+    text = res.text
+    if (text) {
+      convService.append(convId, {
+        author: 'expert',
+        expertId: roleId,
+        model: binding.model,
+        content: text,
+        dispatch: dispatch ?? undefined,
+        inputTokens: res.inTokens
+      })
+    }
+    usageRepo.record({ model: binding.model, provider: ep.protocol, inTokens: res.inTokens, outTokens: res.outTokens })
+    cb.onStepDone(roleId, text, res.inTokens)
+    return { text, inputTokens: res.inTokens, endpointId: binding.endpointId, model: binding.model }
+  }
+
+  // --- Tool-less path: coordinator-self synthesis/direct + designer/translator/editor → one llmChat turn ---
   const systemPrompt = isDirect
     ? COORDINATOR_DIRECT_PROMPT
     : isParallelSynthesis
@@ -446,14 +574,8 @@ async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputT
   if (!systemPrompt) throw new LlmError('bad_request', `unknown role "${roleId}"`)
 
   const parts = [systemPrompt]
-  if (!isSynthesis && !isParallelSynthesis && !isCouncilSynthesis) {
-    // Inject memories + summary the same way chat.service does, so dispatched roles see what they've
-    // learned about the user. Synthesis skips this (see RunStepOptions doc).
-    const memories = await memoryService.recall({ convId, roleId, endpointId: binding.endpointId, model: binding.model })
-    if (memories.length) parts.push('What you remember about the user:\n' + memories.map((m) => `- ${m.content}`).join('\n'))
-    const summary = summaryRepo.getLatest(convId)
-    if (summary) parts.push('Summary of earlier conversation:\n' + summary.content)
-  }
+  if (memories.length) parts.push('What you remember about the user:\n' + memories.map((m) => `- ${m.content}`).join('\n'))
+  if (summaryContent) parts.push('Summary of earlier conversation:\n' + summaryContent)
   const system = parts.join('\n\n')
 
   // Build the conversation messages. With history: replay turns after the latest summary's boundary,
@@ -489,8 +611,6 @@ async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputT
     smallModel: pickSmallModel(ep.protocol, ep.availableModels, binding.model)
   })
 
-  cb.onStepStart(roleId, dispatch, binding.model)
-
   let text = ''
   const result = await llmChat(
     { protocol: ep.protocol, baseUrl: ep.baseUrl, apiKey, model: binding.model, messages, signal },
@@ -519,6 +639,78 @@ async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputT
   cb.onStepDone(roleId, text, inputTokens)
 
   return { text, inputTokens, endpointId: binding.endpointId, model: binding.model }
+}
+
+// Run a collaboration (collaborate mode — doc 19 §5): resolve each agent expert's binding, hand them all
+// the same task as a CollabSession, and bridge their concurrent activity (text deltas + tool cards +
+// approvals) to the per-role coordinator callbacks. Persists each expert's final reply (tagged with the
+// chain) and returns them for synthesis. Experts coordinate among themselves via the consult tools — those
+// calls surface as ordinary tool cards (onToolEvent); the richer orchestration-tree event stream (onEvent)
+// is wired to the UI in phase 5. A Gemini-backed expert is skipped (the agent loop is Anthropic/OpenAI only).
+async function runCollaboration(
+  input: CoordinatorRunInput,
+  roleIds: string[],
+  fullChain: string[],
+  cb: CoordinatorCallbacks,
+  signal: AbortSignal,
+): Promise<{ role: string; text: string }[]> {
+  const experts: agentService.CollabExpertInput[] = []
+  const models = new Map<string, string>()
+  for (const roleId of roleIds) {
+    const binding = rolesService.getBinding(roleId)
+    if (!binding?.endpointId || !binding.model) continue
+    const ep = endpointRepo.getById(binding.endpointId)
+    if (!ep?.enabled) continue
+    const apiKey = keychain.getApiKey(binding.endpointId)
+    if (!apiKey) continue
+    const protocol: 'anthropic' | 'openai' | null =
+      ep.protocol === 'anthropic' ? 'anthropic' : ep.protocol === 'openai' || ep.protocol === 'custom' ? 'openai' : null
+    if (!protocol) continue
+    models.set(roleId, binding.model)
+    cb.onStepStart(roleId, fullChain, binding.model)
+    experts.push({
+      roleId,
+      initialPrompt: input.prompt,
+      cwd: input.cwdByRole?.[roleId] ?? '',
+      protocol,
+      baseUrl: ep.baseUrl,
+      apiKey,
+      model: binding.model
+    })
+  }
+  if (experts.length < 2) throw new LlmError('bad_request', 'collaboration needs at least 2 bound agent experts')
+
+  const hooks: agentService.CollabHooks = {
+    onEvent: () => {}, // orchestration-tree stream → UI in phase 5; consult CALLS already show as tool cards
+    onExpertStream: (roleId, ev) => {
+      if (ev.type === 'text') cb.onDelta(roleId, ev.delta)
+      else if (ev.type === 'tool_use_start') cb.onToolStart?.(roleId, ev.id, ev.name)
+    },
+    onExpertEvent: (roleId, ev) => cb.onToolEvent?.(roleId, ev),
+    // phase 3: collaboration experts auto-approve their cwd-confined mutating tools (doc 19 §8 green zone —
+    // the loop already sandboxes every path to cwd). N concurrent experts can't share the single approval
+    // slot the dispatch path uses (they'd overwrite each other → a waiting expert deadlocks). phase 4 adds
+    // the 3-tier green/yellow/red approval (yellow logged in chat, red deferred) so dangerous / out-of-cwd
+    // operations aren't blanket-allowed.
+    requestPermission: () => Promise.resolve({ allow: true })
+  }
+  const results = await agentService.runCollabSession(input.convId, experts, hooks, signal, () => Date.now())
+
+  const outputs: { role: string; text: string }[] = []
+  for (const [roleId, text] of results) {
+    if (text) {
+      convService.append(input.convId, {
+        author: 'expert',
+        expertId: roleId,
+        model: models.get(roleId) ?? '',
+        content: text,
+        dispatch: fullChain
+      })
+      outputs.push({ role: roleId, text })
+    }
+    cb.onStepDone(roleId, text, 0)
+  }
+  return outputs
 }
 
 // Convert a persisted message's attachments column to the ChatMessage attachment shape adapters
@@ -601,7 +793,7 @@ function buildCouncilSynthesisInput(question: string, positions: { role: string;
 type FacilitateMove = { action: 'converge' } | { action: 'continue' } | { action: 'add'; role: string }
 async function facilitate(question: string, positions: { role: string; text: string }[], panel: string[], signal: AbortSignal): Promise<FacilitateMove> {
   const MAX_PANEL = 4
-  const binding = roleRepo.getBinding('coordinator')
+  const binding = rolesService.getBinding('coordinator')
   if (!binding?.endpointId || !binding.model) return { action: 'converge' }
   const ep = endpointRepo.getById(binding.endpointId)
   if (!ep || !ep.enabled) return { action: 'converge' }
@@ -614,7 +806,7 @@ async function facilitate(question: string, positions: { role: string; text: str
   const available =
     panel.length >= MAX_PANEL
       ? []
-      : DISPATCHABLE_ROLE_IDS.filter((r) => !disabled.has(r) && !panel.includes(r) && !!roleRepo.getBinding(r)?.endpointId)
+      : DISPATCHABLE_ROLE_IDS.filter((r) => !disabled.has(r) && !panel.includes(r) && !!rolesService.getBinding(r)?.endpointId)
   const messages: ChatMessage[] = [
     { role: 'system', content: COORDINATOR_FACILITATOR_PROMPT },
     { role: 'user', content: buildFacilitateInput(question, positions, panel, available) }

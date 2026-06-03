@@ -4,6 +4,9 @@
 
 // Content + mtime of each file the agent has Read, so Edit/Write can detect a stale write (the file
 // changed on disk since the agent last saw it). Keyed by absolute path.
+import type { CollabHandle } from './collab'
+import type { ServiceHandle } from './service-registry'
+
 export interface ReadFileEntry {
   content: string
   mtimeMs: number
@@ -52,6 +55,14 @@ export interface AgentContext {
   // LLM access for tools that call a small/fast model (WebFetch content extraction, WebSearch's
   // isolated secondary request). Injected by runAgent from its own baseUrl/apiKey + a small model.
   llm?: AgentLlmAccess
+  // Multi-expert collaboration handle (consult — doc 19 §5). Present only while an expert runs inside a
+  // CollabSession; the send_message / assign_task / wait tools reach the session through it. Undefined for
+  // a solo dispatch / direct chat, so those tools no-op with a clear message.
+  collab?: CollabHandle
+  // Long-running dev service registry (doc 19 §10), shared across a collaboration's experts (Flynn starts
+  // a backend, Shuri connects). The start_service / stop_service / service_logs / list_services tools reach
+  // it here. Undefined outside a collaboration → those tools no-op with a message.
+  services?: ServiceHandle
 }
 
 // What a tool needs to make its own LLM call (a content-extraction summary, a delegated search).

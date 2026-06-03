@@ -27,6 +27,11 @@ import type {
   CoordinatorStepDone,
   CoordinatorDoneDto,
   CoordinatorErrorDto,
+  CoordinatorToolStart,
+  CoordinatorAssistant,
+  CoordinatorToolResults,
+  CoordinatorPermissionRequest,
+  CoordinatorPermissionCancel,
   ImageToolRunInputDto,
   ImageToolDeltaDto,
   ImageToolImageStartDto,
@@ -132,7 +137,15 @@ const api = {
     onDelta: (cb: (d: CoordinatorStepDelta) => void): (() => void) => agentListen('coordinator:delta', cb),
     onStepDone: (cb: (d: CoordinatorStepDone) => void): (() => void) => agentListen('coordinator:step:done', cb),
     onDone: (cb: (d: CoordinatorDoneDto) => void): (() => void) => agentListen('coordinator:done', cb),
-    onError: (cb: (d: CoordinatorErrorDto) => void): (() => void) => agentListen('coordinator:error', cb)
+    onError: (cb: (d: CoordinatorErrorDto) => void): (() => void) => agentListen('coordinator:error', cb),
+    // Agent-dispatched expert tool activity + approvals (doc 19 §11 phase 2) — same shapes as agent:* but
+    // tagged with roleId. respondPermission reuses the agent permission-response payload.
+    onToolStart: (cb: (d: CoordinatorToolStart) => void): (() => void) => agentListen('coordinator:tool:start', cb),
+    onAssistant: (cb: (d: CoordinatorAssistant) => void): (() => void) => agentListen('coordinator:assistant', cb),
+    onResults: (cb: (d: CoordinatorToolResults) => void): (() => void) => agentListen('coordinator:results', cb),
+    onPermission: (cb: (d: CoordinatorPermissionRequest) => void): (() => void) => agentListen('coordinator:permission', cb),
+    onPermissionCancel: (cb: (d: CoordinatorPermissionCancel) => void): (() => void) => agentListen('coordinator:permission:cancel', cb),
+    respondPermission: (resp: AgentPermissionResponse): Promise<void> => ipcRenderer.invoke('coordinator:permission:respond', resp)
   },
 
   imagetool: {

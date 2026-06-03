@@ -183,6 +183,9 @@ export interface RunTranscript {
 export interface CoordinatorRunInputDto {
   convId: string
   prompt: string
+  // Per-role working dirs (the renderer's cwdByExpert). An agent-dispatched expert uses cwdByRole[roleId]
+  // as its loop cwd; unset → it runs cwd-less (doc 19 §14 — real project cwd lands in stage 5).
+  cwdByRole?: Record<string, string>
 }
 // Fired once per turn, after the route decision, before any text streams. `chain` lists the steps
 // the badge should render. Length 1 for single mode (no badge needed); for a pipeline = `[...experts,
@@ -221,6 +224,39 @@ export interface CoordinatorErrorDto {
   streamId: string
   code: string
   message: string
+}
+// Agent-dispatched expert tool activity forwarded to the coordinator UI (doc 19 §11 phase 2). Same shapes
+// as the agent:* events but tagged with roleId — a coordinator turn can fan out to several experts, so the
+// renderer routes each tool card / approval to the right expert. Reuses AgentBlockDto / AgentResultDto.
+export interface CoordinatorToolStart {
+  streamId: string
+  roleId: string
+  id: string
+  name: string
+}
+export interface CoordinatorAssistant {
+  streamId: string
+  roleId: string
+  blocks: AgentBlockDto[]
+}
+export interface CoordinatorToolResults {
+  streamId: string
+  roleId: string
+  results: AgentResultDto[]
+}
+// A dispatched-tool approval (phase 2 still pops to the user — doc 19 §14). The response reuses
+// AgentPermissionResponse (permissionId + allow + updatedInput); permissionId alone locates the pending prompt.
+export interface CoordinatorPermissionRequest {
+  streamId: string
+  permissionId: string
+  roleId: string
+  toolName: string
+  input: unknown
+  reason?: string
+}
+export interface CoordinatorPermissionCancel {
+  streamId: string
+  permissionId: string
 }
 
 // === Image tool (designer chat + ns_generate_image) ===

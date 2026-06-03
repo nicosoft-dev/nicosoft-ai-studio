@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { STUDIO_DATA } from '@/data/studio-data'
 import { useCustomRoles } from '@/stores/custom-roles'
+import { useWorkspace } from '@/stores/workspace'
 import type { EffortLevel } from '@/lib/thinking'
 import type { AgentMode } from '@/lib/agent-mode'
 
@@ -60,6 +61,10 @@ export interface PermissionPrompt {
   toolName: string
   input: unknown
   reason?: string
+  // Which backend owns this prompt → respondPermission routes the answer to the right IPC channel. A
+  // coordinator-dispatched expert's approval also carries roleId so the dialog can name the expert asking.
+  source?: 'agent' | 'coordinator'
+  roleId?: string
 }
 
 interface SendOpts {
@@ -295,7 +300,7 @@ export const useChat = create<ChatState>((set, get) => {
       const meta = agentMeta.get(d.streamId)
       if (!meta) return
       set((s) => ({
-        permission: { ...s.permission, [meta.convId]: { permissionId: d.permissionId, toolName: d.toolName, input: d.input, reason: d.reason } }
+        permission: { ...s.permission, [meta.convId]: { permissionId: d.permissionId, toolName: d.toolName, input: d.input, reason: d.reason, source: 'agent', roleId: meta.expertId } }
       }))
     })
     ag.onPermissionCancel((d) => {
@@ -402,6 +407,91 @@ export const useChat = create<ChatState>((set, get) => {
       const meta = coordinatorMeta.get(d.streamId)
       coordinatorMeta.delete(d.streamId)
       if (meta) finishWithError(meta.convId, d.message)
+    })
+    // Agent-dispatched expert tool activity (doc 19 §11 phase 2). Unlike the agent path (one message per
+    // loop turn), a coordinator STEP is ONE expertId-tagged message; the dispatched loop runs many turns,
+    // so tool cards / servers / citations ACCUMULATE onto that message. All five locate it by walking back
+    // to the streaming bubble whose expertId === roleId (parallel panels interleave — the last bubble
+    // isn't always this role's), never finalizing it (step:done owns that).
+    at.onToolStart((d) => {
+      const meta = coordinatorMeta.get(d.streamId)
+      if (!meta) return
+      set((s) => {
+        const msgs = (s.byConversation[meta.convId] ?? []).map((m) => ({ ...m, tools: m.tools ? [...m.tools] : m.tools }))
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          if (msgs[i].role === 'assistant' && msgs[i].streaming && msgs[i].expertId === d.roleId) {
+            if (!msgs[i].tools?.some((t) => t.id === d.id)) {
+              msgs[i].tools = [...(msgs[i].tools ?? []), { id: d.id, name: d.name, input: {}, status: 'running' as const }]
+            }
+            break
+          }
+        }
+        return { byConversation: { ...s.byConversation, [meta.convId]: msgs } }
+      })
+    })
+    at.onAssistant((d) => {
+      const meta = coordinatorMeta.get(d.streamId)
+      if (!meta) return
+      set((s) => {
+        const msgs = (s.byConversation[meta.convId] ?? []).map((m) => ({ ...m }))
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          const m = msgs[i]
+          if (m.role === 'assistant' && m.streaming && m.expertId === d.roleId) {
+            // Merge this turn's tool_use into the step's cards (fill authoritative name+input on the ones
+            // onToolStart created; append any not yet seen). Do NOT set text — step:done is authoritative.
+            const tools = [...(m.tools ?? [])]
+            for (const b of d.blocks) {
+              if (b.type === 'tool_use') {
+                const idx = tools.findIndex((t) => t.id === b.id)
+                if (idx !== -1) tools[idx] = { ...tools[idx], name: b.name, input: b.input }
+                else tools.push({ id: b.id, name: b.name, input: b.input, status: 'running' as const })
+              }
+            }
+            m.tools = tools
+            const newServers = d.blocks
+              .filter((b): b is { type: 'server'; serverType: string; query?: string; url?: string } => b.type === 'server' && SHOWN_SERVER_BLOCKS.has(b.serverType))
+              .map((b) => ({ serverType: b.serverType, query: b.query, url: b.url }))
+            if (newServers.length) m.servers = [...(m.servers ?? []), ...newServers]
+            const seenCite = new Set((m.citations ?? []).map((c) => c.url))
+            const newCites = d.blocks
+              .flatMap((b) => (b.type === 'text' ? (b.citations ?? []) : []))
+              .filter((c) => (seenCite.has(c.url) ? false : (seenCite.add(c.url), true)))
+            if (newCites.length) m.citations = [...(m.citations ?? []), ...newCites]
+            msgs[i] = m
+            break
+          }
+        }
+        return { byConversation: { ...s.byConversation, [meta.convId]: msgs } }
+      })
+    })
+    at.onResults((d) => {
+      const meta = coordinatorMeta.get(d.streamId)
+      if (!meta) return
+      set((s) => {
+        const msgs = (s.byConversation[meta.convId] ?? []).map((m) => ({ ...m, tools: m.tools ? [...m.tools] : m.tools }))
+        for (const r of d.results) {
+          for (let i = msgs.length - 1; i >= 0; i--) {
+            const idx = msgs[i].tools?.findIndex((t) => t.id === r.toolUseId && t.status === 'running') ?? -1
+            if (idx !== -1 && msgs[i].tools) {
+              msgs[i].tools![idx] = { ...msgs[i].tools![idx], status: r.isError ? 'error' : 'done', result: r.content }
+              break
+            }
+          }
+        }
+        return { byConversation: { ...s.byConversation, [meta.convId]: msgs } }
+      })
+    })
+    at.onPermission((d) => {
+      const meta = coordinatorMeta.get(d.streamId)
+      if (!meta) return
+      set((s) => ({
+        permission: { ...s.permission, [meta.convId]: { permissionId: d.permissionId, toolName: d.toolName, input: d.input, reason: d.reason, source: 'coordinator', roleId: d.roleId } }
+      }))
+    })
+    at.onPermissionCancel((d) => {
+      const meta = coordinatorMeta.get(d.streamId)
+      if (!meta) return
+      set((s) => (s.permission[meta.convId]?.permissionId === d.permissionId ? { permission: { ...s.permission, [meta.convId]: null } } : {}))
     })
 
     // ---- image tool (designer chat + ns_generate_image) path ----
@@ -588,7 +678,9 @@ export const useChat = create<ChatState>((set, get) => {
             content: text,
             attachments: userImages.map((i) => ({ url: i.url, name: i.name }))
           })
-          const { streamId } = await window.api.coordinator.run({ convId: cid, prompt: text })
+          // cwdByRole = every expert's working dir (the workspace store's cwdByExpert). A dispatched agent
+          // expert runs in cwdByRole[its roleId]; coordinator's own cwd is irrelevant (it never runs tools).
+          const { streamId } = await window.api.coordinator.run({ convId: cid, prompt: text, cwdByRole: useWorkspace.getState().cwdByExpert })
           coordinatorMeta.set(streamId, { convId: cid, endpointId, model })
         } catch (e) {
           finishWithError(cid, e instanceof Error ? e.message : String(e))
@@ -716,7 +808,11 @@ export const useChat = create<ChatState>((set, get) => {
     respondPermission: (convId, allow) => {
       const p = get().permission[convId]
       if (!p) return
-      void window.api.agent.respondPermission({ permissionId: p.permissionId, allow })
+      const resp = { permissionId: p.permissionId, allow }
+      // Route to whichever backend raised it — a coordinator-dispatched expert's prompt lives in a separate
+      // pending map than a direct agent run's (see coordinator.handler / agent.handler).
+      if (p.source === 'coordinator') void window.api.coordinator.respondPermission(resp)
+      else void window.api.agent.respondPermission(resp)
       set((s) => ({ permission: { ...s.permission, [convId]: null } }))
     },
 
