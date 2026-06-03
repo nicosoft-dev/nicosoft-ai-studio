@@ -61,11 +61,17 @@ export function registerAgentHandlers(): void {
               const blocks: AgentBlockDto[] = []
               for (const b of ev.message.content) {
                 if (!isContentBlock(b)) {
-                  // web_search_call carries its query in action.query — surface it for the status row.
-                  const q = (b as { action?: { query?: string } }).action?.query
-                  blocks.push(q ? { type: 'server', serverType: b.type, query: q } : { type: 'server', serverType: b.type })
+                  // web_search_call action: search → query, open_page → url (the visited site). Surface both.
+                  const action = (b as { action?: { query?: string; url?: string } }).action
+                  const dto: AgentBlockDto = { type: 'server', serverType: b.type }
+                  if (action?.query) dto.query = action.query
+                  if (action?.url) dto.url = action.url
+                  blocks.push(dto)
                 }
-                else if (b.type === 'text') blocks.push({ type: 'text', text: b.text })
+                else if (b.type === 'text') {
+                  const tb = b as { text: string; citations?: { url: string; title?: string }[] }
+                  blocks.push(tb.citations?.length ? { type: 'text', text: tb.text, citations: tb.citations } : { type: 'text', text: tb.text })
+                }
                 else if (b.type === 'tool_use') blocks.push({ type: 'tool_use', id: b.id, name: b.name, input: b.input })
                 // tool_result / image don't appear in an assistant turn — skip
               }

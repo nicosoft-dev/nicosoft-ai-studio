@@ -126,9 +126,9 @@ export interface AgentResultDto {
 }
 // A renderer-facing content block. tool_use carries name+input; server blocks are passed as opaque.
 export type AgentBlockDto =
-  | { type: 'text'; text: string }
+  | { type: 'text'; text: string; citations?: { url: string; title?: string }[] } // citations: web_search sources for the answer
   | { type: 'tool_use'; id: string; name: string; input: unknown }
-  | { type: 'server'; serverType: string; query?: string } // server tool (web_search etc.) — faint status row; query for web_search
+  | { type: 'server'; serverType: string; query?: string; url?: string } // web_search_call: query (search) / url (open_page — a visited site)
 // A permission request: the renderer shows an approval dialog and replies with the permissionId.
 export interface AgentPermissionRequest {
   streamId: string

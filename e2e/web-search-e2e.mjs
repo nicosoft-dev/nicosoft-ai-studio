@@ -38,7 +38,7 @@ await page.waitForTimeout(1500)
 
 await page.fill(
   'textarea.cmp-textarea',
-  'Use your web_search tool to look up the current latest stable Node.js LTS major version. Reply with just the version number and the source URL.'
+  'Search the web for the 3 most recent major Node.js releases and their dates, then summarize them. Cite your sources.'
 )
 await page.keyboard.press('Enter')
 console.log('sent web-search prompt, waiting...')
@@ -66,21 +66,30 @@ const sawError = /\"error\"|error_/.test(transcript)
 
 console.log('--- answer (head) ---')
 console.log(info.answer.slice(0, 280))
-const sbText = (await page.$('.server-bubble'))
-  ? await page.$eval('.server-bubble', (e) => e.textContent?.replace(/\s+/g, ' ').trim())
-  : null
+const ui = await page.evaluate(() => {
+  const bubbles = [...document.querySelectorAll('.server-bubble')].map((e) => e.textContent?.replace(/\s+/g, ' ').trim())
+  const visited = [...document.querySelectorAll('.server-bubble.sb-link')].map((e) => e.getAttribute('href'))
+  const sources = [...document.querySelectorAll('.msg-sources .ms-item')].map((e) => ({
+    title: e.querySelector('.ms-title')?.textContent,
+    href: e.getAttribute('href')
+  }))
+  return { bubbles, visited, sources }
+})
 
 console.log('--- signals ---')
 console.log('web_search_call in transcript:', sawWebSearch)
-console.log('server-bubble (UI):', JSON.stringify(sbText))
-console.log('transcript has error:', sawError)
-console.log('page errors:', errors.length ? JSON.stringify(errors) : 'none')
+console.log('server bubbles (UI):', JSON.stringify(ui.bubbles))
+console.log('visited sites (open_page):', JSON.stringify(ui.visited))
+console.log('Sources list:', JSON.stringify(ui.sources, null, 2))
+console.log('transcript has error:', sawError, '| page errors:', errors.length ? JSON.stringify(errors) : 'none')
 
 assert.ok(info.answer.trim().length > 0, 'generalist must produce an answer')
-console.log(sawWebSearch ? '✓ web_search_call server block emitted (API ran the search)' : '⚠ no web_search_call in transcript — model may not have searched, or endpoint ignored the tool')
-if (sawWebSearch) {
-  assert.ok(sbText && /search/i.test(sbText), `web_search must surface a server-bubble status row (got ${JSON.stringify(sbText)})`)
-  console.log('✓ UI shows the web-search status row:', JSON.stringify(sbText))
-}
+assert.ok(sawWebSearch, 'web_search_call must be in the transcript (the API ran the search)')
+console.log('✓ web_search ran')
+assert.ok(ui.bubbles.length > 0, 'must show web-search status row(s)')
+console.log(`✓ ${ui.bubbles.length} search status row(s), ${ui.visited.length} visited site(s)`)
+assert.ok(ui.sources.length > 0, 'must show a Sources list (citations)')
+assert.ok(ui.sources.every((s) => s.href && s.href.startsWith('http')), 'each source must link to its URL')
+console.log(`✓ Sources list: ${ui.sources.length} clickable citation(s)`)
 await app.close()
 process.exit(0)

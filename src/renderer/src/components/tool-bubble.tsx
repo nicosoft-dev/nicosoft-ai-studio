@@ -101,18 +101,58 @@ function DiffView({ name, input }: { name: string; input: Record<string, unknown
   return <div className="diff">{rows}</div>
 }
 
-// Server-side tool the API ran (e.g. web_search) — a faint, non-interactive status row. No expand: the
-// API executed it server-side, so there's no local result to inspect.
+// Pretty host+path for a URL (drops scheme + www, trims a bare trailing slash).
+function prettyUrl(url: string): string {
+  try {
+    const u = new URL(url)
+    return u.hostname.replace(/^www\./, '') + (u.pathname === '/' ? '' : u.pathname)
+  } catch {
+    return url
+  }
+}
+
+// Server-side tool the API ran (web_search) — a faint status row. A 'search' action shows the query;
+// an 'open_page' action shows the visited site (clickable → opens in the browser).
 const SERVER_LABELS: Record<string, string> = {
   web_search_call: 'Searched the web'
 }
 export function ServerBubble({ note }: { note: ServerNote }): ReactElement {
+  if (note.url) {
+    return (
+      <a className="server-bubble sb-link" href={note.url} target="_blank" rel="noreferrer" title={note.url}>
+        <Icons.globe size={11} />
+        <span className="sb-label">Visited</span>
+        <span className="sb-query">{prettyUrl(note.url)}</span>
+      </a>
+    )
+  }
   const label = SERVER_LABELS[note.serverType] ?? note.serverType
   return (
     <div className="server-bubble">
       <Icons.globe size={11} />
       <span className="sb-label">{label}</span>
       {note.query ? <span className="sb-query">{note.query}</span> : null}
+    </div>
+  )
+}
+
+// Sources — the web_search citations behind an answer (which site each part drew on). Clickable; opens
+// in the browser. Rendered under the assistant's message.
+export function Sources({ items }: { items: { url: string; title?: string }[] }): ReactElement {
+  return (
+    <div className="msg-sources">
+      <div className="ms-label">
+        <Icons.link size={12} /> Sources
+      </div>
+      <div className="ms-list">
+        {items.map((c, i) => (
+          <a key={i} className="ms-item" href={c.url} target="_blank" rel="noreferrer" title={c.url}>
+            <span className="ms-num">{i + 1}</span>
+            <span className="ms-title">{c.title || prettyUrl(c.url)}</span>
+            <span className="ms-host">{prettyUrl(c.url)}</span>
+          </a>
+        ))}
+      </div>
     </div>
   )
 }

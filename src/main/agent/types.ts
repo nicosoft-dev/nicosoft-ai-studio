@@ -5,6 +5,9 @@
 export interface TextBlock {
   type: 'text'
   text: string
+  // OpenAI web_search url_citation annotations — which source each part of the answer came from. UI
+  // only (shown as a Sources list); not round-tripped back to the API.
+  citations?: { url: string; title?: string }[]
 }
 
 export interface ToolUseBlock {

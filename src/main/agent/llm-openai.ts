@@ -193,7 +193,10 @@ export async function* callWithToolsOpenAI(
             yield block // ← stream: loop starts executing this tool
           } else if (it.type === 'message') {
             const text = (it.id ? texts.get(it.id) : undefined) ?? extractItemText(it)
-            if (text) content.push({ type: 'text', text })
+            if (text) {
+              const citations = extractCitations(it)
+              content.push(citations.length ? { type: 'text', text, citations } : { type: 'text', text })
+            }
           } else if (it.type === 'reasoning') {
             content.push({ ...it } as ServerBlock) // round-trip verbatim (encrypted_content)
           } else if (it.type === 'web_search_call') {
@@ -226,6 +229,24 @@ export async function* callWithToolsOpenAI(
   const hasToolUse = content.some((b) => b.type === 'tool_use')
   const stopReason: StopReason = hasToolUse ? 'tool_use' : 'end_turn'
   return { content, stopReason, usage: { inTokens, outTokens } }
+}
+
+// Pull url_citation annotations off a message item — which web sources each part of the answer drew
+// on (web_search). Deduped by URL, in first-seen order.
+function extractCitations(it: { content?: unknown }): { url: string; title?: string }[] {
+  if (!Array.isArray(it.content)) return []
+  const seen = new Set<string>()
+  const out: { url: string; title?: string }[] = []
+  for (const part of it.content as Array<{ annotations?: unknown }>) {
+    if (!Array.isArray(part.annotations)) continue
+    for (const a of part.annotations as Array<{ type?: string; url?: string; title?: string }>) {
+      if (a.type === 'url_citation' && a.url && !seen.has(a.url)) {
+        seen.add(a.url)
+        out.push({ url: a.url, title: a.title })
+      }
+    }
+  }
+  return out
 }
 
 // Fallback: pull text from a message item's content array if output_text.delta wasn't seen.

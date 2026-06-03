@@ -40,6 +40,7 @@ export interface ChatMessage {
   images?: { url: string; name: string; loading?: boolean }[]
   tools?: ToolCall[] // present on agent (tool-using) turns
   servers?: ServerNote[] // server-side tools the API ran (web_search etc.) — shown as faint status rows
+  citations?: { url: string; title?: string }[] // web_search sources for the answer — shown as a Sources list
   streaming?: boolean
   // Coordinator-dispatched message: the contributing expert (engineer/translator/...) and (pipeline only) the dispatch
   // chain shared by every step of that turn. The renderer reads both to switch avatar/name per message
@@ -51,7 +52,8 @@ export interface ChatMessage {
 // faint status row (no expand / result; the API ran it, not the loop).
 export interface ServerNote {
   serverType: string // e.g. 'web_search_call'
-  query?: string // the search query, when the server tool is web_search
+  query?: string // search query (web_search 'search' action)
+  url?: string // visited site (web_search 'open_page' action)
 }
 export interface PermissionPrompt {
   permissionId: string
@@ -259,8 +261,14 @@ export const useChat = create<ChatState>((set, get) => {
           .filter((b): b is { type: 'tool_use'; id: string; name: string; input: unknown } => b.type === 'tool_use')
           .map((b) => ({ id: b.id, name: b.name, input: b.input, status: 'running' as const }))
         cur.servers = d.blocks
-          .filter((b): b is { type: 'server'; serverType: string; query?: string } => b.type === 'server' && SHOWN_SERVER_BLOCKS.has(b.serverType))
-          .map((b) => ({ serverType: b.serverType, query: b.query }))
+          .filter((b): b is { type: 'server'; serverType: string; query?: string; url?: string } => b.type === 'server' && SHOWN_SERVER_BLOCKS.has(b.serverType))
+          .map((b) => ({ serverType: b.serverType, query: b.query, url: b.url }))
+        // Aggregate web_search url citations across the turn's text blocks (deduped) → the Sources list.
+        const seenCite = new Set<string>()
+        const cites = d.blocks
+          .flatMap((b) => (b.type === 'text' ? (b.citations ?? []) : []))
+          .filter((c) => (seenCite.has(c.url) ? false : (seenCite.add(c.url), true)))
+        cur.citations = cites.length ? cites : undefined
         cur.streaming = false // turn complete; the next turn (after results) starts a new message
         return { byConversation: { ...s.byConversation, [meta.convId]: msgs } }
       })
