@@ -965,7 +965,7 @@ export function CommandPalette({
   ;([["endpoints", "Endpoints", "plug"], ["roles", "Roles", "users"], ["memory", "Memory", "box"], ["profile", "Profile", "user"]] as const)
     .forEach(([tab, label, icon]) => rows.push({ type: "settings", id: tab, label, icon }))
   rows.push({ group: "Actions" })
-  rows.push({ type: "action", id: "studio", label: "Go to Studio", icon: "layoutGrid" })
+  rows.push({ type: "action", id: "studio", label: "Go to Overview", icon: "layoutGrid" })
   rows.push({ type: "action", id: "new", label: "New conversation", icon: "plusCircle" })
   rows.push({ type: "action", id: "export", label: "Export conversation", icon: "download" })
   rows.push({ type: "action", id: "newrole", label: "New role", icon: "plus" })

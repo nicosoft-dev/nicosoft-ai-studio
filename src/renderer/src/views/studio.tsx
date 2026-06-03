@@ -207,7 +207,7 @@ export function StudioHome({
   return (
     <div className="main-col">
       <div className="conv-header">
-        <span className="conv-title">Studio</span>
+        <span className="conv-title">Overview</span>
         <div className="studio-tabs segmented">
           <button className={tab === "activity" ? "active" : ""} onClick={() => setTab("activity")}>Activity</button>
           <button className={tab === "stats" ? "active" : ""} onClick={() => setTab("stats")}>Stats</button>

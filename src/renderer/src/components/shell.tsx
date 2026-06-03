@@ -242,7 +242,7 @@ export function Sidebar({
       <div className="sidebar-scroll">
         <div className={"studio-nav-row" + (studioActive ? " active" : "")} onClick={onStudio}>
           <span className="sn-grid"><Icons.layoutGrid size={16} /></span>
-          Studio
+          Overview
         </div>
         <div className={"studio-nav-row" + (projectsActive ? " active" : "")} onClick={onProjects}>
           <span className="sn-grid"><Icons.kanban size={16} /></span>
