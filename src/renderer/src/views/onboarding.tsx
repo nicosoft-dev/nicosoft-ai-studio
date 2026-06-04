@@ -205,7 +205,9 @@ export function Onboarding({ onFinish }: { onFinish: () => void }): ReactElement
       // endpoint's available list first so the binding resolves + the Settings model picker shows them.
       const mine = STUDIO_DATA.EXPERTS.filter((e) => e.family === endpoint.protocol)
       if (mine.length) {
-        const slugs = new Set([...(endpoint.availableModels ?? []).map((m) => m.slug), ...mine.map((e) => e.model)])
+        const slugs = new Set(
+          [...(endpoint.availableModels ?? []).map((m) => m.slug), ...mine.map((e) => e.model)].filter((s): s is string => !!s)
+        )
         await window.api.endpoints.update(endpoint.id, { availableModels: [...slugs].map((slug) => ({ slug, contextLength: 0 })) })
         for (const e of mine) {
           await window.api.roles.setBinding(e.id, { endpointId: endpoint.id, model: e.model })

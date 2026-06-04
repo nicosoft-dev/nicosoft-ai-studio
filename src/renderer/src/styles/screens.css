@@ -366,6 +366,8 @@
 .dialog-body { padding: 18px; display: flex; flex-direction: column; gap: 15px; overflow-y: auto; flex: 1; min-height: 0; }
 .dialog-foot { display: flex; align-items: center; gap: 9px; padding: 14px 18px; border-top: 1px solid var(--border-1); flex: none; }
 .dialog-foot .df-spacer { flex: 1; }
+.np-path { display: flex; gap: 8px; align-items: center; }
+.np-path .input { flex: 1; }
 
 /* command palette */
 .cmdk {
@@ -1217,6 +1219,8 @@
    ============================================================ */
 .proj-list-body, .proj-detail-body { flex: 1; overflow-y: auto; padding: 24px 28px 32px; }
 .proj-list-body > .proj-list { max-width: 760px; margin: 0 auto; }
+.proj-empty { max-width: 520px; margin: 48px auto 0; text-align: center; color: var(--text-3); font-size: 13.5px; line-height: 1.7; }
+.proj-empty strong { color: var(--text-2); font-weight: 600; }
 .proj-detail-inner { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 26px; }
 
 .proj-list { display: flex; flex-direction: column; gap: 10px; }
@@ -1414,6 +1418,7 @@
 .wb-time { font-size: 9.5px; color: var(--text-4); font-family: var(--mono); }
 .wb-card-title { font-size: 12px; font-family: var(--mono); color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wb-card-sub { font-size: 10.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wb-lane-empty { align-self: center; font-size: 11px; color: var(--text-4); font-style: italic; }
 .wb-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 9.5px; padding: 1px 5px; border-radius: 4px; margin-top: 2px; align-self: flex-start; }
 .wb-badge.yellow { color: var(--warning); background: color-mix(in oklab, var(--warning) 14%, transparent); }
 .wb-badge.yellow svg { color: var(--warning); }
