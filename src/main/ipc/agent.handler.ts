@@ -4,6 +4,7 @@ import type { PermissionDecision } from '../agent/context'
 import { isContentBlock } from '../agent/types'
 import { LlmError } from '../llm/types'
 import * as agentService from '../services/agent.service'
+import * as compressionService from '../services/compression.service'
 import type { AgentBlockDto, AgentPermissionResponse, AgentResultDto, AgentRunInput } from './contracts'
 
 // Streaming agent over IPC: `agent:run` starts a run, returns its streamId, and pushes events on
@@ -144,4 +145,7 @@ export function registerAgentHandlers(): void {
 
   // Rebuild tool cards for a past conversation from its transcript (keyed by run_id).
   ipcMain.handle('agent:transcript', (_e, convId: string) => agentService.readTranscript(convId))
+
+  // Manual compaction (the /compact command) — fold older history now, ignoring the 90% threshold.
+  ipcMain.handle('agent:compact', (_e, convId: string) => compressionService.compactNow(convId))
 }

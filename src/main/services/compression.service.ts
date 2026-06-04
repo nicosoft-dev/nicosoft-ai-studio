@@ -7,6 +7,7 @@ import { chat as llmChat } from '../llm/client'
 import type { MessageRow } from '../repos/conversation.repo'
 import type { SummaryRow } from '../repos/summary.repo'
 import { agentEvents } from './event-bus'
+import * as roleRepo from '../repos/role.repo'
 
 // Context compression. When a conversation's running context crosses 90% of the model's window, fold
 // the older messages into a chained summary, keeping the most recent few verbatim. STEP 0 runs a
@@ -37,6 +38,7 @@ export interface CompressInput {
   model: string
   contextWindow?: number // explicit window (Engineer passes its run window); falls back to the model catalog
   currentTokens?: number // exact prompt tokens (count_tokens) for this turn; preferred over the estimate
+  force?: boolean // manual /compact — bypass the 90% threshold and fold now (still needs enough to fold)
 }
 
 export async function maybeCompress(input: CompressInput): Promise<void> {
@@ -62,7 +64,7 @@ export async function maybeCompress(input: CompressInput): Promise<void> {
         : estimateMessageTokens(recent) +
           (prevSummary ? estimateTextTokens(prevSummary.content) : 0) +
           RESERVED_CONTEXT_TOKENS
-    if (used < ctxLen * COMPRESS_RATIO) return // under threshold
+    if (!input.force && used < ctxLen * COMPRESS_RATIO) return // under threshold (force = manual /compact)
     if (recent.length <= KEEP_RECENT + 1) return // too little to fold usefully
 
     agentEvents.emit({ type: 'compact:pre', convId: input.convId, roleId: input.roleId, ts: Date.now() })
@@ -96,8 +98,27 @@ export async function maybeCompress(input: CompressInput): Promise<void> {
   }
 }
 
+// B2: manual compaction (the /compact command + future UI button). Resolves the conversation's role
+// binding, then folds NOW regardless of the 90% threshold (force).
+export async function compactNow(convId: string): Promise<void> {
+  const conv = convRepo.getById(convId)
+  if (!conv?.primaryRoleId) return
+  const binding = roleRepo.getBinding(conv.primaryRoleId)
+  if (!binding?.endpointId || !binding.model) return
+  await maybeCompress({
+    convId,
+    roleId: conv.primaryRoleId,
+    endpointId: binding.endpointId,
+    model: binding.model,
+    force: true
+  })
+}
+
 // Fold the older messages (+ any prior summary) into one summary via the conversation's MAIN model —
 // quality matters here, this replaces history. Returns null on empty output.
+// B1: when the transcript is too big for one call, map-reduce (summarize each chunk, then merge) instead
+// of the old slice(-MAX_FOLD_CHARS) which silently DROPPED the oldest turns. Each call retries once for
+// transient failures so an overflow / network blip doesn't abandon the whole compaction.
 async function foldSummary(
   fold: MessageRow[],
   prev: SummaryRow | null,
@@ -105,23 +126,74 @@ async function foldSummary(
   key: string,
   model: string
 ): Promise<string | null> {
-  let transcript = fold.map((m) => `${m.author === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n')
-  if (transcript.length > MAX_FOLD_CHARS) transcript = transcript.slice(-MAX_FOLD_CHARS)
+  const lines = fold.map((m) => `${m.author === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
   const prior = prev ? `Existing summary so far:\n${prev.content}\n\n` : ''
-  const result = await llmChat(
-    {
-      protocol: ep.protocol,
-      baseUrl: ep.baseUrl,
-      apiKey: key,
-      model,
-      messages: [
-        { role: 'system', content: COMPRESS_SYSTEM },
-        { role: 'user', content: `${COMPRESS_PROMPT}\n\n${prior}Conversation:\n${transcript}` }
-      ]
-    },
-    () => {} // non-streaming use
-  )
-  return result.text.trim() || null
+  const transcript = lines.join('\n')
+
+  // Common case: fits in one fold.
+  if (transcript.length <= MAX_FOLD_CHARS) {
+    return summarizeChunk(`${prior}Conversation:\n${transcript}`, ep, key, model)
+  }
+
+  // Too big for one call → summarize each chunk, then summarize the summaries. No message is dropped.
+  const chunks = chunkByChars(lines, MAX_FOLD_CHARS)
+  const partials: string[] = []
+  for (let i = 0; i < chunks.length; i++) {
+    const s = await summarizeChunk(`Conversation (part ${i + 1}/${chunks.length}):\n${chunks[i]}`, ep, key, model)
+    if (s) partials.push(s)
+  }
+  if (!partials.length) return null
+  if (partials.length === 1) return partials[0]
+  return summarizeChunk(`${prior}Section summaries to merge into ONE summary:\n${partials.join('\n\n')}`, ep, key, model)
+}
+
+// One summary call with a single retry (transient overflow / network). Returns null on empty / failure.
+async function summarizeChunk(
+  body: string,
+  ep: endpointRepo.EndpointRow,
+  key: string,
+  model: string
+): Promise<string | null> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const result = await llmChat(
+        {
+          protocol: ep.protocol,
+          baseUrl: ep.baseUrl,
+          apiKey: key,
+          model,
+          messages: [
+            { role: 'system', content: COMPRESS_SYSTEM },
+            { role: 'user', content: `${COMPRESS_PROMPT}\n\n${body}` }
+          ]
+        },
+        () => {} // non-streaming use
+      )
+      const text = result.text.trim()
+      if (text) return text
+    } catch (err) {
+      if (attempt === 1) {
+        console.warn('[compression] summary call failed after retry', err)
+        return null
+      }
+    }
+  }
+  return null
+}
+
+// Split lines into chunks each ≤ maxChars (a single over-long line becomes its own chunk).
+function chunkByChars(lines: string[], maxChars: number): string[] {
+  const chunks: string[] = []
+  let cur = ''
+  for (const line of lines) {
+    if (cur && cur.length + line.length + 1 > maxChars) {
+      chunks.push(cur)
+      cur = ''
+    }
+    cur = cur ? cur + '\n' + line : line
+  }
+  if (cur) chunks.push(cur)
+  return chunks
 }
 
 function estimateMessageTokens(messages: MessageRow[]): number {

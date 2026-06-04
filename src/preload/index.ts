@@ -127,6 +127,7 @@ const api = {
   agent: {
     run: (input: AgentRunInput): Promise<{ streamId: string }> => ipcRenderer.invoke('agent:run', input),
     stop: (streamId: string): Promise<void> => ipcRenderer.invoke('agent:stop', streamId),
+    compact: (convId: string): Promise<void> => ipcRenderer.invoke('agent:compact', convId),
     respondPermission: (resp: AgentPermissionResponse): Promise<void> =>
       ipcRenderer.invoke('agent:permission:respond', resp),
     onDelta: (cb: (d: AgentTextDelta) => void): (() => void) => agentListen('agent:delta', cb),
