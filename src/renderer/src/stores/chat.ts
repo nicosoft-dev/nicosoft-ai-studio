@@ -528,15 +528,23 @@ export const useChat = create<ChatState>((set, get) => {
     at.onApproval((d) => {
       const meta = coordinatorMeta.get(d.streamId)
       if (!meta) return
+      const key = uid()
       set((s) => ({
         approvals: {
           ...s.approvals,
           [meta.convId]: [
             ...(s.approvals[meta.convId] ?? []),
-            { key: uid(), roleId: d.roleId, zone: d.zone, toolName: d.toolName, reason: d.reason, pendingId: d.pendingId, status: 'open' as const }
+            { key, roleId: d.roleId, zone: d.zone, toolName: d.toolName, reason: d.reason, pendingId: d.pendingId, status: 'open' as const }
           ]
         }
       }))
+      // A yellow card is just an auto-approved note — surface it briefly, then fade it so notes don't pile
+      // up and clutter the thread. Red cards stay until the user resolves them (they fade on approve/reject).
+      if (d.zone === 'yellow') {
+        setTimeout(() => set((s) => ({
+          approvals: { ...s.approvals, [meta.convId]: (s.approvals[meta.convId] ?? []).filter((c) => c.key !== key) }
+        })), 4000)
+      }
     })
 
     // ---- image tool (designer chat + ns_generate_image) path ----
@@ -872,6 +880,13 @@ export const useChat = create<ChatState>((set, get) => {
       set(patch('executing'))
       const res = await window.api.approval.approve(pendingId)
       set(patch(res.ok ? 'approved' : 'failed', res.output))
+      // Once it has run, the card is noise — fade it from the thread after a beat (keep failures; their
+      // error output is worth leaving up).
+      if (res.ok) {
+        setTimeout(() => set((s) => ({
+          approvals: { ...s.approvals, [convId]: (s.approvals[convId] ?? []).filter((c) => c.pendingId !== pendingId) }
+        })), 2500)
+      }
     },
 
     rejectApproval: (convId, pendingId) => {
@@ -879,6 +894,9 @@ export const useChat = create<ChatState>((set, get) => {
       set((s) => ({
         approvals: { ...s.approvals, [convId]: (s.approvals[convId] ?? []).map((c) => (c.pendingId === pendingId ? { ...c, status: 'rejected' as const } : c)) }
       }))
+      setTimeout(() => set((s) => ({
+        approvals: { ...s.approvals, [convId]: (s.approvals[convId] ?? []).filter((c) => c.pendingId !== pendingId) }
+      })), 2500)
     },
 
     removeConversation: async (convId) => {
