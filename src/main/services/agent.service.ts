@@ -64,6 +64,10 @@ const ROLE_CORE_TOOLS: Record<string, readonly string[]> = {
 // Plan-mode tools (EnterPlanMode/ExitPlanMode) — every agent role gets them (doc 17). They're
 // read-only (mode switch + plan presentation), so they're never gated by the plan-mode mutation deny.
 const PLAN_TOOLS = [enterPlanModeTool, exitPlanModeTool] as unknown as Tool[]
+// Dev roles (Flynn/Shuri) get the service tools in the SINGLE-agent path too (collab already had them),
+// so they run dev servers via start_service — detached + readiness-probed + tree-killed — instead of a
+// blocking `Bash ... &` that wedges the loop and leaks the process.
+const SERVICE_TOOLS = [startServiceTool, stopServiceTool, serviceLogsTool, listServicesTool] as unknown as Tool[]
 
 function toolsForAgentRole(roleId: string): Tool[] {
   const core =
@@ -105,6 +109,7 @@ export async function run(
   // Tools scoped to this agent role: a CORE subset (doc 16 §5) + MCP + Skill, by roleId + scope.
   const roleId = input.roleId ?? ENGINEER_ROLE_ID
   let tools = toolsForAgentRole(roleId)
+  if (DEV_ROLES.has(roleId)) tools = [...tools, ...SERVICE_TOOLS]
   // Read needs a folder boundary; without a cwd, drop it for non-dev roles so the model can't read the
   // process working dir. Dev roles (Flynn/Shuri) always have a cwd (required in the composer).
   if (!input.cwd && !DEV_ROLES.has(roleId)) tools = tools.filter((t) => t.name !== 'Read')
@@ -253,6 +258,9 @@ export async function runAgentLoop(
   const log = (obj: unknown): void => void transcript.write(JSON.stringify(obj) + '\n')
   log({ t: 'run', runId: loop.runId, convId: loop.convId, cwd: loop.cwd, model: loop.model })
 
+  // Per-run service registry: dev roles start dev servers through it (start_service); everything it
+  // launched is tree-killed when the run ends (finally) — no leftover dev servers piling up across runs.
+  const registry = new ServiceRegistry()
   const ctx: AgentContext = {
     cwd: loop.cwd,
     signal,
@@ -261,6 +269,7 @@ export async function runAgentLoop(
     requestPermission: cb.requestPermission,
     todos: [],
     sessionDir,
+    services: registry,
   }
 
   const gen = runAgent({
@@ -313,6 +322,7 @@ export async function runAgentLoop(
     }
   } finally {
     transcript.end()
+    registry.dispose() // tree-kill any dev servers this run started — no zombies, no resource pile-up
   }
 
   return {
@@ -358,6 +368,7 @@ export async function runDispatchedAgent(
   signal: AbortSignal,
 ): Promise<{ text: string; inTokens: number; outTokens: number }> {
   let tools = toolsForAgentRole(d.roleId)
+  if (DEV_ROLES.has(d.roleId)) tools = [...tools, ...SERVICE_TOOLS]
   if (!d.cwd && !DEV_ROLES.has(d.roleId)) tools = tools.filter((t) => t.name !== 'Read')
   const serverTools: ServerToolSchema[] = d.protocol === 'openai' ? [{ type: 'web_search', name: 'web_search' }] : []
   const system = buildAgentSystem(d.roleId, d.memories, d.summary, skillManager.listingForRole(d.roleId), d.cwd)
@@ -443,8 +454,11 @@ function buildCollabSystem(roleId: string, teammates: { id: string; name: string
     'start_service runs a long-lived server / dev process (it stays up — Bash would kill it); list_services ' +
     "shows what's running + each service's port (the frontend uses it to find the backend's port); " +
     "service_logs reads a service's output to debug. Build against the contracts you agree on; do not " +
-    "reimplement a teammate's area. When your part is done and nothing is pending, just finish — the " +
-    "coordinator collects everyone's results and reviews."
+    "reimplement a teammate's area. Finish your COMPLETE part before you stop — every file written, your " +
+    "own checks passing, and the agreed integration actually working. Do NOT end your turn after " +
+    "scaffolding a few files assuming the session keeps running: when every expert stops at once the whole " +
+    "build ends right there, unfinished. Keep working — and consult teammates — until your piece is " +
+    "genuinely, fully done; only then finish, and the coordinator collects everyone's results and reviews."
   )
 }
 
