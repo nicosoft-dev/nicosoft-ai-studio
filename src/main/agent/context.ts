@@ -6,6 +6,7 @@
 // changed on disk since the agent last saw it). Keyed by absolute path.
 import type { CollabHandle } from './collab'
 import type { ServiceHandle } from './service-registry'
+import type { LspHandle } from './lsp/manager'
 
 export interface ReadFileEntry {
   content: string
@@ -91,6 +92,10 @@ export interface AgentContext {
   // Async sub-agent pool (batch 3): agent_spawn / agent_send / agent_wait / agent_close reach it here. Set
   // by runAgent on the top-level run; undefined inside a sub-agent so children can't spawn (depth 1).
   subAgents?: SubAgentPool
+  // Language server (batch 4): the lsp tool reaches it here for definition / references / hover /
+  // diagnostics on TS/JS. Set by runAgentLoop (lazily spawns typescript-language-server on first query);
+  // undefined where there's no project to analyze. Shared with sub-agents so they can use it too.
+  lsp?: LspHandle
 }
 
 // What a tool needs to make its own LLM call (a content-extraction summary, a delegated search).
