@@ -6,6 +6,7 @@ import * as memoryService from './memory.service'
 import { chat as llmChat } from '../llm/client'
 import type { MessageRow } from '../repos/conversation.repo'
 import type { SummaryRow } from '../repos/summary.repo'
+import { agentEvents } from './event-bus'
 
 // Context compression. When a conversation's running context crosses 90% of the model's window, fold
 // the older messages into a chained summary, keeping the most recent few verbatim. STEP 0 runs a
@@ -64,6 +65,8 @@ export async function maybeCompress(input: CompressInput): Promise<void> {
     if (used < ctxLen * COMPRESS_RATIO) return // under threshold
     if (recent.length <= KEEP_RECENT + 1) return // too little to fold usefully
 
+    agentEvents.emit({ type: 'compact:pre', convId: input.convId, roleId: input.roleId, ts: Date.now() })
+
     // STEP 0: capture long-term memory synchronously before folding messages away.
     await memoryService.extract(
       { convId: input.convId, roleId: input.roleId, endpointId: input.endpointId, model: input.model },
@@ -84,6 +87,7 @@ export async function maybeCompress(input: CompressInput): Promise<void> {
       content: summaryText,
       coveredUpTo
     })
+    agentEvents.emit({ type: 'compact:post', convId: input.convId, roleId: input.roleId, ts: Date.now() })
   } catch (err) {
     // best-effort: a compression failure must never break the chat flow, but surface it (CLAUDE.md)
     console.warn('[compression] failed for conversation', input.convId, err)

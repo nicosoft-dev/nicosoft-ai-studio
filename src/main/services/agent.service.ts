@@ -38,6 +38,7 @@ import type { MemoryRow } from '../repos/memory.repo'
 import * as convService from './conversation.service'
 import * as memoryService from './memory.service'
 import * as compressionService from './compression.service'
+import { agentEvents } from './event-bus'
 import { pickSmallModel } from './model-select'
 import { countContext } from './token-count.service'
 import { manager as mcpManager } from './mcp.service'
@@ -166,6 +167,7 @@ export async function run(
       serverTools,
       cwd: input.cwd,
       convId,
+      roleId,
       runId,
       thinking: input.thinking,
       contextWindow: input.contextWindow,
@@ -231,6 +233,7 @@ export interface AgentLoopInput {
   serverTools: ServerToolSchema[]
   cwd: string
   convId: string
+  roleId: string
   runId: string
   thinking?: AgentRunInput['thinking']
   contextWindow?: number
@@ -278,17 +281,32 @@ export async function runAgentLoop(
   let result!: AgentResult
   let inTokens = 0
   let outTokens = 0
+  const toolNames = new Map<string, string>() // tool_use id → name, to pair tool:post with its tool
+  agentEvents.emit({ type: 'session:start', convId: loop.convId, roleId: loop.roleId, ts: Date.now() })
   try {
     for (;;) {
       const { value, done } = await gen.next()
       if (done) {
         log({ t: 'done', runId: loop.runId, reason: value.reason, turns: value.turns })
+        agentEvents.emit({ type: 'session:end', convId: loop.convId, roleId: loop.roleId, turns: value.turns, reason: value.reason, ts: Date.now() })
         result = value
         break
       }
       if (value.type === 'assistant') {
         inTokens += promptTokensFromUsage(value.usage) // include cache read/creation — see compact.ts
         outTokens += value.usage.outTokens
+        for (const b of value.message.content) {
+          if (isContentBlock(b) && b.type === 'tool_use') {
+            toolNames.set(b.id, b.name)
+            agentEvents.emit({ type: 'tool:pre', convId: loop.convId, roleId: loop.roleId, tool: b.name, ts: Date.now() })
+          }
+        }
+      } else if (value.type === 'tool_results') {
+        for (const b of value.message.content) {
+          if (isContentBlock(b) && b.type === 'tool_result') {
+            agentEvents.emit({ type: 'tool:post', convId: loop.convId, roleId: loop.roleId, tool: toolNames.get(b.tool_use_id) ?? 'unknown', isError: b.is_error ?? false, ts: Date.now() })
+          }
+        }
       }
       log({ t: 'event', runId: loop.runId, event: value })
       cb.onEvent(value)
@@ -368,6 +386,7 @@ export async function runDispatchedAgent(
       serverTools,
       cwd: d.cwd,
       convId: d.convId,
+      roleId: d.roleId,
       runId: ulid(),
       thinking: d.thinking,
       contextWindow: d.contextWindow,
