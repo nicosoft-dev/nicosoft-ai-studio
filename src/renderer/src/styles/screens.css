@@ -1388,51 +1388,85 @@
 .wbl.approval, .wbl.fail { color: var(--error); }
 .wbl.pending { color: var(--text-4); }
 
-/* orchestration — scrolls internally */
-.wb-orch { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.wb-orch-head { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
-.wb-orch-legend { display: inline-flex; gap: 12px; margin-left: auto; }
-.wb-lanes { position: relative; flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+/* ============================================================
+   Orchestration — 1:1 with the Project Workbench design: ONE scroll
+   region (.wb-orch), sticky gutters, swimlane tracks of event cards
+   joined by .wb-conn connectors, + a cross-lane consult arrow overlay.
+   ============================================================ */
+.wb-orch-wrap { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.wb-block-head { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; font-size: 12px; font-weight: 600; color: var(--text-2); letter-spacing: -0.005em; }
+.wb-block-head .wb-bh-ic { color: var(--text-3); display: grid; place-items: center; }
+.wb-block-head .wb-bh-sub { color: var(--text-4); font-weight: 400; }
+.wb-block-head .wb-bh-spacer { flex: 1; }
+.wb-legend { display: flex; align-items: center; gap: 12px; }
+.wb-legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 400; color: var(--text-4); }
+.wb-legend i { width: 8px; height: 8px; border-radius: 50%; }
 
-/* one swimlane */
-.wb-lane { display: flex; min-height: 66px; border-left: 2px solid var(--lane-color); background: var(--bg-2); border-radius: var(--r-md); overflow: hidden; }
-.wb-gutter { flex: 0 0 158px; display: flex; align-items: center; gap: 8px; padding: 10px 12px; cursor: pointer; border-right: 1px solid var(--border-1); }
-.wb-who { display: flex; flex-direction: column; min-width: 0; flex: 1; }
-.wb-name { font-size: 12.5px; font-weight: 600; color: var(--text-1); }
-.wb-role { font-size: 11px; color: var(--text-4); }
-.wb-status { font-size: 10px; padding: 1px 6px; border-radius: 4px; }
-.wb-status.watching { color: var(--text-4); }
-.wb-status.working { color: var(--accent); background: color-mix(in oklab, var(--accent) 14%, transparent); }
-.wb-status.blocked { color: var(--error); background: color-mix(in oklab, var(--error) 14%, transparent); }
-.wb-status.done { color: var(--success); }
-.wb-track { flex: 1; min-width: 0; display: flex; align-items: stretch; gap: 8px; padding: 8px 10px; overflow-x: auto; }
+.wb-orch { flex: 1; min-height: 0; border: 1px solid var(--border-1); border-radius: var(--r-lg); overflow: auto; background: var(--bg-1); position: relative; }
+.wb-orch-inner { position: relative; width: max-content; min-width: 100%; }
+.wb-lanes { width: max-content; min-width: 100%; }
 
-/* coordinator ribbon */
-.wb-ribbon { display: flex; align-items: center; gap: 6px; }
-.wb-ribbon svg { color: var(--text-4); flex: 0 0 auto; }
-.wb-pill { font-size: 11px; font-family: var(--mono); color: var(--text-2); background: var(--bg-3); border: 1px solid var(--border-1); border-radius: 5px; padding: 4px 9px; white-space: nowrap; }
+.wb-lane { display: flex; align-items: stretch; border-bottom: 1px solid var(--border-1); --lane: var(--accent); position: relative; }
+.wb-lane:last-child { border-bottom: none; }
+.wb-lane::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--lane); z-index: 5; }
 
-/* doer tool card */
-.wb-card { flex: 0 0 auto; min-width: 132px; max-width: 200px; display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; background: var(--bg-3); border: 1px solid var(--border-1); border-radius: var(--r-sm); }
-.wb-card.consult { border-color: color-mix(in oklab, var(--accent) 45%, transparent); }
-.wb-card-head { display: flex; align-items: center; justify-content: space-between; }
-.wb-kind { font-size: 9.5px; font-weight: 700; letter-spacing: 0.05em; color: var(--text-4); }
-.wb-time { font-size: 9.5px; color: var(--text-4); font-family: var(--mono); }
-.wb-card-title { font-size: 12px; font-family: var(--mono); color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.wb-card-sub { font-size: 10.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.wb-lane-empty { align-self: center; font-size: 11px; color: var(--text-4); font-style: italic; }
-.wb-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 9.5px; padding: 1px 5px; border-radius: 4px; margin-top: 2px; align-self: flex-start; }
-.wb-badge.yellow { color: var(--warning); background: color-mix(in oklab, var(--warning) 14%, transparent); }
-.wb-badge.yellow svg { color: var(--warning); }
-.wb-badge.live { color: var(--success); background: color-mix(in oklab, var(--success) 14%, transparent); }
-.wb-live-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--success); }
+/* gutter — sticky so it stays in view while the track scrolls horizontally */
+.wb-gutter { position: sticky; left: 0; z-index: 4; width: 176px; flex: 0 0 176px; box-sizing: border-box; padding: 12px 13px 12px 16px; background: var(--bg-1); border-right: 1px solid var(--border-1); display: flex; flex-direction: column; gap: 7px; justify-content: center; cursor: pointer; }
+.wb-lane.conductor .wb-gutter { background: color-mix(in oklab, var(--accent) 5%, var(--bg-1)); }
+.wb-gutter-id { display: flex; align-items: center; gap: 9px; }
+.wb-gutter-meta { min-width: 0; }
+.wb-gutter-name { font-size: 13px; font-weight: 600; color: var(--lane); letter-spacing: -0.01em; }
+.wb-gutter-role { font-size: 10.5px; color: var(--text-4); margin-top: 1px; }
+.wb-lane-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-3); }
+.wb-lane-status .wb-st-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--lane); }
+.wb-lane-status.running .wb-st-dot { animation: pulse-soft 1.4s ease-in-out infinite; }
+.wb-lane-status.done { color: var(--text-4); }
+.wb-lane-status.done .wb-st-dot { background: var(--text-4); }
+.wb-lane-status.blocked { color: var(--error); }
+.wb-lane-status.blocked .wb-st-dot { background: var(--error); animation: pulse-soft 1s ease-in-out infinite; }
 
-/* consult arrow overlay (mock fixed anchors) */
-/* inline consult chip — lives in the source expert's timeline track (→ target · what they asked) */
-.wb-consult-chip { flex: 0 0 auto; align-self: center; display: inline-flex; align-items: center; gap: 6px; max-width: 240px; padding: 5px 9px; font-size: 11px; border-radius: 6px; color: var(--accent); background: color-mix(in oklab, var(--accent) 12%, transparent); border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent); }
-.wb-consult-chip svg { flex: 0 0 auto; }
-.wb-consult-to { font-weight: 600; white-space: nowrap; }
-.wb-consult-text { color: color-mix(in oklab, var(--accent) 75%, var(--text-2)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* track — events left → right, joined by connectors */
+.wb-track { flex: 1; display: flex; align-items: center; gap: 0; padding: 12px 18px; min-height: 76px; }
+.wb-lane.conductor .wb-track { min-height: 44px; padding: 8px 18px; }
+.wb-lane-empty { font-size: 11px; color: var(--text-4); font-style: italic; }
+.wb-conn { flex: 0 0 18px; height: 1px; background: var(--border-2); align-self: center; position: relative; }
+.wb-conn::after { content: ""; position: absolute; right: -1px; top: -2px; border-left: 4px solid var(--border-2); border-top: 2.5px solid transparent; border-bottom: 2.5px solid transparent; }
+
+/* event card */
+.wb-card { flex: 0 0 auto; position: relative; z-index: 2; min-width: 132px; max-width: 210px; display: flex; flex-direction: column; gap: 5px; padding: 8px 10px 7px; border-radius: 8px; background: var(--bg-2); border: 1px solid var(--border-1); }
+.wb-card-head { display: flex; align-items: center; gap: 6px; }
+.wb-card-ic { color: var(--text-4); display: grid; place-items: center; flex: 0 0 auto; }
+.wb-tool { font-family: var(--mono); font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-3); font-weight: 500; }
+.wb-target { font-family: var(--mono); font-size: 11.5px; color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.01em; }
+.wb-card-foot { display: flex; align-items: center; gap: 6px; margin-top: 1px; }
+.wb-ts { font-family: var(--mono); font-size: 9.5px; color: var(--text-4); }
+.wb-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 9.5px; padding: 1px 6px; border-radius: 4px; letter-spacing: 0.01em; }
+.wb-tag.auto { color: var(--success); background: color-mix(in oklab, var(--success) 15%, transparent); }
+.wb-tag.consult { color: var(--accent); background: var(--accent-soft); }
+.wb-tag.danger { color: var(--error); background: color-mix(in oklab, var(--error) 14%, transparent); }
+
+/* conductor ribbon — compact inline pills, single line */
+.wb-lane.conductor .wb-card { flex-direction: row; align-items: center; gap: 7px; min-width: auto; max-width: none; padding: 5px 11px; }
+.wb-lane.conductor .wb-card .wb-card-foot, .wb-lane.conductor .wb-card .wb-run-dot { display: none; }
+.wb-lane.conductor .wb-target { font-size: 11px; }
+
+/* running card — lane-colored glow + halo dot */
+.wb-card.running { border-color: color-mix(in oklab, var(--lane) 50%, transparent); box-shadow: 0 0 0 1px color-mix(in oklab, var(--lane) 30%, transparent); }
+.wb-card.running .wb-tool { color: var(--lane); }
+.wb-run-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--lane); animation: wb-ping 1.5s ease-out infinite; flex: 0 0 7px; margin-left: auto; }
+@keyframes wb-ping { 0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--lane) 55%, transparent); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+
+/* consult request card (dashed) */
+.wb-card.consult-from { border-style: dashed; border-color: color-mix(in oklab, var(--accent) 45%, transparent); }
+.wb-card.consult-from .wb-card-ic, .wb-card.consult-from .wb-target { color: var(--accent); }
+
+/* cross-lane consult arrow overlay (sits inside .wb-orch-inner, scrolls with the content) */
+.wb-consult-layer { position: absolute; inset: 0; pointer-events: none; z-index: 3; overflow: visible; }
+.wb-consult-path { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 4; opacity: 0.85; }
+.wb-consult-origin { fill: var(--accent); }
+.wb-consult-label { position: absolute; transform: translate(-50%, -50%); pointer-events: none; z-index: 6; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; background: var(--bg-3); border: 1px solid var(--border-2); border-radius: 6px; padding: 3px 8px; box-shadow: var(--shadow-float); }
+.wb-consult-label .wb-cl-name { font-family: var(--mono); font-size: 11px; color: var(--accent); }
+.wb-consult-label .wb-cl-ic { color: var(--accent); display: grid; place-items: center; }
 
 /* tests strip */
 .wb-tests { flex: 0 0 auto; display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border-1); }
@@ -1452,9 +1486,13 @@
 .wb-dock { flex: 0 0 auto; border-top: 1px solid var(--border-2); padding: 12px 18px; display: flex; flex-direction: column; gap: 10px; background: var(--bg-1); }
 .wb-dock-msg { display: flex; gap: 10px; }
 .wb-dock-body { flex: 1; min-width: 0; }
-.wb-dock-who { font-size: 12px; font-weight: 600; color: var(--text-1); margin-bottom: 2px; }
+.wb-dock-who { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-1); margin-bottom: 2px; }
 .wb-dock-at { color: var(--accent); font-weight: 500; }
-.wb-dock-text { font-size: 12.5px; color: var(--text-2); line-height: 1.5; }
+/* Danny's report: a fixed-height scroll box by default (it can be a wall of text); Expand toggles full height */
+.wb-dock-toggle { margin-left: auto; font-size: 11px; font-weight: 500; color: var(--accent); background: none; border: none; cursor: pointer; }
+.wb-dock-toggle:hover { text-decoration: underline; }
+.wb-dock-text { font-size: 12.5px; color: var(--text-2); line-height: 1.5; white-space: pre-wrap; }
+.wb-dock-text.collapsed { max-height: 92px; overflow-y: auto; }
 .wb-dock-input { display: flex; align-items: center; gap: 8px; background: var(--bg-2); border: 1px solid var(--border-1); border-radius: var(--r-md); padding: 6px 6px 6px 14px; }
 .wb-dock-input input { flex: 1; background: none; border: none; outline: none; color: var(--text-1); font-size: 13px; }
 .wb-dock-input input::placeholder { color: var(--text-4); }

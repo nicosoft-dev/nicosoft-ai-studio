@@ -142,6 +142,20 @@ CREATE TABLE IF NOT EXISTS project_consults (
   FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS project_tool_events (
+  id         TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  role_id    TEXT NOT NULL,
+  src_id     TEXT,                                  -- the tool_use block id (dedup across compaction retries)
+  seq        INTEGER NOT NULL,
+  tool_name  TEXT NOT NULL,
+  target     TEXT,
+  zone       TEXT NOT NULL DEFAULT 'green',         -- green (auto) | yellow (auto+log) | red (needs approval)
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pte_src ON project_tool_events (project_id, src_id);
+
 CREATE TABLE IF NOT EXISTS scheduled_tasks (
   id           TEXT PRIMARY KEY,
   name         TEXT NOT NULL,

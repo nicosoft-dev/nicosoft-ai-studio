@@ -7,7 +7,7 @@
    (services / approvals / consult arrows / Danny dock) wire up in
    phase 5c.
    ============================================================ */
-import { Fragment, useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useState } from 'react'
 import type { CSSProperties, ReactElement } from 'react'
 import { Icons } from '@/components/icons'
 import { Avatar, AvatarStack } from '@/components/primitives'
@@ -17,6 +17,7 @@ import { STUDIO_DATA, PHASES, PHASE_INDEX } from '@/data/studio-data'
 type ProjectDto = Awaited<ReturnType<typeof window.api.project.list>>[number]
 type TaskDto = ProjectDto['plan'][number]
 type TestDto = ProjectDto['tests'][number]
+type ToolEventDto = ProjectDto['toolEvents'][number]
 
 // project.phase is stored lowercase (planning|executing|testing|done); the chip + rail label in TitleCase.
 const PHASE_LABEL: Record<string, string> = { planning: 'Planning', executing: 'Executing', testing: 'Testing', done: 'Done' }
@@ -195,84 +196,190 @@ function NewProjectDialog({ onClose, onCreated }: { onClose: () => void; onCreat
   )
 }
 
-/* — One task card on a doer's lane — */
-function ProjectTaskCard({ task }: { task: TaskDto }): ReactElement {
+// HH:MM clock for a card footer.
+function fmtClock(iso?: string): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+// tool → glyph, mirroring the Project Workbench design (no penSquare glyph here → Write uses edit).
+const TOOL_ICON: Record<string, string> = {
+  Read: 'file', Write: 'edit', Edit: 'edit', MultiEdit: 'edit', NotebookEdit: 'edit',
+  Bash: 'terminal', Grep: 'search', Glob: 'search', LS: 'folder', WebFetch: 'globe', WebSearch: 'globe',
+  Plan: 'listChecks', Dispatch: 'arrowRight', Watch: 'eye', Task: 'listChecks',
+}
+
+type LaneStatus = { state: string; label: string }
+type LaneEvent = { id: string; toolName: string; target: string | null; zone?: string; createdAt?: string }
+
+/* — one event card on a lane's timeline (READ / WRITE / BASH …); head(icon+tool) / target / foot(ts+tag) — */
+function EventCard({ ev, running }: { ev: LaneEvent; running?: boolean }): ReactElement {
+  const Ico = Icons[TOOL_ICON[ev.toolName] ?? 'file']
   return (
-    <div className={'wb-card ' + task.status}>
+    <div className={'wb-card' + (running ? ' running' : '')}>
       <div className="wb-card-head">
-        <span className="wb-kind">{task.status}</span>
+        <span className="wb-card-ic"><Ico size={13} /></span>
+        <span className="wb-tool">{ev.toolName}</span>
+        {running ? <span className="wb-run-dot" /> : null}
       </div>
-      <div className="wb-card-title">{task.title}</div>
-      {task.output && <div className="wb-card-sub">{task.output}</div>}
+      {ev.target ? <div className="wb-target" title={ev.target}>{ev.target}</div> : null}
+      <div className="wb-card-foot">
+        {ev.createdAt ? <span className="wb-ts">{fmtClock(ev.createdAt)}</span> : null}
+        {ev.zone === 'yellow' ? <span className="wb-tag auto"><Icons.shield size={9} /> auto-approved</span> : null}
+        {ev.zone === 'red' ? <span className="wb-tag danger"><Icons.alert size={9} /> needs approval</span> : null}
+      </div>
     </div>
   )
 }
 
-/* — An inline consult chip on the source expert's lane (→ target · what they asked). Rendered in the
-     timeline track so it scrolls with the cards — replaces the old floating SVG label that overlapped the
-     cards (doc 19 §13). — */
-function ConsultChip({ consult }: { consult: ConsultDto }): ReactElement {
+/* — a consult request card on the source lane (dashed); the SVG layer draws the arrow to the target lane — */
+function ConsultCard({ consult, idx }: { consult: ConsultDto; idx: number }): ReactElement {
   const to = STUDIO_DATA.EXPERT_BY_ID[consult.to]?.name ?? consult.to
   return (
-    <div className="wb-consult-chip" title={`Consulted ${to}${consult.text ? ` — ${consult.text}` : ''}`}>
-      <Icons.link size={11} />
-      <span className="wb-consult-to">→ {to}</span>
-      {consult.text ? <span className="wb-consult-text">{consult.text}</span> : null}
+    <div className="wb-card consult-from" data-cfrom={idx} title={consult.text ?? `Consulted ${to}`}>
+      <div className="wb-card-head">
+        <span className="wb-card-ic"><Icons.link size={13} /></span>
+        <span className="wb-tool">Consult</span>
+      </div>
+      <div className="wb-target">→ {to}</div>
+      <div className="wb-card-foot">
+        <span className="wb-tag consult"><Icons.link size={9} /> consult</span>
+      </div>
     </div>
   )
 }
 
-/* — One swimlane per expert: coordinator is a compact ribbon, doers show their task cards + consults. — */
-function ProjectLane({
+/* — one swimlane: sticky gutter (id block + status line below) + a horizontal track of cards with a
+     .wb-conn connector between them. The coordinator lane renders as a compact conductor ribbon. — */
+function Lane({
   roleId,
-  tasks,
+  conductor,
+  status,
+  events,
   consults,
-  isChair,
-  planCount,
-  phase,
   onOpenExpert
 }: {
   roleId: string
-  tasks: TaskDto[]
-  consults?: ConsultDto[]
-  isChair?: boolean
-  planCount?: number
-  phase?: string
+  conductor?: boolean
+  status: LaneStatus
+  events: LaneEvent[]
+  consults: (ConsultDto & { __idx: number })[]
   onOpenExpert: (id: string) => void
 }): ReactElement {
   const e = STUDIO_DATA.EXPERT_BY_ID[roleId]
-  const mine = (consults ?? []).filter((c) => c.from === roleId)
-  const status = isChair ? 'watching' : laneStatus(tasks)
+  const lastRunning = !conductor && status.state === 'running' ? events.length - 1 : -1
+  const empty = events.length === 0 && consults.length === 0
   return (
-    <div className={'wb-lane ' + status} data-role={roleId} style={{ '--lane-color': e?.color ?? 'var(--exp-coordinator)' } as CSSProperties}>
+    <div className={'wb-lane' + (conductor ? ' conductor' : '')} data-role={roleId} style={{ '--lane': e?.color ?? 'var(--accent)' } as CSSProperties}>
       <div className="wb-gutter" onClick={() => onOpenExpert(roleId)}>
-        {e ? <Avatar expert={e} size={26} /> : <span className="wb-avatar-fallback">{roleId[0]?.toUpperCase()}</span>}
-        <div className="wb-who">
-          <span className="wb-name">{e?.name ?? roleId}</span>
-          <span className="wb-role">{e?.specialty?.split('—')[0]?.trim() ?? roleId}</span>
+        <div className="wb-gutter-id">
+          {e ? <Avatar expert={e} size={28} /> : <span className="wb-avatar-fallback">{roleId[0]?.toUpperCase()}</span>}
+          <div className="wb-gutter-meta">
+            <div className="wb-gutter-name" style={{ color: e?.color ?? 'var(--accent)' }}>{e?.name ?? roleId}</div>
+            <div className="wb-gutter-role">{e?.specialty?.split('—')[0]?.trim() ?? roleId}</div>
+          </div>
         </div>
-        <span className={'wb-status ' + status}>{status}</span>
+        <div className={'wb-lane-status ' + status.state}>
+          <span className="wb-st-dot" /> {status.label}
+        </div>
       </div>
       <div className="wb-track">
-        {isChair ? (
-          <div className="wb-ribbon">
-            {[`PLAN ${planCount ?? 0} tasks`, `DISPATCH team`, `PHASE ${phaseTitle(phase ?? 'planning')}`].map((pill, i) => (
-              <Fragment key={pill}>
-                {i > 0 && <Icons.chevronRight size={12} />}
-                <span className="wb-pill">{pill}</span>
-              </Fragment>
-            ))}
-          </div>
-        ) : tasks.length === 0 && mine.length === 0 ? (
+        {empty ? (
           <span className="wb-lane-empty">no activity yet</span>
         ) : (
           <>
-            {tasks.map((t) => <ProjectTaskCard key={t.id} task={t} />)}
-            {mine.map((c, i) => <ConsultChip key={'c' + i} consult={c} />)}
+            {events.map((ev, i) => (
+              <Fragment key={ev.id}>
+                {i > 0 && <span className="wb-conn" />}
+                <EventCard ev={ev} running={i === lastRunning} />
+              </Fragment>
+            ))}
+            {consults.map((c, i) => (
+              <Fragment key={'c' + c.__idx}>
+                {(events.length > 0 || i > 0) && <span className="wb-conn" />}
+                <ConsultCard consult={c} idx={c.__idx} />
+              </Fragment>
+            ))}
           </>
         )}
       </div>
     </div>
+  )
+}
+
+/* — cross-lane consult arrows (doc 19): an SVG bezier from each consult's source card into the target lane's
+     first card, drawn in the .wb-lanes coordinate space so it scrolls with the content. Ported from the
+     design's ConsultLayer — measure card rects, retry across frames until layout settles, re-measure on resize. — */
+function ConsultLayer({ lanesEl, consults }: { lanesEl: HTMLDivElement | null; consults: (ConsultDto & { __idx: number })[] }): ReactElement | null {
+  const [geo, setGeo] = useState<{ w: number; h: number; edges: { fx: number; fy: number; tx: number; ty: number; to: string }[] } | null>(null)
+  useLayoutEffect(() => {
+    if (!lanesEl || consults.length === 0) {
+      setGeo(null)
+      return
+    }
+    let raf = 0
+    let tries = 0
+    const measure = (): boolean => {
+      const ir = lanesEl.getBoundingClientRect()
+      const edges: { fx: number; fy: number; tx: number; ty: number; to: string }[] = []
+      for (const c of consults) {
+        const from = lanesEl.querySelector(`[data-cfrom="${c.__idx}"]`)
+        const toCard = lanesEl.querySelector(`.wb-lane[data-role="${c.to}"] .wb-track .wb-card`)
+        if (!from || !toCard) continue
+        const fr = from.getBoundingClientRect()
+        const tr = toCard.getBoundingClientRect()
+        if (fr.width === 0 || tr.width === 0) continue
+        edges.push({
+          fx: fr.left - ir.left + fr.width / 2,
+          fy: fr.bottom - ir.top,
+          tx: tr.left - ir.left + tr.width / 2,
+          ty: tr.top - ir.top,
+          to: STUDIO_DATA.EXPERT_BY_ID[c.to]?.name ?? c.to
+        })
+      }
+      setGeo({ w: lanesEl.scrollWidth, h: lanesEl.offsetHeight, edges })
+      return edges.length > 0
+    }
+    const loop = (): void => {
+      measure()
+      if (++tries < 10) raf = requestAnimationFrame(loop)
+    }
+    loop()
+    const ro = new ResizeObserver(measure)
+    ro.observe(lanesEl)
+    return () => {
+      cancelAnimationFrame(raf)
+      ro.disconnect()
+    }
+  }, [lanesEl, consults])
+
+  if (!geo || geo.edges.length === 0) return null
+  return (
+    <>
+      <svg className="wb-consult-layer" width={geo.w} height={geo.h} viewBox={`0 0 ${geo.w} ${geo.h}`}>
+        <defs>
+          <marker id="wb-arrow" markerWidth="9" markerHeight="9" refX="6" refY="4.5" orient="auto">
+            <path d="M1 1 L7 4.5 L1 8" fill="none" stroke="var(--accent)" strokeWidth="1.4" />
+          </marker>
+        </defs>
+        {geo.edges.map((ed, i) => {
+          const midY = (ed.fy + ed.ty) / 2
+          return (
+            <Fragment key={i}>
+              <circle className="wb-consult-origin" cx={ed.fx} cy={ed.fy} r={3} />
+              <path className="wb-consult-path" d={`M ${ed.fx} ${ed.fy} C ${ed.fx} ${midY}, ${ed.tx} ${midY}, ${ed.tx} ${ed.ty}`} markerEnd="url(#wb-arrow)" />
+            </Fragment>
+          )
+        })}
+      </svg>
+      {geo.edges.map((ed, i) => (
+        <div key={i} className="wb-consult-label" style={{ left: (ed.fx + ed.tx) / 2, top: (ed.fy + ed.ty) / 2 }}>
+          <span className="wb-cl-ic"><Icons.link size={11} /></span>
+          <span className="wb-cl-name">→ {ed.to}</span>
+        </div>
+      ))}
+    </>
   )
 }
 
@@ -327,9 +434,29 @@ function ProjectDetail({
   onOpenExpert: (id: string) => void
 }): ReactElement {
   const doers = project.experts.filter((id) => id !== 'coordinator')
+  const [lanesEl, setLanesEl] = useState<HTMLDivElement | null>(null)
+  const consultsIdx = project.consults.map((c, i) => ({ ...c, __idx: i }))
+  const doerNames = doers.map((rid) => STUDIO_DATA.EXPERT_BY_ID[rid]?.name ?? rid).join(' + ')
+  // Coordinator lane = a compact conductor ribbon (PLAN → DISPATCH → WATCH), synthesized from project state.
+  const conductorEvents: LaneEvent[] = [
+    { id: 'c-plan', toolName: 'Plan', target: `${project.plan.length} task${project.plan.length === 1 ? '' : 's'}` },
+    { id: 'c-dispatch', toolName: 'Dispatch', target: doerNames || 'team' },
+    { id: 'c-watch', toolName: 'Watch', target: project.phase === 'done' ? 'complete' : 'for green tests' }
+  ]
+  const laneStatusOf = (rid: string): LaneStatus => {
+    const s = laneStatus(project.plan.filter((t) => t.assigneeRoleId === rid))
+    return s === 'working' ? { state: 'running', label: 'working' } : { state: s, label: s }
+  }
+  const eventsOf = (rid: string): LaneEvent[] => {
+    const tools = project.toolEvents.filter((t) => t.roleId === rid)
+    if (tools.length > 0) return tools
+    // fallback for projects predating tool-event capture: show the assigned tasks as cards
+    return project.plan.filter((t) => t.assigneeRoleId === rid).map((t) => ({ id: t.id, toolName: 'Task', target: t.title, zone: 'green' }))
+  }
   const [pending, setPending] = useState<PendingDto[]>([])
   const [convId, setConvId] = useState<string | null>(null)
   const [dannyReply, setDannyReply] = useState('')
+  const [dockExpanded, setDockExpanded] = useState(false)
   const [running, setRunning] = useState(false)
   const [draft, setDraft] = useState('')
   const [services, setServices] = useState<{ name: string; port: number | null; status: string }[]>([])
@@ -448,36 +575,42 @@ function ProjectDetail({
           </div>
         )}
 
-        <div className="wb-orch">
-          <div className="wb-orch-head">
-            <span className="wb-section-label">
-              <Icons.kanban size={14} /> Orchestration
-            </span>
-            <span className="wb-section-sub">work across the team</span>
-            <span className="wb-orch-legend">
-              <span className="wbl running">working</span>
-              <span className="wbl done">done</span>
+        <div className="wb-orch-wrap">
+          <div className="wb-block-head">
+            <span className="wb-bh-ic"><Icons.kanban size={14} /></span>
+            Orchestration
+            <span className="wb-bh-sub">— live, parallel work across the team</span>
+            <span className="wb-bh-spacer" />
+            <span className="wb-legend">
+              <span><i style={{ background: 'var(--accent)' }} /> running</span>
+              <span><i style={{ background: 'var(--text-4)' }} /> done</span>
+              <span><i style={{ background: 'var(--error)' }} /> needs approval</span>
             </span>
           </div>
-          <div className="wb-lanes">
-            <ProjectLane
-              roleId="coordinator"
-              tasks={project.plan}
-              isChair
-              planCount={project.plan.length}
-              phase={project.phase}
-              onOpenExpert={onOpenExpert}
-            />
-            {doers.map((rid) => (
-              <ProjectLane
-                key={rid}
-                roleId={rid}
-                tasks={project.plan.filter((t) => t.assigneeRoleId === rid)}
-                consults={project.consults}
-                phase={project.phase}
-                onOpenExpert={onOpenExpert}
-              />
-            ))}
+          <div className="wb-orch">
+            <div className="wb-orch-inner">
+              <div className="wb-lanes" ref={setLanesEl}>
+                <Lane
+                  roleId="coordinator"
+                  conductor
+                  status={{ state: 'watching', label: 'watching' }}
+                  events={conductorEvents}
+                  consults={[]}
+                  onOpenExpert={onOpenExpert}
+                />
+                {doers.map((rid) => (
+                  <Lane
+                    key={rid}
+                    roleId={rid}
+                    status={laneStatusOf(rid)}
+                    events={eventsOf(rid)}
+                    consults={consultsIdx.filter((c) => c.from === rid)}
+                    onOpenExpert={onOpenExpert}
+                  />
+                ))}
+              </div>
+              <ConsultLayer lanesEl={lanesEl} consults={consultsIdx} />
+            </div>
           </div>
         </div>
 
@@ -492,8 +625,13 @@ function ProjectDetail({
             <div className="wb-dock-body">
               <div className="wb-dock-who">
                 Danny <span className="wb-dock-at">@you</span>
+                {!running ? (
+                  <button className="wb-dock-toggle" onClick={() => setDockExpanded((v) => !v)}>
+                    {dockExpanded ? 'Collapse' : 'Expand'}
+                  </button>
+                ) : null}
               </div>
-              <div className="wb-dock-text">{running ? 'Working on it…' : dannyReply}</div>
+              <div className={'wb-dock-text' + (dockExpanded ? '' : ' collapsed')}>{running ? 'Working on it…' : dannyReply}</div>
             </div>
           </div>
         ) : null}

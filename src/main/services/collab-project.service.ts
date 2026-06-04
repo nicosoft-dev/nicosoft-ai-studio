@@ -1,5 +1,6 @@
 import * as projectService from './project.service'
 import * as convRepo from '../repos/conversation.repo'
+import { classifyApproval } from '../agent/approval'
 import type { ProjectTaskDto } from '../ipc/contracts'
 import type { CollabEvent } from '../agent/collab'
 
@@ -94,4 +95,43 @@ function mapOrSeedTasks(projectId: string, roles: string[]): CollabProject {
 
 function taskTitle(roleId: string): string {
   return `${roleId.charAt(0).toUpperCase()}${roleId.slice(1)} contribution`
+}
+
+// Persist one expert tool call onto the project's orchestration timeline (the tool-card timeline). zone is
+// the safety classification at call time (green auto / yellow auto+log / red needs-approval). srcId = the
+// tool_use block id so a mid-run compaction re-issuing the same blocks doesn't double-record.
+export function recordToolEvent(project: CollabProject, roleId: string, toolName: string, input: unknown, cwd: string, srcId: string | null): void {
+  const zone = classifyApproval(toolName, input, cwd).zone
+  projectService.addToolEvent(project.projectId, { roleId, srcId, toolName, target: toolTarget(toolName, input), zone })
+}
+
+// A short, human label for a tool card: the file basename / the command head / the search pattern / the URL.
+function toolTarget(name: string, input: unknown): string | null {
+  const i = (input ?? {}) as Record<string, unknown>
+  const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v : null)
+  const base = (p: string | null): string | null => (p ? p.split('/').pop() || p : null)
+  switch (name) {
+    case 'Read':
+    case 'Write':
+    case 'Edit':
+    case 'MultiEdit':
+    case 'NotebookEdit':
+      return base(str(i.file_path) ?? str(i.path) ?? str(i.notebook_path))
+    case 'Bash': {
+      const c = str(i.command)
+      return c ? (c.length > 42 ? c.slice(0, 40) + '…' : c) : null
+    }
+    case 'Grep':
+      return str(i.pattern)
+    case 'Glob':
+      return str(i.pattern) ?? base(str(i.path))
+    case 'LS':
+      return base(str(i.path))
+    case 'WebFetch':
+      return str(i.url)
+    case 'WebSearch':
+      return str(i.query)
+    default:
+      return base(str(i.file_path) ?? str(i.path) ?? str(i.command) ?? str(i.pattern) ?? str(i.url) ?? str(i.query))
+  }
 }

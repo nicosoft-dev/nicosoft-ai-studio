@@ -239,3 +239,63 @@ export function listConsults(projectId: string): ProjectConsultRow[] {
     createdAt: r.created_at,
   }))
 }
+
+// ---------- project_tool_events ----------
+export interface ProjectToolEventRow {
+  id: string
+  projectId: string
+  roleId: string
+  seq: number
+  toolName: string
+  target: string | null
+  zone: string
+  createdAt: string
+}
+interface ToolEventRaw {
+  id: string
+  project_id: string
+  role_id: string
+  seq: number
+  tool_name: string
+  target: string | null
+  zone: string
+  created_at: string
+}
+export interface ToolEventInsert {
+  projectId: string
+  roleId: string
+  srcId: string | null
+  toolName: string
+  target: string | null
+  zone: string
+}
+// Insert one tool-call row. seq = next within the project (gaps are fine; we ORDER BY seq). INSERT OR
+// IGNORE + the (project_id, src_id) unique index dedupes a tool_use the loop re-issues after a mid-run
+// compaction. Returns null when the row was deduped. (NULL src_id never collides — SQLite NULLs are distinct.)
+export function insertToolEvent(input: ToolEventInsert): ProjectToolEventRow | null {
+  const id = ulid()
+  const now = new Date().toISOString()
+  const next = getDb().prepare('SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM project_tool_events WHERE project_id = ?').get(input.projectId) as { n: number }
+  const res = getDb()
+    .prepare(
+      `INSERT OR IGNORE INTO project_tool_events (id, project_id, role_id, src_id, seq, tool_name, target, zone, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(id, input.projectId, input.roleId, input.srcId, next.n, input.toolName, input.target, input.zone, now)
+  if (res.changes === 0) return null
+  return { id, projectId: input.projectId, roleId: input.roleId, seq: next.n, toolName: input.toolName, target: input.target, zone: input.zone, createdAt: now }
+}
+
+export function listToolEvents(projectId: string): ProjectToolEventRow[] {
+  const rows = getDb().prepare('SELECT * FROM project_tool_events WHERE project_id = ? ORDER BY seq ASC').all(projectId)
+  return (rows as unknown as ToolEventRaw[]).map((r) => ({
+    id: r.id,
+    projectId: r.project_id,
+    roleId: r.role_id,
+    seq: r.seq,
+    toolName: r.tool_name,
+    target: r.target,
+    zone: r.zone,
+    createdAt: r.created_at,
+  }))
+}

@@ -565,6 +565,16 @@ export interface ProjectConsultDto {
   text: string | null
   count: number
 }
+// One tool call an expert made during the collaboration — the orchestration tool-card timeline.
+// zone is the safety classification at call time; ordered by seq within a project.
+export interface ProjectToolEventDto {
+  id: string
+  roleId: string
+  toolName: string
+  target: string | null
+  zone: 'green' | 'yellow' | 'red'
+  createdAt: string
+}
 export interface ProjectDto {
   id: string
   title: string
@@ -576,6 +586,7 @@ export interface ProjectDto {
   plan: ProjectTaskDto[]
   tests: ProjectTestDto[]
   consults: ProjectConsultDto[] // derived from collab send/assign events, deduped by from→to
+  toolEvents: ProjectToolEventDto[] // per-expert tool calls in order — the orchestration timeline
   createdAt: string
   updatedAt: string
 }

@@ -31,6 +31,7 @@ import * as agentService from './agent.service'
 import { classifyApproval } from '../agent/approval'
 import * as pendingRepo from '../repos/pending-approval.repo'
 import type { AgentEvent } from '../agent/loop'
+import { isContentBlock } from '../agent/types'
 import type { PermissionRequest, PermissionDecision } from '../agent/context'
 import type { MemoryRow } from '../repos/memory.repo'
 import { countContext } from './token-count.service'
@@ -728,7 +729,18 @@ async function runCollaboration(
       if (ev.type === 'text') cb.onDelta(roleId, ev.delta)
       else if (ev.type === 'tool_use_start') cb.onToolStart?.(roleId, ev.id, ev.name)
     },
-    onExpertEvent: (roleId, ev) => cb.onToolEvent?.(roleId, ev),
+    onExpertEvent: (roleId, ev) => {
+      // Tool-card timeline (doc 19): persist each expert tool call onto the project as it streams, so the
+      // Workbench lane shows a live READ/WRITE/BASH timeline. assistant events carry the tool_use blocks.
+      if (project && ev.type === 'assistant') {
+        const cwd = experts.find((e) => e.roleId === roleId)?.cwd ?? ''
+        for (const b of ev.message.content) {
+          if (isContentBlock(b) && b.type === 'tool_use') collabProject.recordToolEvent(project, roleId, b.name, b.input, cwd, b.id)
+        }
+        cb.onProjectUpdated?.(project.projectId)
+      }
+      cb.onToolEvent?.(roleId, ev)
+    },
     // phase 4: coordinator self-approves each expert's tool via the safety classifier (doc §8) — green/yellow
     // auto-run (yellow worth surfacing), red hard-denied + recorded for the user to approve later. cwd is the
     // requesting expert's own (red-zone replay needs it).
