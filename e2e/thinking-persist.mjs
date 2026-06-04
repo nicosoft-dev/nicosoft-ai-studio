@@ -19,18 +19,18 @@ page.on('console', (m) => {
 await page.waitForLoadState('domcontentloaded')
 await page.waitForTimeout(1000)
 
-// Bind generalist to gemini-2.5-flash (has low/medium/high thinking) + clear any saved depth.
+// Bind editor to gemini-2.5-flash (has low/medium/high thinking) + clear any saved depth.
 await page.evaluate(
   async ({ key }) => {
     const eps = await window.api.endpoints.list()
     for (const ep of eps) if (!ep.hasKey && key) await window.api.endpoints.update(ep.id, { apiKey: key })
     const gemini = (await window.api.endpoints.list()).find((e) => e.protocol === 'gemini')
     if (!gemini) throw new Error('need a gemini-protocol endpoint')
-    await window.api.roles.setBinding('generalist', { endpointId: gemini.id, model: 'gemini-2.5-flash', thinkingDepth: null })
+    await window.api.roles.setBinding('editor', { endpointId: gemini.id, model: 'gemini-2.5-flash', thinkingDepth: null })
   },
   { key: NS_KEY }
 )
-await page.evaluate(() => localStorage.setItem('nicosoft-studio-state-v1', JSON.stringify({ view: 'app', activeExpert: 'generalist' })))
+await page.evaluate(() => localStorage.setItem('nicosoft-studio-state-v1', JSON.stringify({ view: 'app', activeExpert: 'editor' })))
 await page.reload()
 await page.waitForTimeout(1500)
 
@@ -45,7 +45,7 @@ await page.evaluate(() => {
 })
 await page.waitForTimeout(500)
 const dbAfterSelect = await page.evaluate(async () => {
-  const b = (await window.api.roles.listBindings()).find((x) => x.roleId === 'generalist')
+  const b = (await window.api.roles.listBindings()).find((x) => x.roleId === 'editor')
   return b ? b.thinkingDepth : null
 })
 console.log('db thinkingDepth right after select:', dbAfterSelect)
@@ -57,7 +57,7 @@ const labels = await page.evaluate(() =>
   [...document.querySelectorAll('.cmp-toolbar .cmp-model')].map((p) => p.querySelector('.cmp-model-id')?.textContent?.trim())
 )
 const dbAfterReload = await page.evaluate(async () => {
-  const b = (await window.api.roles.listBindings()).find((x) => x.roleId === 'generalist')
+  const b = (await window.api.roles.listBindings()).find((x) => x.roleId === 'editor')
   return b ? b.thinkingDepth : null
 })
 console.log('after reload — picker:', JSON.stringify(labels), 'db:', dbAfterReload)
