@@ -146,7 +146,7 @@ function NewProjectDialog({ onClose, onCreated }: { onClose: () => void; onCreat
 
   return (
     <div className="overlay" onMouseDown={onClose}>
-      <div className="dialog" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="dialog wide" onMouseDown={(e) => e.stopPropagation()}>
         <div className="dialog-head">
           <span className="dh-title">New Project</span>
           <button className="icon-btn" onClick={onClose}>
@@ -158,8 +158,8 @@ function NewProjectDialog({ onClose, onCreated }: { onClose: () => void; onCreat
             <label className="field-label">Project folder</label>
             <div className="np-path">
               <input className="input mono" value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder="/path/to/your/project" />
-              <button className="btn ghost sm" onClick={pick}>
-                <Icons.folder size={14} /> Browse
+              <button className="btn ghost np-browse" onClick={pick} aria-label="Browse for a folder" title="Browse for a folder">
+                <Icons.folder size={16} />
               </button>
             </div>
           </div>
@@ -168,7 +168,7 @@ function NewProjectDialog({ onClose, onCreated }: { onClose: () => void; onCreat
               What should the team build? <span style={{ color: 'var(--text-4)', fontWeight: 400 }}>· goal</span>
             </label>
             <textarea
-              className="input"
+              className="input np-goal"
               rows={4}
               value={goal}
               onChange={(e) => setGoal(e.target.value)}

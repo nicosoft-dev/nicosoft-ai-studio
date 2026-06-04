@@ -366,8 +366,10 @@
 .dialog-body { padding: 18px; display: flex; flex-direction: column; gap: 15px; overflow-y: auto; flex: 1; min-height: 0; }
 .dialog-foot { display: flex; align-items: center; gap: 9px; padding: 14px 18px; border-top: 1px solid var(--border-1); flex: none; }
 .dialog-foot .df-spacer { flex: 1; }
-.np-path { display: flex; gap: 8px; align-items: center; }
+.np-path { display: flex; gap: 8px; align-items: stretch; }
 .np-path .input { flex: 1; }
+.np-browse { flex: none; width: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.np-goal { height: auto; min-height: 78px; padding: 8px 11px; line-height: 1.5; resize: vertical; }
 
 /* command palette */
 .cmdk {

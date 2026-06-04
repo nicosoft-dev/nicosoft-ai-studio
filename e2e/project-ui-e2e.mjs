@@ -62,6 +62,7 @@ await page.fill('.dialog-body textarea', 'A waitlist landing page with an email 
 const nameInputs = await page.$$('.dialog-body input.input')
 await nameInputs[nameInputs.length - 1].fill('Waitlist page') // explicit name → skips LLM generation
 await page.waitForTimeout(200)
+await page.screenshot({ path: '/tmp/project-ui-newdialog.png' })
 await page.click('.dialog-foot .btn.primary') // Create
 await page.waitForTimeout(1200)
 
