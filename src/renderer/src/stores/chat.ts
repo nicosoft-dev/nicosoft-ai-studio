@@ -48,6 +48,7 @@ export interface ChatMessage {
   // and draw a single dispatch badge spanning consecutive same-chain messages.
   expertId?: string | null
   dispatch?: string[] | null
+  inputTokens?: number // measured prompt (sent) tokens for THIS turn — per-message so collab experts each show their own; drives the finalized readout
 }
 // A server-side tool the API executed (e.g. OpenAI web_search) — carried as a server block, shown as a
 // faint status row (no expand / result; the API ran it, not the loop).
@@ -215,6 +216,7 @@ export const useChat = create<ChatState>((set, get) => {
         if (cur && cur.role === 'assistant') {
           cur.streaming = false
           cur.text = d.text // done is authoritative
+          if (typeof d.inputTokens === 'number') cur.inputTokens = d.inputTokens
         }
         return {
           byConversation: { ...s.byConversation, [meta.convId]: msgs },
@@ -335,7 +337,10 @@ export const useChat = create<ChatState>((set, get) => {
       set((s) => {
         const msgs = (s.byConversation[meta.convId] ?? []).map((m) => ({ ...m }))
         const cur = msgs[msgs.length - 1]
-        if (cur && cur.role === 'assistant') cur.streaming = false
+        if (cur && cur.role === 'assistant') {
+          cur.streaming = false
+          if (typeof d.inputTokens === 'number') cur.inputTokens = d.inputTokens
+        }
         return {
           byConversation: { ...s.byConversation, [meta.convId]: msgs },
           streaming: { ...s.streaming, [meta.convId]: false },
@@ -398,7 +403,7 @@ export const useChat = create<ChatState>((set, get) => {
         // isn't necessarily this step's. step:done text is authoritative over the delta accumulator.
         for (let i = msgs.length - 1; i >= 0; i--) {
           if (msgs[i].role === 'assistant' && msgs[i].streaming && msgs[i].expertId === d.roleId) {
-            msgs[i] = { ...msgs[i], text: d.text, streaming: false }
+            msgs[i] = { ...msgs[i], text: d.text, streaming: false, ...(typeof d.inputTokens === 'number' ? { inputTokens: d.inputTokens } : {}) }
             break
           }
         }
@@ -413,7 +418,10 @@ export const useChat = create<ChatState>((set, get) => {
         const msgs = (s.byConversation[meta.convId] ?? []).map((m) => ({ ...m }))
         // Belt-and-suspenders: clear streaming flag on the last assistant (in case step:done was missed).
         const cur = msgs[msgs.length - 1]
-        if (cur && cur.role === 'assistant') cur.streaming = false
+        if (cur && cur.role === 'assistant') {
+          cur.streaming = false
+          if (cur.inputTokens === undefined && typeof d.inputTokens === 'number') cur.inputTokens = d.inputTokens
+        }
         return {
           byConversation: { ...s.byConversation, [meta.convId]: msgs },
           streaming: { ...s.streaming, [meta.convId]: false },
@@ -645,7 +653,8 @@ export const useChat = create<ChatState>((set, get) => {
           servers: run?.servers.length ? run.servers : undefined,
           citations: run?.citations.length ? run.citations : undefined,
           expertId: m.author === 'user' ? null : m.expertId,
-          dispatch: m.dispatch
+          dispatch: m.dispatch,
+          inputTokens: m.author !== 'user' && m.inputTokens > 0 ? m.inputTokens : undefined
         }
       })
       // Seed the composer readout from the most recent assistant turn's measured prompt tokens.

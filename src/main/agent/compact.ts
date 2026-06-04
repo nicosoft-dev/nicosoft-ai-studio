@@ -66,6 +66,14 @@ export function tokensFromUsage(usage: Usage): number {
   return usage.inTokens + usage.outTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheCreationTokens ?? 0)
 }
 
+// Input tokens actually SENT this turn = non-cached prefix + cache read + cache creation. With prompt
+// caching (Claude OAuth mirrors Claude Code's cache_control), message_start.input_tokens is only the tiny
+// non-cached delta — the bulk lands in cache_read/cache_creation. Summing all three gives the true ↑
+// prompt size for the readout; without it a cache-heavy turn reports a misleadingly tiny ↑ (e.g. 8).
+export function promptTokensFromUsage(usage: Usage): number {
+  return usage.inTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheCreationTokens ?? 0)
+}
+
 export function estimateTokens(messages: AgentMessage[]): number {
   let chars = 0
   for (const m of messages) {

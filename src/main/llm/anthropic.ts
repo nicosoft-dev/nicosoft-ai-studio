@@ -97,7 +97,14 @@ function buildBody(req: ChatRequest): MessagesBody {
 interface AnthropicEvent {
   type?: string
   delta?: { text?: string }
-  message?: { usage?: { input_tokens?: number; output_tokens?: number } }
+  message?: {
+    usage?: {
+      input_tokens?: number
+      output_tokens?: number
+      cache_read_input_tokens?: number
+      cache_creation_input_tokens?: number
+    }
+  }
   usage?: { input_tokens?: number; output_tokens?: number }
 }
 
@@ -130,7 +137,15 @@ export const chatAnthropic: ChatFn = async (req: ChatRequest, onDelta: OnDelta):
         }
       } else if (ev.type === 'message_start') {
         const u = ev.message?.usage
-        if (u && typeof u.input_tokens === 'number') inTokens = u.input_tokens
+        // input_tokens is the NON-cached prefix only; with prompt caching the bulk lands in
+        // cache_read/cache_creation. Sum all three so inTokens reflects the full prompt actually sent
+        // (else cache-heavy turns — e.g. collab doers — report a misleadingly tiny ↑).
+        if (u) {
+          inTokens =
+            (u.input_tokens ?? 0) +
+            (u.cache_read_input_tokens ?? 0) +
+            (u.cache_creation_input_tokens ?? 0)
+        }
         if (u && typeof u.output_tokens === 'number') outTokens = u.output_tokens
       } else if (ev.type === 'message_delta') {
         if (ev.usage && typeof ev.usage.output_tokens === 'number') outTokens = ev.usage.output_tokens

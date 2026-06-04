@@ -13,6 +13,7 @@ import { ulid } from '../db/id'
 import type { AgentContext, RequestPermission, PermissionRequest, PermissionDecision } from '../agent/context'
 import type { AgentLlmEvent } from '../agent/llm'
 import { runAgent, buildToolsParam, type AgentEvent, type AgentResult } from '../agent/loop'
+import { promptTokensFromUsage } from '../agent/compact'
 import { isContentBlock } from '../agent/types'
 import type { AgentMessage, AnyBlock, ServerToolSchema } from '../agent/types'
 import { CORE_TOOLS } from '../agent/registry'
@@ -286,7 +287,7 @@ export async function runAgentLoop(
         break
       }
       if (value.type === 'assistant') {
-        inTokens += value.usage.inTokens
+        inTokens += promptTokensFromUsage(value.usage) // include cache read/creation — see compact.ts
         outTokens += value.usage.outTokens
       }
       log({ t: 'event', runId: loop.runId, event: value })
@@ -437,10 +438,11 @@ export async function runCollabSession(
   hooks: CollabHooks,
   signal: AbortSignal,
   nowMs: () => number,
-): Promise<Map<string, string>> {
+): Promise<Map<string, { text: string; inTokens: number }>> {
   // One service registry per collaboration, shared by all its experts (Flynn starts a backend, Shuri
   // lists + connects). Tree-killed in the finally below when the session ends — no zombie ports survive.
   const registry = new ServiceRegistry()
+  const inTokensByRole = new Map<string, number>() // accumulated prompt tokens per expert → its per-message ↑ readout
   const roster = experts.map((x) => ({ id: x.roleId, name: displayName(x.roleId) ?? x.roleId }))
   const specs: ExpertSpec[] = experts.map((x) => {
     // Per-expert state shared across its turns: the read-file cache + todo list persist as it loops, so it
@@ -494,14 +496,17 @@ export async function runCollabSession(
           onStream: (ev) => hooks.onExpertStream(x.roleId, ev),
         })
         let result!: AgentResult
+        let turnIn = 0
         for (;;) {
           const { value, done } = await gen.next()
           if (done) {
             result = value
             break
           }
+          if (value.type === 'assistant') turnIn += promptTokensFromUsage(value.usage) // incl. cache read/creation
           hooks.onExpertEvent(x.roleId, value)
         }
+        inTokensByRole.set(x.roleId, (inTokensByRole.get(x.roleId) ?? 0) + turnIn)
         return result.messages
       },
     }
@@ -513,7 +518,10 @@ export async function runCollabSession(
     hooks.onServices?.(registry.list())
   }
   try {
-    return await new CollabSession(specs, onEvent, nowMs).run(signal)
+    const texts = await new CollabSession(specs, onEvent, nowMs).run(signal)
+    return new Map(
+      [...texts].map(([roleId, text]): [string, { text: string; inTokens: number }] => [roleId, { text, inTokens: inTokensByRole.get(roleId) ?? 0 }])
+    )
   } finally {
     hooks.onServices?.([])
     registry.dispose() // tree-kill every service the collaboration started — no lingering ports

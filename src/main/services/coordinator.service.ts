@@ -750,18 +750,19 @@ async function runCollaboration(
   const results = await agentService.runCollabSession(input.convId, experts, hooks, signal, () => Date.now())
 
   const outputs: { role: string; text: string }[] = []
-  for (const [roleId, text] of results) {
+  for (const [roleId, { text, inTokens }] of results) {
     if (text) {
       convService.append(input.convId, {
         author: 'expert',
         expertId: roleId,
         model: models.get(roleId) ?? '',
         content: text,
+        inputTokens: inTokens,
         dispatch: fullChain
       })
       outputs.push({ role: roleId, text })
     }
-    cb.onStepDone(roleId, text, 0)
+    cb.onStepDone(roleId, text, inTokens)
   }
   return outputs
 }

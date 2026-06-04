@@ -144,6 +144,9 @@
 .thinking-readout .tr-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--seg-color, var(--accent)); flex: 0 0 auto; animation: tr-breathe 1.4s ease-in-out infinite; }
 .thinking-readout .tr-sep { color: var(--text-4); }
 @keyframes tr-breathe { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+/* finalized per-message token readout: steady dot (the turn is done — nothing is breathing) */
+.thinking-readout.msg-tokens { color: var(--text-4); }
+.thinking-readout.msg-tokens .tr-dot { animation: none; opacity: 0.55; }
 
 /* skeleton */
 .skel-line { height: 11px; border-radius: 4px; background: var(--bg-3); animation: skel 1.4s ease-in-out infinite; margin-bottom: 9px; }
