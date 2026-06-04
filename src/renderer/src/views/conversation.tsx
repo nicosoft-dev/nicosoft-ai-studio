@@ -475,6 +475,18 @@ export function ChatView({ expert, onOpenSettings }: { expert: Expert; onOpenSet
     return () => ro.disconnect()
   }, [activeConv])
 
+  // An approval surfacing should pin to the bottom too. The permission dialog is an OVERLAY, so the
+  // ResizeObserver above never fires for it (it adds no msg-list height) — without this the list stays
+  // put and the latest activity + the action being approved can sit off-screen.
+  useEffect(() => {
+    if (!permission && !(approvals && approvals.length)) return
+    const list = listRef.current
+    if (list) {
+      stickRef.current = true
+      list.scrollTop = list.scrollHeight
+    }
+  }, [permission, approvals])
+
   const openImage = (items: ViewerImage[], index: number): void => setViewer({ items, index })
   const downloadImage = (img: ViewerImage): void => void window.api.media.save(img.url, img.name)
   // Refine: close the viewer, seed the composer with a refine lead-in and focus it. The designer keeps
