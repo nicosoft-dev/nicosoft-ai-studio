@@ -66,6 +66,7 @@ Rules:
 - Use "council" (heavier — multiple rounds of debate) ONLY for high-stakes or genuinely contested decisions where experts should CHALLENGE each other and converge, not just list parallel takes. Reserve it for when the debate is worth the extra cost.
 - Use "collaborate" when 2-3 builder experts must BUILD one thing TOGETHER with live coordination — real multi-part construction where they need each other's work as they go (classically Flynn + Shuri building an app: Shuri calls the API Flynn writes). NOT pipeline (one fully finishes, then the next) and NOT parallel (independent takes, no integration). Only builder roles that run tools (Flynn, Shuri, Amélie, Turing) — never designer/translator/summarizer/email.
 - Between specialists prefer "single"; use "pipeline" only for linear hand-offs (translate→debug, summarize→email) where one's output feeds the next.
+- For a big multi-step build or a brand-new project, prefer orchestrating it ("pipeline" or "collaborate") over a single eager hand-off, and let the FIRST step produce a plan/design (the builder writes it under the project's docs/) before the rest proceed — don't kick off a large build with no plan.
 - Pipeline / parallel / council / collaborate length is 2 or 3 — never more.
 - Never route to yourself (you are Danny, the coordinator) — "direct" is how you take a turn.
 - Use ONLY the names listed above, exact spelling.`

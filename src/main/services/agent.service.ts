@@ -530,15 +530,25 @@ export async function runCollabSession(
 
 // Agent system = the role's base prompt (Engineer's coding prompt, or the role section via
 // buildRolePrompt for other agent roles) + the chat layer's injected context (memories, summary, skills).
-// Plan-mode guidance — every agent role learns when to self-select EnterPlanMode (doc 17).
-const PLAN_GUIDANCE =
-  'When a task is complex or has side effects, call EnterPlanMode first: investigate read-only, then ' +
-  'present a concrete plan via ExitPlanMode for the user to approve before making changes. You decide ' +
-  'when planning is worth it; in plan mode only read-only tools run.'
+// Plan-first doctrine — the HIGHEST-priority rule every agent role sees, ahead of its own base prompt.
+// Big work (new project / large change / major fix) must be planned + documented before any edit; small
+// work is exempt so the agent keeps its judgment. Self-contained (no reliance on the base identity that
+// follows it) so it reads cleanly when prepended.
+const PLAN_FIRST =
+  '# Plan before you build — HIGHEST PRIORITY (this overrides any default urge to start editing right away)\n' +
+  'When you are about to start a NEW project, make a LARGE change (touches many files or the architecture), ' +
+  'or fix a BIG problem in a software project, do NOT jump straight into edits. Plan first:\n' +
+  '1. Investigate read-only, then call EnterPlanMode and lay out a concrete, step-by-step plan; call ' +
+  "ExitPlanMode to get the user's approval BEFORE changing anything (in plan mode only read-only tools run).\n" +
+  "2. Write the plan / design as a markdown doc under the project's `docs/` directory (create `docs/` if it " +
+  'is missing) so the plan is durable, then build against it.\n' +
+  '3. Break large work into ordered steps and orchestrate them one at a time, verifying as you go.\n' +
+  'For small, well-scoped tasks, plain questions, or chitchat, skip all of this and just do the work — you ' +
+  'decide when a task is big enough to warrant a plan. Never let planning become busywork on trivial changes.'
 
 function buildAgentSystem(roleId: string, memories: MemoryRow[], summary: string | null, skillListing: string): string {
   const base = DEV_ROLES.has(roleId) ? DEV_PROMPT[roleId] : (buildRolePrompt(roleId) ?? ENGINEER_SYSTEM_PROMPT)
-  const parts = [base, PLAN_GUIDANCE]
+  const parts = [PLAN_FIRST, base]
   if (memories.length) {
     parts.push(
       "What you've learned about this user (engineering preferences, project conventions):\n" +
