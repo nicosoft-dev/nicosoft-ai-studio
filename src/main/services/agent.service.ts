@@ -135,7 +135,7 @@ export async function run(
 
   // ③ Agent system = ENGINEER prompt + injected memories + summary; seed = history → AgentMessage (Anthropic
   //    needs a user-first list, so drop any leading assistant turns left by a fold boundary).
-  const system = buildAgentSystem(roleId, memories, summary?.content ?? null, skillManager.listingForRole(roleId))
+  const system = buildAgentSystem(roleId, memories, summary?.content ?? null, skillManager.listingForRole(roleId), input.cwd)
   const mapped = conversationToAgentMessages(recent)
   const firstUser = mapped.findIndex((m) => m.role === 'user')
   const seed = firstUser > 0 ? mapped.slice(firstUser) : mapped
@@ -342,7 +342,7 @@ export async function runDispatchedAgent(
   let tools = toolsForAgentRole(d.roleId)
   if (!d.cwd && !DEV_ROLES.has(d.roleId)) tools = tools.filter((t) => t.name !== 'Read')
   const serverTools: ServerToolSchema[] = d.protocol === 'openai' ? [{ type: 'web_search', name: 'web_search' }] : []
-  const system = buildAgentSystem(d.roleId, d.memories, d.summary, skillManager.listingForRole(d.roleId))
+  const system = buildAgentSystem(d.roleId, d.memories, d.summary, skillManager.listingForRole(d.roleId), d.cwd)
 
   let seed: AgentMessage[]
   if (d.includeHistory) {
@@ -409,8 +409,8 @@ export interface CollabHooks {
 // The role's coding/section prompt + a "working as a team" addendum naming the reachable teammates, so the
 // expert knows who to consult and to stay in its own area. Memories/summary are skipped — a collaboration
 // is a fresh shared task, not a continuation of the role's chat history.
-function buildCollabSystem(roleId: string, teammates: { id: string; name: string }[]): string {
-  const base = buildAgentSystem(roleId, [], null, skillManager.listingForRole(roleId))
+function buildCollabSystem(roleId: string, teammates: { id: string; name: string }[], cwd?: string): string {
+  const base = buildAgentSystem(roleId, [], null, skillManager.listingForRole(roleId), cwd)
   const roster = teammates.map((t) => `- ${t.name} (roleId: ${t.id})`).join('\n')
   return (
     base +
@@ -463,6 +463,7 @@ export async function runCollabSession(
     const system = buildCollabSystem(
       x.roleId,
       roster.filter((r) => r.id !== x.roleId),
+      x.cwd,
     )
     const sessionDir = join(homedir(), '.nsai', 'sessions', convId, x.roleId)
     return {
@@ -546,9 +547,48 @@ const PLAN_FIRST =
   'For small, well-scoped tasks, plain questions, or chitchat, skip all of this and just do the work — you ' +
   'decide when a task is big enough to warrant a plan. Never let planning become busywork on trivial changes.'
 
-function buildAgentSystem(roleId: string, memories: MemoryRow[], summary: string | null, skillListing: string): string {
+// Project-convention files (CLAUDE.md / AGENTS.md) from the agent's working dir — the user's
+// project-specific rules. Injected as REFERENCE BELOW the hardcoded system rules (PLAN_FIRST), which
+// always win; on conflict the agent follows the system rule and tells the user. Missing dir → null.
+const CONVENTION_FILES = ['CLAUDE.md', 'AGENTS.md', join('.claude', 'CLAUDE.md')]
+const MAX_CONVENTION_CHARS = 8000
+function readProjectConventions(cwd: string | undefined): string | null {
+  if (!cwd) return null
+  const parts: string[] = []
+  for (const rel of CONVENTION_FILES) {
+    const p = join(cwd, rel)
+    if (!existsSync(p)) continue
+    try {
+      const body = readFileSync(p, 'utf8').trim()
+      if (body) parts.push(`--- ${rel} ---\n${body}`)
+    } catch {
+      /* unreadable → skip */
+    }
+  }
+  if (!parts.length) return null
+  const joined = parts.join('\n\n')
+  return joined.length > MAX_CONVENTION_CHARS ? joined.slice(0, MAX_CONVENTION_CHARS) + '\n…(truncated)' : joined
+}
+
+function buildAgentSystem(
+  roleId: string,
+  memories: MemoryRow[],
+  summary: string | null,
+  skillListing: string,
+  cwd?: string,
+): string {
   const base = DEV_ROLES.has(roleId) ? DEV_PROMPT[roleId] : (buildRolePrompt(roleId) ?? ENGINEER_SYSTEM_PROMPT)
   const parts = [PLAN_FIRST, base]
+  const conventions = readProjectConventions(cwd)
+  if (conventions) {
+    parts.push(
+      '# PROJECT CONVENTIONS (reference)\n' +
+        "The user's project ships these convention files. Follow them for project-specific choices " +
+        '(naming, layout, stack, style). The system rules at the very top take precedence: if a project ' +
+        'convention conflicts with them, follow the system rule and tell the user about the conflict.\n\n' +
+        conventions,
+    )
+  }
   if (memories.length) {
     parts.push(
       "What you've learned about this user (engineering preferences, project conventions):\n" +
