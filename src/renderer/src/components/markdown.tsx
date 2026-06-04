@@ -91,8 +91,15 @@ export function Markdown({ children }: { children: string }): ReactElement {
           pre: ({ children }) => <>{children}</>,
           code({ node: _node, className, children, ...rest }) {
             const match = /language-(\w+)/.exec(className || '')
-            if (!match) return <code className="inline-code" {...rest}>{children}</code>
-            return <CodeBlock lang={match[1]} code={String(children).replace(/\n$/, '')} />
+            const text = String(children)
+            // react-markdown v10 drops the `inline` flag, and a fenced block WITHOUT a language (bare
+            // ```) or an indented block carries no `language-*` class — so className alone can't tell
+            // block from inline. Real inline code is always single-line; anything with a newline is a
+            // block. Treat both as block so directory trees / multi-line snippets keep their line breaks
+            // instead of collapsing onto one line (rendered as inline-code).
+            const isBlock = !!match || text.includes('\n')
+            if (!isBlock) return <code className="inline-code" {...rest}>{children}</code>
+            return <CodeBlock lang={match ? match[1] : 'text'} code={text.replace(/\n$/, '')} />
           }
         }}
       >
