@@ -44,7 +44,7 @@ function fmtElapsed(ms: number): string {
 // The live "thinking" readout shown while a reply streams: a steady role-colored dot (CSS breathes its
 // opacity — no spin) + elapsed · output-token estimate (chars/4, same heuristic Claude Code uses).
 // Tokens/elapsed appear once they're meaningful, so the pure-thinking phase (no text yet) is just the dot.
-function ThinkingReadout({ chars }: { chars: number }): ReactElement {
+function ThinkingReadout({ chars, inputTokens }: { chars: number; inputTokens: number }): ReactElement {
   const startRef = useRef(Date.now())
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
@@ -52,17 +52,21 @@ function ThinkingReadout({ chars }: { chars: number }): ReactElement {
     return () => clearInterval(clock)
   }, [])
   const elapsed = now - startRef.current
-  const tokens = Math.round(chars / 4)
+  const out = Math.round(chars / 4)
+  // ↑ prompt tokens sent up (last measured turn) · ↓ output tokens streaming back (chars/4 estimate).
+  const parts: ReactElement[] = []
+  if (elapsed >= 1000) parts.push(<span>{fmtElapsed(elapsed)}</span>)
+  if (inputTokens > 0) parts.push(<span>↑ {fmtReadoutTokens(inputTokens)}</span>)
+  if (out > 0) parts.push(<span>↓ {fmtReadoutTokens(out)} tokens</span>)
   return (
     <span className="thinking-readout" aria-label="thinking">
       <span className="tr-dot" />
-      {elapsed >= 1000 ? <span>{fmtElapsed(elapsed)}</span> : null}
-      {tokens > 0 ? (
-        <>
-          {elapsed >= 1000 ? <span className="tr-sep">·</span> : null}
-          <span>↓ {fmtReadoutTokens(tokens)} tokens</span>
-        </>
-      ) : null}
+      {parts.map((p, i) => (
+        <Fragment key={i}>
+          {i > 0 ? <span className="tr-sep">·</span> : null}
+          {p}
+        </Fragment>
+      ))}
     </span>
   )
 }
@@ -79,12 +83,14 @@ function ChatSegment({
   msg,
   expert,
   expertById,
-  onOpenImage
+  onOpenImage,
+  inputTokens
 }: {
   msg: ChatMessage
   expert: Expert
   expertById: Record<string, Expert>
   onOpenImage: (items: ViewerImage[], index: number) => void
+  inputTokens: number
 }): ReactElement {
   const isUser = msg.role === 'user'
   // Lookup the per-message expert if Coordinator tagged it; fall back to the prop (the conversation's
@@ -156,7 +162,7 @@ function ChatSegment({
         {msg.tools && msg.tools.length > 0 ? msg.tools.map((t) => <ToolBubble key={t.id} tool={t} />) : null}
         {msg.servers && msg.servers.length > 0 ? msg.servers.map((sv, i) => <ServerBubble key={i} note={sv} />) : null}
         {msg.citations && msg.citations.length > 0 ? <Sources items={msg.citations} /> : null}
-        {msg.streaming ? <ThinkingReadout chars={msg.text.length} /> : null}
+        {msg.streaming ? <ThinkingReadout chars={msg.text.length} inputTokens={inputTokens} /> : null}
       </div>
     </div>
   )
@@ -364,6 +370,7 @@ export function ChatView({ expert, onOpenSettings }: { expert: Expert; onOpenSet
   const { byId: expertById } = useAllExperts()
   const activeConv = chat.activeConv
   const messages = activeConv ? (chat.byConversation[activeConv] ?? []) : []
+  const baseTokens = activeConv ? (chat.contextTokens[activeConv] ?? 0) : 0
   const error = activeConv ? chat.error[activeConv] : null
   const permission = activeConv ? chat.permission[activeConv] : null
   const approvals = activeConv ? chat.approvals[activeConv] : undefined
@@ -432,7 +439,7 @@ export function ChatView({ expert, onOpenSettings }: { expert: Expert; onOpenSet
               return (
                 <Fragment key={m.id}>
                   {showBadge ? <DispatchBadge chain={m.dispatch as string[]} /> : null}
-                  <ChatSegment msg={m} expert={expert} expertById={expertById} onOpenImage={openImage} />
+                  <ChatSegment msg={m} expert={expert} expertById={expertById} onOpenImage={openImage} inputTokens={baseTokens} />
                 </Fragment>
               )
             })

@@ -62,7 +62,10 @@ const PERM_TAMPER = /\b(chmod|chown|chgrp)\b[^\n|;&]*(-R\b|\s777\b|\sa\+|\/(etc|
 function classifyBashCommand(command: string): ApprovalVerdict {
   if (!command.trim()) return { zone: 'green', reason: 'empty command' }
   if (DANGEROUS_CMD.test(command)) return { zone: 'red', reason: 'delete / privilege / destructive system command' }
-  if (NET_EGRESS.test(command)) return { zone: 'red', reason: 'network egress (upload / remote shell / transfer)' }
+  // localhost / loopback targets are dev-server probes (the team testing its own backend), not real
+  // egress → fall through to yellow (auto). Only egress to a remote host is red.
+  if (NET_EGRESS.test(command) && !/\b(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|::1)\b/.test(command))
+    return { zone: 'red', reason: 'network egress (upload / remote shell / transfer)' }
   if (OUT_OF_CWD_WRITE.test(command)) return { zone: 'red', reason: 'write to a system path outside the project' }
   if (PERM_TAMPER.test(command)) return { zone: 'red', reason: 'permission/ownership tampering' }
   // Read-only check last: a dangerous flag wouldn't be read-only anyway, but this keeps the green path tight.

@@ -145,8 +145,10 @@ export function registerCoordinatorHandlers(): void {
               const ev: CoordinatorPermissionRequest = { streamId, permissionId, roleId, toolName: req.toolName, input: req.input, reason: req.reason }
               send('coordinator:permission', ev)
             }),
-          // Unattended-approval audit (doc 19 §8) → chat: a yellow auto-approved note / a red pending card.
+          // Unattended-approval audit (doc 19 §8): only RED (needs-approval) reaches the chat — green/yellow
+          // auto-approvals stay silent (they flooded the thread; user ask). The red card still surfaces.
           onApproval: (e) => {
+            if (e.zone !== 'red') return
             const ev: CoordinatorApprovalEvent = { streamId, ...e }
             send('coordinator:approval', ev)
           },
