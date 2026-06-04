@@ -66,7 +66,8 @@ const r = await page.evaluate(async () => {
   const convs = await window.api.conversations.list()
   const conv = convs.find((c) => c.primaryRoleId === 'generalist')
   const transcript = conv ? await window.api.agent.transcript(conv.id) : {}
-  const calls = Object.values(transcript).flat()
+  // transcript is Record<run_id, { tools, servers, citations }> — collect each run's tool calls
+  const calls = Object.values(transcript).flatMap((run) => run.tools ?? [])
   return { calls: calls.map((t) => ({ name: t.name, input: t.input })) }
 })
 console.log('tool calls:', JSON.stringify(r.calls))
