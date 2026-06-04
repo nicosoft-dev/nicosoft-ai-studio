@@ -10,7 +10,7 @@ import { mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { ulid } from '../db/id'
-import type { AgentContext, RequestPermission, PermissionRequest, PermissionDecision } from '../agent/context'
+import type { AgentContext, RequestPermission, PermissionRequest, PermissionDecision, AskUser } from '../agent/context'
 import type { AgentLlmEvent } from '../agent/llm'
 import { runAgent, buildToolsParam, type AgentEvent, type AgentResult } from '../agent/loop'
 import { promptTokensFromUsage } from '../agent/compact'
@@ -21,6 +21,7 @@ import { ENGINEER_SYSTEM_PROMPT, SHURI_SYSTEM_PROMPT } from '../agent/system-pro
 import { buildRolePrompt, displayName } from '../agent/roles/prompts'
 import { enterPlanModeTool } from '../agent/tools/enter-plan-mode'
 import { exitPlanModeTool } from '../agent/tools/exit-plan-mode'
+import { askUserQuestionTool } from '../agent/tools/ask-user-question'
 import { sendMessageTool, assignTaskTool, waitTool } from '../agent/tools/consult'
 import { CollabSession, type ExpertSpec, type CollabEvent } from '../agent/collab'
 import { ServiceRegistry, type ServiceInfo } from '../agent/service-registry'
@@ -75,13 +76,14 @@ function toolsForAgentRole(roleId: string): Tool[] {
       ? [...CORE_TOOLS]
       : CORE_TOOLS.filter((t) => (ROLE_CORE_TOOLS[roleId] ?? []).includes(t.name))
   const skill = skillManager.skillTool(roleId)
-  return [...core, ...PLAN_TOOLS, ...mcpManager.toolsForRole(roleId), ...(skill ? [skill] : [])]
+  return [...core, ...PLAN_TOOLS, askUserQuestionTool as unknown as Tool, ...mcpManager.toolsForRole(roleId), ...(skill ? [skill] : [])]
 }
 
 export interface AgentCallbacks {
   onStream: (e: AgentLlmEvent) => void // fine-grained deltas (text + tool_use input) for streaming UI
   onEvent: (e: AgentEvent) => void // completed assistant turns + tool_results
   requestPermission: RequestPermission // bridged to the renderer (req, optional cancel signal)
+  askUser?: AskUser // AskUserQuestion: bridged to the renderer; undefined headless (the tool then errors)
 }
 
 export async function run(
@@ -267,6 +269,7 @@ export async function runAgentLoop(
     readFileState: new Map(),
     permissionMode: loop.permissionMode,
     requestPermission: cb.requestPermission,
+    askUser: cb.askUser,
     todos: [],
     sessionDir,
     services: registry,

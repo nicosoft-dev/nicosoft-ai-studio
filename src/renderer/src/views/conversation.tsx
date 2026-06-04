@@ -17,6 +17,7 @@ import { useChat, roleHasAgent, roleHasImageTool, type ChatMessage } from '@/sto
 import { ToolBubble, ServerBubble, Sources } from '@/components/tool-bubble'
 import { Markdown } from '@/components/markdown'
 import { ApprovalDialog } from '@/components/approval-dialog'
+import { QuestionDialog } from '@/components/question-dialog'
 import { ApprovalCards } from '@/components/approval-cards'
 import { useRoleBinding } from '@/lib/use-role-binding'
 import { fileToImage, imagesFromClipboard, type ImageAttachment } from '@/lib/image'
@@ -439,6 +440,7 @@ export function ChatView({ expert, onOpenSettings }: { expert: Expert; onOpenSet
   const baseTokens = activeConv ? (chat.contextTokens[activeConv] ?? 0) : 0
   const error = activeConv ? chat.error[activeConv] : null
   const permission = activeConv ? chat.permission[activeConv] : null
+  const question = activeConv ? chat.question[activeConv] : null
   const approvals = activeConv ? chat.approvals[activeConv] : undefined
   const listRef = useRef<HTMLDivElement>(null)
   // Stick to the bottom while streaming. The flag is maintained from the user's OWN scrolls (onListScroll),
@@ -551,6 +553,9 @@ export function ChatView({ expert, onOpenSettings }: { expert: Expert; onOpenSet
           onAllow={() => chat.respondPermission(activeConv, true)}
           onDeny={() => chat.respondPermission(activeConv, false)}
         />
+      ) : null}
+      {question && activeConv ? (
+        <QuestionDialog prompt={question} onAnswer={(a) => chat.respondQuestion(activeConv, a)} />
       ) : null}
       {viewer ? (
         <ImageViewer

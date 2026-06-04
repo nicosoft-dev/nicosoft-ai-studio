@@ -16,6 +16,9 @@ import type {
   AgentPermissionRequest,
   AgentPermissionResponse,
   AgentPermissionCancel,
+  AgentQuestionRequest,
+  AgentQuestionResponse,
+  AgentQuestionCancel,
   AgentDone,
   AgentErrorDto,
   ToolCallDto,
@@ -130,12 +133,16 @@ const api = {
     compact: (convId: string): Promise<void> => ipcRenderer.invoke('agent:compact', convId),
     respondPermission: (resp: AgentPermissionResponse): Promise<void> =>
       ipcRenderer.invoke('agent:permission:respond', resp),
+    respondQuestion: (resp: AgentQuestionResponse): Promise<void> =>
+      ipcRenderer.invoke('agent:question:respond', resp),
     onDelta: (cb: (d: AgentTextDelta) => void): (() => void) => agentListen('agent:delta', cb),
     onToolStart: (cb: (d: AgentToolStart) => void): (() => void) => agentListen('agent:tool:start', cb),
     onAssistant: (cb: (d: AgentAssistant) => void): (() => void) => agentListen('agent:assistant', cb),
     onResults: (cb: (d: AgentToolResults) => void): (() => void) => agentListen('agent:results', cb),
     onPermission: (cb: (d: AgentPermissionRequest) => void): (() => void) => agentListen('agent:permission', cb),
     onPermissionCancel: (cb: (d: AgentPermissionCancel) => void): (() => void) => agentListen('agent:permission:cancel', cb),
+    onQuestion: (cb: (d: AgentQuestionRequest) => void): (() => void) => agentListen('agent:question', cb),
+    onQuestionCancel: (cb: (d: AgentQuestionCancel) => void): (() => void) => agentListen('agent:question:cancel', cb),
     onDone: (cb: (d: AgentDone) => void): (() => void) => agentListen('agent:done', cb),
     onError: (cb: (d: AgentErrorDto) => void): (() => void) => agentListen('agent:error', cb),
     transcript: (convId: string): Promise<Record<string, RunTranscript>> =>

@@ -147,6 +147,23 @@ export interface AgentPermissionCancel {
   streamId: string
   permissionId: string
 }
+// AskUserQuestion: agent → renderer question, and the renderer's chosen answer back. questionId alone
+// locates the pending question (same pattern as permissionId).
+export interface AgentQuestionRequest {
+  streamId: string
+  questionId: string
+  question: string
+  header?: string
+  options: string[]
+}
+export interface AgentQuestionResponse {
+  questionId: string
+  answer: string
+}
+export interface AgentQuestionCancel {
+  streamId: string
+  questionId: string
+}
 export interface AgentDone {
   streamId: string
   reason: string

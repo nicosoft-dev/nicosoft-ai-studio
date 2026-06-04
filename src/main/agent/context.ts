@@ -30,6 +30,16 @@ export interface PermissionDecision {
 // signal lets the caller cancel a pending prompt (turn/run abort) so it denies instead of hanging.
 export type RequestPermission = (req: PermissionRequest, signal?: AbortSignal) => Promise<PermissionDecision>
 
+// AskUserQuestion: the agent pauses and asks the user a short multiple-choice question to clarify intent
+// before acting. The UI shows a question dialog and blocks on the user; a headless run auto-answers (first
+// option). Returns the chosen option text. The signal cancels a pending question on a run/turn abort.
+export interface UserQuestion {
+  question: string
+  header?: string
+  options: string[]
+}
+export type AskUser = (q: UserQuestion, signal?: AbortSignal) => Promise<string>
+
 export interface TodoItem {
   content: string
   status: 'pending' | 'in_progress' | 'completed'
@@ -49,6 +59,9 @@ export interface AgentContext {
   // persists across turns (the loop re-reads it when assembling each turn's context).
   setPermissionMode?: (mode: PermissionMode) => void
   requestPermission: RequestPermission
+  // AskUserQuestion: ask the user to clarify intent (multiple-choice). Set by the IPC layer; undefined in
+  // headless / sub-agent contexts where there's no user to ask (the tool then errors).
+  askUser?: AskUser
   todos: TodoItem[] // the agent's working todo list (TodoWrite replaces it); UI renders it in H4
   spawnSubAgent?: SpawnSubAgent // set by runAgent for the Task tool; undefined inside a sub-agent
   sessionDir: string // large tool results persist to <sessionDir>/tool-results/<tool_use_id>.txt

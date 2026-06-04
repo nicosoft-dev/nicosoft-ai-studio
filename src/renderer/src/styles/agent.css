@@ -194,6 +194,18 @@
 .ap-deny kbd { background: var(--bg-3); }
 .ap-allow kbd { background: rgba(255, 255, 255, 0.18); }
 
+/* AskUserQuestion dialog — reuses .approval-overlay / .approval-card; multiple-choice options + Other. */
+.q-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.q-tag { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent); background: var(--bg-3); border-radius: 5px; padding: 2px 7px; }
+.q-question { font-size: 14px; color: var(--text-1); line-height: 1.5; margin-bottom: 14px; }
+.q-options { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.q-option { display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; border-radius: var(--r-md); background: var(--bg-2); border: 1px solid var(--border-1); color: var(--text-1); cursor: pointer; font-size: 13.5px; transition: border-color 0.12s, background 0.12s; }
+.q-option:hover { border-color: var(--accent); background: var(--bg-3); }
+.q-num { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 5px; background: var(--bg-3); color: var(--text-3); font-size: 11px; font-family: var(--mono); flex: 0 0 auto; }
+.q-opt-text { flex: 1; }
+.q-other { width: 100%; box-sizing: border-box; background: var(--bg-2); border: 1px solid var(--border-1); border-radius: var(--r-md); padding: 9px 12px; color: var(--text-1); font-size: 13px; }
+.q-other:focus { outline: none; border-color: var(--accent); }
+
 /* ExitPlanMode variant — present the model's plan for approval (not a generic tool prompt). */
 .approval-card.ap-plan { max-width: 560px; }
 .ap-plan .ap-icon { color: var(--accent); }

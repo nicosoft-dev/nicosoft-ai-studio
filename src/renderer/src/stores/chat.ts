@@ -68,6 +68,15 @@ export interface PermissionPrompt {
   roleId?: string
 }
 
+// AskUserQuestion prompt — the agent paused to ask the user to clarify intent (multiple choice).
+export interface QuestionPrompt {
+  questionId: string
+  question: string
+  header?: string
+  options: string[]
+  roleId?: string
+}
+
 // A coordinator unattended-approval card shown in chat (doc 19 §8). yellow = auto-approved (a note);
 // red = hard-denied + recorded as pending (pendingId) — the user approves (→ replay) or rejects it.
 export interface ApprovalCard {
@@ -101,6 +110,7 @@ interface ChatState {
   streaming: Record<string, boolean>
   error: Record<string, string | null>
   permission: Record<string, PermissionPrompt | null> // per-conversation (future: parallel agent runs)
+  question: Record<string, QuestionPrompt | null> // per-conversation AskUserQuestion prompt
   approvals: Record<string, ApprovalCard[]> // per-conversation coordinator approval cards (yellow notes + red pending)
   contextTokens: Record<string, number> // per-conversation exact prompt tokens of the last sent turn
   loadConversations: () => Promise<void>
@@ -109,6 +119,7 @@ interface ChatState {
   send: (opts: SendOpts) => Promise<void>
   stop: () => void
   respondPermission: (convId: string, allow: boolean) => void
+  respondQuestion: (convId: string, answer: string) => void
   approveApproval: (convId: string, pendingId: string) => Promise<void>
   rejectApproval: (convId: string, pendingId: string) => void
   removeConversation: (convId: string) => Promise<void>
@@ -329,6 +340,18 @@ export const useChat = create<ChatState>((set, get) => {
       const meta = agentMeta.get(d.streamId)
       if (!meta) return
       set((s) => (s.permission[meta.convId]?.permissionId === d.permissionId ? { permission: { ...s.permission, [meta.convId]: null } } : {}))
+    })
+    ag.onQuestion((d) => {
+      const meta = agentMeta.get(d.streamId)
+      if (!meta) return
+      set((s) => ({
+        question: { ...s.question, [meta.convId]: { questionId: d.questionId, question: d.question, header: d.header, options: d.options, roleId: meta.expertId } }
+      }))
+    })
+    ag.onQuestionCancel((d) => {
+      const meta = agentMeta.get(d.streamId)
+      if (!meta) return
+      set((s) => (s.question[meta.convId]?.questionId === d.questionId ? { question: { ...s.question, [meta.convId]: null } } : {}))
     })
     ag.onDone((d) => {
       const meta = agentMeta.get(d.streamId)
@@ -635,6 +658,7 @@ export const useChat = create<ChatState>((set, get) => {
     streaming: {},
     error: {},
     permission: {},
+    question: {},
     approvals: {},
     contextTokens: {},
 
@@ -857,7 +881,7 @@ export const useChat = create<ChatState>((set, get) => {
       }
       // Also clear any pending approval: stop just deleted the agentMeta, so the backend's done/cancel
       // events would meta-miss and leave the ApprovalDialog stuck on screen otherwise.
-      set((s) => ({ streaming: { ...s.streaming, [cid]: false }, permission: { ...s.permission, [cid]: null } }))
+      set((s) => ({ streaming: { ...s.streaming, [cid]: false }, permission: { ...s.permission, [cid]: null }, question: { ...s.question, [cid]: null } }))
     },
 
     respondPermission: (convId, allow) => {
@@ -869,6 +893,13 @@ export const useChat = create<ChatState>((set, get) => {
       if (p.source === 'coordinator') void window.api.coordinator.respondPermission(resp)
       else void window.api.agent.respondPermission(resp)
       set((s) => ({ permission: { ...s.permission, [convId]: null } }))
+    },
+
+    respondQuestion: (convId, answer) => {
+      const q = get().question[convId]
+      if (!q) return
+      void window.api.agent.respondQuestion({ questionId: q.questionId, answer })
+      set((s) => ({ question: { ...s.question, [convId]: null } }))
     },
 
     approveApproval: async (convId, pendingId) => {

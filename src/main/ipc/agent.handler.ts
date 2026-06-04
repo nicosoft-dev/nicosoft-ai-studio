@@ -5,7 +5,7 @@ import { isContentBlock } from '../agent/types'
 import { LlmError } from '../llm/types'
 import * as agentService from '../services/agent.service'
 import * as compressionService from '../services/compression.service'
-import type { AgentBlockDto, AgentPermissionResponse, AgentResultDto, AgentRunInput } from './contracts'
+import type { AgentBlockDto, AgentPermissionResponse, AgentQuestionResponse, AgentResultDto, AgentRunInput } from './contracts'
 
 // Streaming agent over IPC: `agent:run` starts a run, returns its streamId, and pushes events on
 // `agent:delta` (text) / `agent:assistant` (a finished turn's blocks) / `agent:results` (tool
@@ -16,6 +16,9 @@ const streams = new Map<string, { controller: AbortController; sender: WebConten
 const pendingPermissions = new Map<string, (d: PermissionDecision) => void>()
 // permissionIds belonging to each run, so a terminal event can deny + clear any still-open prompts.
 const pendingByStream = new Map<string, Set<string>>()
+// AskUserQuestion: pending questions keyed by questionId; settle() resolves the loop's askUser promise.
+const pendingQuestions = new Map<string, (answer: string) => void>()
+const pendingQByStream = new Map<string, Set<string>>()
 
 // Resolve (deny) every still-pending permission for a run and drop its bucket — called on any terminal
 // event so a prompt the renderer never answered can't linger in the maps forever.
@@ -24,6 +27,11 @@ function sweepStream(streamId: string): void {
   if (ids) {
     for (const id of ids) pendingPermissions.get(id)?.({ allow: false })
     pendingByStream.delete(streamId)
+  }
+  const qids = pendingQByStream.get(streamId)
+  if (qids) {
+    for (const id of qids) pendingQuestions.get(id)?.('(no answer — the run ended)')
+    pendingQByStream.delete(streamId)
   }
 }
 
@@ -34,6 +42,7 @@ export function registerAgentHandlers(): void {
     const sender = e.sender
     streams.set(streamId, { controller, sender })
     pendingByStream.set(streamId, new Set())
+    pendingQByStream.set(streamId, new Set())
 
     // If the renderer goes away without answering a prompt or calling agent:stop, abort the run so the
     // loop unwinds instead of hanging forever on a pending permission (which would pin the
@@ -113,6 +122,23 @@ export function registerAgentHandlers(): void {
               signal?.addEventListener('abort', onAbort, { once: true })
               send('agent:permission', { streamId, permissionId, toolName: req.toolName, input: req.input, reason: req.reason })
             }),
+          askUser: (q, signal) =>
+            new Promise<string>((resolve) => {
+              const questionId = ulid()
+              const settle = (answer: string, fromAbort = false): void => {
+                pendingQByStream.get(streamId)?.delete(questionId)
+                if (pendingQuestions.delete(questionId)) {
+                  if (fromAbort) send('agent:question:cancel', { streamId, questionId })
+                  resolve(answer)
+                }
+              }
+              pendingQuestions.set(questionId, (answer) => settle(answer))
+              pendingQByStream.get(streamId)?.add(questionId)
+              const onAbort = (): void => settle('(question cancelled)', true)
+              controller.signal.addEventListener('abort', onAbort, { once: true })
+              signal?.addEventListener('abort', onAbort, { once: true })
+              send('agent:question', { streamId, questionId, question: q.question, header: q.header, options: q.options })
+            }),
         },
         controller.signal,
       )
@@ -141,6 +167,10 @@ export function registerAgentHandlers(): void {
 
   ipcMain.handle('agent:permission:respond', (_e, resp: AgentPermissionResponse) => {
     pendingPermissions.get(resp.permissionId)?.({ allow: resp.allow, updatedInput: resp.updatedInput })
+  })
+
+  ipcMain.handle('agent:question:respond', (_e, resp: AgentQuestionResponse) => {
+    pendingQuestions.get(resp.questionId)?.(resp.answer)
   })
 
   // Rebuild tool cards for a past conversation from its transcript (keyed by run_id).
