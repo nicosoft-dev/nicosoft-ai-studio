@@ -1420,8 +1420,8 @@
 .wb-lane-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-3); }
 .wb-lane-status .wb-st-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--lane); }
 .wb-lane-status.running .wb-st-dot { animation: pulse-soft 1.4s ease-in-out infinite; }
-.wb-lane-status.done { color: var(--text-4); }
-.wb-lane-status.done .wb-st-dot { background: var(--text-4); }
+.wb-lane-status.done { color: var(--success); }
+.wb-lane-status.done .wb-st-dot { background: var(--success); }
 .wb-lane-status.blocked { color: var(--error); }
 .wb-lane-status.blocked .wb-st-dot { background: var(--error); animation: pulse-soft 1s ease-in-out infinite; }
 

@@ -583,7 +583,7 @@ function ProjectDetail({
             <span className="wb-bh-spacer" />
             <span className="wb-legend">
               <span><i style={{ background: 'var(--accent)' }} /> running</span>
-              <span><i style={{ background: 'var(--text-4)' }} /> done</span>
+              <span><i style={{ background: 'var(--success)' }} /> done</span>
               <span><i style={{ background: 'var(--error)' }} /> needs approval</span>
             </span>
           </div>

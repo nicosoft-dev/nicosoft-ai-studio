@@ -27,7 +27,8 @@ function seed() {
   db.prepare('DELETE FROM projects WHERE id=?').run(PID)
   db.prepare('INSERT INTO projects (id,title,goal,cwd,phase,created_at,updated_at) VALUES (?,?,?,?,?,?,?)').run(PID, 'Tool timeline e2e', 'seeded', null, 'executing', now, now)
   for (const [i, r] of ['engineer', 'shuri'].entries())
-    db.prepare("INSERT INTO project_tasks (id,project_id,step_no,title,assignee_role_id,deps,status,output,created_at) VALUES (?,?,?,?,?,'[]','doing',NULL,?)").run('tt-task-' + i, PID, i + 1, r + ' work', r, now)
+    // shuri done → its lane status renders 'done' (success color); engineer doing → 'running'
+    db.prepare("INSERT INTO project_tasks (id,project_id,step_no,title,assignee_role_id,deps,status,output,created_at) VALUES (?,?,?,?,?,'[]',?,NULL,?)").run('tt-task-' + i, PID, i + 1, r + ' work', r, r === 'shuri' ? 'done' : 'doing', now)
   const evs = [
     ['engineer', 'Read', 'server.js', 'green'], ['engineer', 'Write', 'server.js', 'green'], ['engineer', 'Bash', 'node test.js', 'yellow'],
     ['engineer', 'Edit', 'server.js', 'green'], ['engineer', 'Bash', 'rm -rf /tmp/x', 'red'], ['engineer', 'Read', 'package.json', 'green'],
@@ -66,6 +67,18 @@ const geo = await page.evaluate(() => ({
   gutterSticky: getComputedStyle(document.querySelector('.wb-gutter')).position === 'sticky',
   orchScrollX: (() => { const o = document.querySelector('.wb-orch'); return o ? o.scrollWidth - o.clientWidth : 0 })(),
   lanes: document.querySelectorAll('.wb-lane').length,
+  // a 'done' lane status must use the success color (not gray) — compare to a --success probe
+  doneColor: (() => {
+    const ds = document.querySelector('.wb-lane[data-role="shuri"] .wb-lane-status.done')
+    if (!ds) return 'no-done'
+    const probe = document.createElement('span')
+    probe.style.color = 'var(--success)'
+    document.body.appendChild(probe)
+    const want = getComputedStyle(probe).color
+    const got = getComputedStyle(ds).color
+    probe.remove()
+    return got === want ? 'success' : `mismatch got=${got} want=${want}`
+  })(),
 }))
 console.log(JSON.stringify(geo, null, 2))
 await page.screenshot({ path: '/tmp/orch-tools.png' })
@@ -81,5 +94,6 @@ assert.ok(geo.connectors > 0, 'cards joined by .wb-conn connectors')
 assert.ok(geo.gutterSticky, 'lane gutters are sticky (stay while the track scrolls)')
 assert.equal(geo.lanes, 3, `3 lanes: coordinator + 2 doers (got ${geo.lanes})`)
 assert.ok(geo.orchScrollX > 0, `orchestration scrolls horizontally as one region (overflow ${geo.orchScrollX}px)`)
-console.log('✓ orchestration 1:1 — conductor ribbon + event cards + zone tags + connectors + sticky gutters + single horizontal scroll')
+assert.equal(geo.doneColor, 'success', `a done lane status uses the success color (${geo.doneColor})`)
+console.log('✓ orchestration 1:1 — conductor ribbon + event cards + zone tags + connectors + sticky gutters + single horizontal scroll + done=success')
 process.exit(0)
