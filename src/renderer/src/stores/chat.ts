@@ -284,11 +284,15 @@ export const useChat = create<ChatState>((set, get) => {
         cur.servers = d.blocks
           .filter((b): b is { type: 'server'; serverType: string; query?: string; url?: string } => b.type === 'server' && SHOWN_SERVER_BLOCKS.has(b.serverType))
           .map((b) => ({ serverType: b.serverType, query: b.query, url: b.url }))
-        // Aggregate web_search url citations across the turn's text blocks (deduped) → the Sources list.
+        // Sources = the answer's url citations, or — when the model returns none — the sites web_search
+        // actually visited (open_page). Some web_search responses carry visited pages but no inline
+        // url_citation annotations, so without this fallback the Sources list would be empty.
         const seenCite = new Set<string>()
-        const cites = d.blocks
-          .flatMap((b) => (b.type === 'text' ? (b.citations ?? []) : []))
-          .filter((c) => (seenCite.has(c.url) ? false : (seenCite.add(c.url), true)))
+        const textCites = d.blocks.flatMap((b) => (b.type === 'text' ? (b.citations ?? []) : []))
+        const visited = d.blocks.flatMap((b) =>
+          b.type === 'server' && b.serverType === 'web_search_call' && b.url ? [{ url: b.url }] : []
+        )
+        const cites = (textCites.length ? textCites : visited).filter((c) => (seenCite.has(c.url) ? false : (seenCite.add(c.url), true)))
         cur.citations = cites.length ? cites : undefined
         cur.streaming = false // turn complete; the next turn (after results) starts a new message
         return { byConversation: { ...s.byConversation, [meta.convId]: msgs } }
@@ -469,9 +473,13 @@ export const useChat = create<ChatState>((set, get) => {
               .map((b) => ({ serverType: b.serverType, query: b.query, url: b.url }))
             if (newServers.length) m.servers = [...(m.servers ?? []), ...newServers]
             const seenCite = new Set((m.citations ?? []).map((c) => c.url))
-            const newCites = d.blocks
-              .flatMap((b) => (b.type === 'text' ? (b.citations ?? []) : []))
-              .filter((c) => (seenCite.has(c.url) ? false : (seenCite.add(c.url), true)))
+            const textCites = d.blocks.flatMap((b) => (b.type === 'text' ? (b.citations ?? []) : []))
+            const visited = d.blocks.flatMap((b) =>
+              b.type === 'server' && b.serverType === 'web_search_call' && b.url ? [{ url: b.url }] : []
+            )
+            // prefer url citations; fall back to visited sites only when the message has no citations yet
+            const src = textCites.length || (m.citations?.length ?? 0) > 0 ? textCites : visited
+            const newCites = src.filter((c) => (seenCite.has(c.url) ? false : (seenCite.add(c.url), true)))
             if (newCites.length) m.citations = [...(m.citations ?? []), ...newCites]
             msgs[i] = m
             break

@@ -69,8 +69,9 @@ console.log(info.answer.slice(0, 280))
 const ui = await page.evaluate(() => {
   const bubbles = [...document.querySelectorAll('.server-bubble')].map((e) => e.textContent?.replace(/\s+/g, ' ').trim())
   const visited = [...document.querySelectorAll('.server-bubble.sb-link')].map((e) => e.getAttribute('href'))
-  const sources = [...document.querySelectorAll('.msg-sources .ms-item')].map((e) => ({
-    title: e.querySelector('.ms-title')?.textContent,
+  const sources = [...document.querySelectorAll('.msg-sources .ms-chip')].map((e) => ({
+    host: e.querySelector('.ms-card-host')?.textContent,
+    title: e.querySelector('.ms-card-title')?.textContent,
     href: e.getAttribute('href')
   }))
   return { bubbles, visited, sources }
