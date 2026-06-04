@@ -201,19 +201,19 @@ const ENDPOINT_HEALTH: EndpointHealth[] = [
 // The real key lives in the OS keychain (Batch 2), never in source; this masked tail is display-only.
 const ENDPOINTS: EndpointRow[] = [
   { name: 'Anthropic', proto: 'anthropic', status: 'healthy', models: ['nicosoft/claude-sonnet-4-6', 'nicosoft/claude-haiku-4-5-20251001'], key: '••••••8lHs', baseURL: 'https://api.nicosoft.ai' },
-  { name: 'OpenAI', proto: 'openai', status: 'healthy', models: ['nicosoft/gpt-5.4-mini', 'nicosoft/gpt-5.4'], key: '••••••8lHs', baseURL: 'https://api.nicosoft.ai' },
+  { name: 'OpenAI', proto: 'openai', status: 'healthy', models: ['nicosoft/gpt-5.5', 'nicosoft/gpt-5-mini'], key: '••••••8lHs', baseURL: 'https://api.nicosoft.ai' },
   { name: 'Google Gemini', proto: 'gemini', status: 'healthy', models: ['gemini-2.5-flash', 'gemini-2.5-pro', 'imagen-4'], key: '••••••8lHs', baseURL: 'https://api.nicosoft.ai' }
 ]
 
 const ROLE_BINDINGS: RoleBinding[] = [
   { id: 'coordinator', family: 'anthropic', model: 'nicosoft/claude-haiku-4-5-20251001' },
-  { id: 'generalist', family: 'openai', model: 'nicosoft/gpt-5.4-mini' },
+  { id: 'generalist', family: 'openai', model: 'nicosoft/gpt-5.5' },
   { id: 'engineer', family: 'anthropic', model: 'nicosoft/claude-sonnet-4-6' },
   { id: 'designer', family: 'gemini', model: 'gemini-pro-latest' },
   { id: 'translator', family: 'gemini', model: 'gemini-flash-latest' },
   { id: 'editor', family: 'gemini', model: 'gemini-pro-latest' },
-  { id: 'analyst', family: 'openai', model: 'nicosoft/gpt-5.4' },
-  { id: 'scheduler', family: 'openai', model: 'nicosoft/gpt-5.4-mini' }
+  { id: 'analyst', family: 'openai', model: 'nicosoft/gpt-5.5' },
+  { id: 'scheduler', family: 'openai', model: 'nicosoft/gpt-5-mini' }
 ]
 
 const GREETINGS: Record<string, Greeting> = {
