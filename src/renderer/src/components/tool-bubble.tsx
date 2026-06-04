@@ -136,23 +136,67 @@ export function ServerBubble({ note }: { note: ServerNote }): ReactElement {
   )
 }
 
-// Sources — the web_search citations behind an answer (which site each part drew on). Clickable; opens
-// in the browser. Rendered under the assistant's message.
+// Bare hostname (no scheme / www) — the source's display name.
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return url
+  }
+}
+
+// Favicon for a source, via Google's favicon service; falls back to a globe glyph if it fails to load.
+function Favicon({ url, size }: { url: string; size: number }): ReactElement {
+  const [failed, setFailed] = useState(false)
+  let host = ''
+  try {
+    host = new URL(url).hostname
+  } catch {
+    /* malformed url */
+  }
+  if (!host || failed) {
+    return (
+      <span className="ms-fav ms-fav-fb" style={{ width: size, height: size }}>
+        <Icons.globe size={Math.round(size * 0.7)} />
+      </span>
+    )
+  }
+  return (
+    <img
+      className="ms-fav"
+      src={`https://www.google.com/s2/favicons?domain=${host}&sz=64`}
+      style={{ width: size, height: size }}
+      alt=""
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  )
+}
+
+// Sources — the web_search citations behind an answer, as a compact favicon cluster + a "Sources" label.
+// Hovering a favicon reveals a card (site · title · url); clicking opens the page in the browser. Rendered
+// under the assistant's message.
 export function Sources({ items }: { items: { url: string; title?: string }[] }): ReactElement {
   return (
     <div className="msg-sources">
-      <div className="ms-label">
-        <Icons.link size={12} /> Sources
-      </div>
-      <div className="ms-list">
+      <div className="ms-chips">
         {items.map((c, i) => (
-          <a key={i} className="ms-item" href={c.url} target="_blank" rel="noreferrer" title={c.url}>
-            <span className="ms-num">{i + 1}</span>
-            <span className="ms-title">{c.title || prettyUrl(c.url)}</span>
-            <span className="ms-host">{prettyUrl(c.url)}</span>
+          <a key={i} className="ms-chip" href={c.url} target="_blank" rel="noreferrer" style={{ zIndex: items.length - i }}>
+            <Favicon url={c.url} size={16} />
+            <span className="ms-card" role="tooltip">
+              <span className="ms-card-head">
+                <Favicon url={c.url} size={15} />
+                <span className="ms-card-host">{hostOf(c.url)}</span>
+              </span>
+              {c.title ? <span className="ms-card-title">{c.title}</span> : null}
+              <span className="ms-card-url">{prettyUrl(c.url)}</span>
+            </span>
           </a>
         ))}
       </div>
+      <span className="ms-label">
+        <Icons.link size={12} /> Sources
+      </span>
     </div>
   )
 }

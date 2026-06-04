@@ -90,30 +90,35 @@
 .server-bubble.sb-link:hover .sb-query { color: var(--text-2); text-decoration: underline; }
 .server-bubble.sb-link:hover svg { color: var(--text-3); }
 
-/* Sources — web_search citations under an answer (which sites each part drew on). Clickable. */
-.msg-sources { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-1); }
-.ms-label {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
-  color: var(--text-4); margin-bottom: 7px;
+/* Sources — web_search citations under an answer, as a compact favicon cluster + "Sources" label.
+   Hover a favicon → a card (site · title · url); click → opens the page in the browser. */
+.msg-sources { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-1); display: flex; align-items: center; gap: 9px; }
+.ms-chips { display: inline-flex; align-items: center; }
+.ms-chip {
+  position: relative; flex: 0 0 auto; width: 24px; height: 24px; margin-left: -6px;
+  border-radius: 50%; background: var(--bg-2); border: 1px solid var(--border-2);
+  display: inline-flex; align-items: center; justify-content: center; transition: transform 0.1s;
 }
+.ms-chip:first-child { margin-left: 0; }
+.ms-chip:hover { transform: translateY(-2px); z-index: 60 !important; }
+.ms-fav { width: 16px; height: 16px; border-radius: 3px; object-fit: contain; display: block; background: var(--bg-3); }
+.ms-fav-fb { display: inline-flex; align-items: center; justify-content: center; color: var(--text-4); background: transparent; }
+.ms-label { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-4); }
 .ms-label svg { color: var(--text-4); }
-.ms-list { display: flex; flex-direction: column; gap: 4px; }
-.ms-item {
-  display: flex; align-items: center; gap: 9px;
-  padding: 5px 8px; border-radius: var(--r-sm);
-  text-decoration: none; color: var(--text-2); font-size: 12.5px;
-  min-width: 0; transition: background 0.12s;
+
+/* hover card — opens upward over the message content; left-anchored to the cluster */
+.ms-card {
+  position: absolute; bottom: calc(100% + 9px); left: -8px; width: 264px; display: block;
+  padding: 10px 11px; text-align: left;
+  background: var(--bg-2); border: 1px solid var(--border-2); border-radius: 9px; box-shadow: var(--shadow-float);
+  opacity: 0; visibility: hidden; pointer-events: none; transform: translateY(4px);
+  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s; z-index: 61;
 }
-.ms-item:hover { background: var(--bg-2); }
-.ms-num {
-  flex: 0 0 auto; width: 17px; height: 17px; border-radius: 4px;
-  background: var(--bg-3); color: var(--text-4);
-  font-size: 10.5px; display: inline-flex; align-items: center; justify-content: center;
-}
-.ms-title { color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
-.ms-host { color: var(--text-4); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; min-width: 0; }
-.ms-item:hover .ms-host { color: var(--text-3); }
+.ms-chip:hover .ms-card { opacity: 1; visibility: visible; pointer-events: auto; transform: translateY(0); }
+.ms-card-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.ms-card-host { font-size: 12px; font-weight: 600; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ms-card-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 12.5px; color: var(--text-1); line-height: 1.4; margin-bottom: 5px; }
+.ms-card-url { display: block; font-size: 11px; color: var(--text-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* — Diff (inside a tool bubble for Edit / Write / MultiEdit) — */
 .diff { font-family: var(--mono); font-size: 12.5px; line-height: 1.65; padding: 6px 0; }
