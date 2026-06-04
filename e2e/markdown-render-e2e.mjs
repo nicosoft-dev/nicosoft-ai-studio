@@ -51,19 +51,23 @@ await page.waitForTimeout(1500)
 const row = page.locator('.hist-row', { hasText: 'MD Render Test' }).first()
 await row.waitFor({ timeout: 5000 })
 await row.click()
-await page.waitForTimeout(1500)
+await page.waitForTimeout(1000)
+await page.waitForSelector('.code-block .shiki', { timeout: 8000 }).catch(() => {}) // shiki highlights async
+await page.waitForTimeout(500)
 
 const dom = await page.evaluate(() => {
   const codeEls = [...document.querySelectorAll('.md code, .md pre')]
   const find = (needle) => {
     const el = codeEls.find((e) => (e.textContent || '').includes(needle))
     if (!el) return null
+    const block = el.closest('.code-block')
     return {
       tag: el.tagName,
-      cls: el.className,
       isInline: el.classList.contains('inline-code') || !!el.closest('.inline-code'),
-      inBlock: !!el.closest('.code-block') || el.tagName === 'PRE' || !!el.closest('pre'),
+      inBlock: !!block || el.tagName === 'PRE' || !!el.closest('pre'),
       multiline: (el.textContent || '').includes('\n'),
+      lang: block ? block.querySelector('.code-lang')?.textContent ?? null : null,
+      highlighted: !!(block && block.querySelector('.shiki') && !block.querySelector('.code-plain')),
       height: Math.round(el.getBoundingClientRect().height),
     }
   }
@@ -85,6 +89,8 @@ else {
   if (!dom.tree.multiline) fails.push('directory tree lost its line breaks')
 }
 if (dom.indented && dom.indented.isInline) fails.push('indented block rendered as inline-code')
+if (dom.indented && dom.indented.lang !== 'javascript') fails.push(`indented JS block not language-detected (lang=${dom.indented && dom.indented.lang})`)
+if (dom.indented && !dom.indented.highlighted) fails.push('indented JS block not syntax-highlighted')
 if (!dom.inlineCodes.some((t) => t === 'foo.js')) fails.push('inline `foo.js` regressed (not inline anymore)')
 if (dom.inlineCodes.some((t) => (t || '').includes('package.json'))) fails.push('tree leaked into an inline-code span')
 
