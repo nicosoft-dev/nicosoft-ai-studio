@@ -457,6 +457,7 @@ function ProjectDetail({
   const [convId, setConvId] = useState<string | null>(null)
   const [dannyReply, setDannyReply] = useState('')
   const [dockExpanded, setDockExpanded] = useState(false)
+  const [goalExpanded, setGoalExpanded] = useState(false)
   const [running, setRunning] = useState(false)
   const [draft, setDraft] = useState('')
   const [services, setServices] = useState<{ name: string; port: number | null; status: string }[]>([])
@@ -550,7 +551,13 @@ function ProjectDetail({
         </div>
 
         <div className="wb-goalrow">
-          <span className="wb-goal">{project.goal || 'No description yet'}</span>
+          <span
+            className={'wb-goal ' + (goalExpanded ? 'expanded' : 'collapsed')}
+            onClick={() => setGoalExpanded((v) => !v)}
+            title={goalExpanded ? 'Click to collapse' : 'Click to expand'}
+          >
+            {project.goal || 'No description yet'}
+          </span>
           <span className="wb-team">
             <AvatarStack ids={project.experts} size={22} />
           </span>

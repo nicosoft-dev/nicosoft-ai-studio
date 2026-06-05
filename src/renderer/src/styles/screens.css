@@ -1379,9 +1379,10 @@
 .wb-svc-port { color: var(--accent); }
 
 /* goal + team */
-.wb-goalrow { display: flex; align-items: center; gap: 12px; }
-.wb-goal { font-size: 14px; color: var(--text-1); }
-.wb-team { margin-left: auto; }
+.wb-goalrow { display: flex; align-items: flex-start; gap: 12px; }
+.wb-goal { flex: 1; min-width: 0; font-size: 14px; color: var(--text-1); line-height: 1.5; cursor: pointer; }
+.wb-goal.collapsed { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.wb-team { margin-left: auto; flex: 0 0 auto; }
 
 /* red-tier approval bar (deferred, non-blocking) */
 .wb-approval { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: var(--r-md); background: color-mix(in oklab, var(--error) 10%, var(--bg-1)); border: 1px solid color-mix(in oklab, var(--error) 35%, transparent); }
