@@ -182,7 +182,10 @@ function ChatSegment({
         {msg.tools && msg.tools.length > 0 ? msg.tools.map((t) => <ToolBubble key={t.id} tool={t} />) : null}
         {msg.servers && msg.servers.length > 0 ? msg.servers.map((sv, i) => <ServerBubble key={i} note={sv} />) : null}
         {msg.citations && msg.citations.length > 0 ? <Sources items={msg.citations} /> : null}
-        {msg.streaming ? (
+        {/* Live readout (pulsing dot + elapsed + tokens) shows while streaming AND while tools are still
+            running — otherwise it vanished the instant the text finished but tools were mid-flight, leaving
+            the "agent is working" state blank for the whole tool-execution phase. */}
+        {msg.streaming || msg.tools?.some((t) => t.status === 'running') ? (
           <ThinkingReadout chars={msg.text.length} inputTokens={inputTokens} />
         ) : msg.inputTokens ? (
           <MsgTokens inputTokens={msg.inputTokens} chars={msg.text.length} />
