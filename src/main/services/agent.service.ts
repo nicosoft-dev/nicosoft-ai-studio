@@ -632,6 +632,22 @@ const PLAN_FIRST =
   'For small, well-scoped tasks, plain questions, or chitchat, skip all of this and just do the work — you ' +
   'decide when a task is big enough to warrant a plan. Never let planning become busywork on trivial changes.'
 
+// Tool awareness for non-dev agent roles (generalist / analyst / scheduler). Their role prompts are chat-
+// style with no mention of tools, so in the agent loop they don't realize they CAN act — observed: the
+// generalist fetched an online math API nine times to compute compound interest instead of running it
+// locally, and never finished. This is a NEUTRAL capability note — here are the tools, the choice (local vs
+// web) is yours — NOT a mandate to stay local. Dev roles (engineer / shuri) already carry detailed tool
+// guidance in their system prompts, so they don't get this.
+const TOOL_AWARENESS =
+  '# You can act, not just answer — you are running with real tools\n' +
+  'You may use tools by your own judgment: run code in a local sandbox (Bash / code execution — compute, ' +
+  'transform data, parse, test a snippet, generate a file), read / write / edit files in the working ' +
+  'directory, search the project, and reach the web (fetch a page, search). There is NO rule that you must ' +
+  'stay local or that you must go online — pick whatever fits. Rule of thumb: anything you can compute or ' +
+  'derive yourself (math, statistics, data wrangling, parsing, formatting) is faster and more reliable done ' +
+  "locally than through an external service; go to the web when you genuinely need information you don't " +
+  'already have. The call is yours.'
+
 // Project-convention files (CLAUDE.md / AGENTS.md) from the agent's working dir — the user's
 // project-specific rules. Injected as REFERENCE BELOW the hardcoded system rules (PLAN_FIRST), which
 // always win; on conflict the agent follows the system rule and tells the user. Missing dir → null.
@@ -664,6 +680,9 @@ function buildAgentSystem(
 ): string {
   const base = DEV_ROLES.has(roleId) ? DEV_PROMPT[roleId] : (buildRolePrompt(roleId) ?? ENGINEER_SYSTEM_PROMPT)
   const parts = [PLAN_FIRST, base]
+  // Non-dev agent roles use a chat-style role prompt with no tool awareness — give them the capability note
+  // so they know they can act (dev roles already have detailed tool guidance baked into DEV_PROMPT).
+  if (!DEV_ROLES.has(roleId)) parts.push(TOOL_AWARENESS)
   const conventions = readProjectConventions(cwd)
   if (conventions) {
     parts.push(
