@@ -204,21 +204,6 @@ export interface Project {
   tests: ProjectTest[]
 }
 
-export interface ScheduledStep {
-  kind: 'expert' | 'email' | 'project' | 'tool'
-  expert?: string
-  text: string
-}
-export interface ScheduledTask {
-  id: string
-  name: string
-  trigger: { type: string; label: string }
-  enabled: boolean
-  nextRun: string
-  lastRun: { when: string; result: string }
-  steps: ScheduledStep[]
-}
-
 export interface StudioData {
   EXPERTS: Expert[]
   EXPERT_BY_ID: Record<string, Expert>
@@ -233,5 +218,4 @@ export interface StudioData {
   EXTENSIONS: ExtensionsData
   MEMORY: MemoryData
   PROJECTS: Project[]
-  SCHEDULED: ScheduledTask[]
 }

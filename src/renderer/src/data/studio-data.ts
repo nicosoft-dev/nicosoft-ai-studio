@@ -13,8 +13,7 @@ import type {
   Greeting,
   HistoryGroup,
   Conversation,
-  Project,
-  ScheduledTask
+  Project
 } from '@/types'
 
 const EXPERTS: Expert[] = [
@@ -380,43 +379,6 @@ const PROJECTS: Project[] = [
 export const PHASES = ['Plan', 'Execute', 'Test', 'Done']
 export const PHASE_INDEX: Record<string, number> = { Planning: 0, Executing: 1, Testing: 2, Done: 3 }
 
-const SCHEDULED: ScheduledTask[] = [
-  {
-    id: 'weekly-report',
-    name: 'Weekly report',
-    trigger: { type: 'weekly', label: 'Mon 9:00' },
-    enabled: true,
-    nextRun: 'Mon, 9:00 AM',
-    lastRun: { when: 'last Mon', result: 'ok' },
-    steps: [
-      { kind: 'expert', expert: 'analyst', text: "Analyze last week's metrics vs. the prior week." },
-      { kind: 'expert', expert: 'scheduler', text: "Draft the report email from Turing's findings." },
-      { kind: 'email', text: 'Send via the email MCP to the team list.' }
-    ]
-  },
-  {
-    id: 'inbox-triage',
-    name: 'Daily inbox triage',
-    trigger: { type: 'daily', label: 'Daily 8:00' },
-    enabled: true,
-    nextRun: 'Tomorrow, 8:00 AM',
-    lastRun: { when: 'today', result: 'ok' },
-    steps: [{ kind: 'expert', expert: 'scheduler', text: 'Sort overnight email; flag anything needing a reply.' }]
-  },
-  {
-    id: 'churn-watch',
-    name: 'Churn watch',
-    trigger: { type: 'weekly', label: 'Fri 17:00' },
-    enabled: false,
-    nextRun: '—',
-    lastRun: { when: '2 weeks ago', result: 'ok' },
-    steps: [
-      { kind: 'expert', expert: 'analyst', text: 'Compute weekly churn and compare to the 4.0% threshold.' },
-      { kind: 'project', text: "If over threshold, start a 'Churn response' project." }
-    ]
-  }
-]
-
 export const STUDIO_DATA: StudioData = {
   EXPERTS,
   EXPERT_BY_ID,
@@ -430,6 +392,5 @@ export const STUDIO_DATA: StudioData = {
   USER_PROFILE,
   EXTENSIONS,
   MEMORY,
-  PROJECTS,
-  SCHEDULED
+  PROJECTS
 }
