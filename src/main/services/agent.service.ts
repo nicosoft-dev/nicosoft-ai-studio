@@ -61,10 +61,13 @@ const DEV_PROMPT: Record<string, string> = { engineer: ENGINEER_SYSTEM_PROMPT, s
 // web search via OpenAI's server-side web_search (a serverTool added in run(), not in this list).
 // MCP + Skill are layered on by scope for every agent role.
 const ROLE_CORE_TOOLS: Record<string, readonly string[]> = {
-  generalist: ['Read', 'WebFetch', 'code_execution'], // quick math needs a real compute tool, not an external API
-  analyst: ['Read', 'WebFetch', 'code_execution'],
-  // doc 28: cron 管理 + 草拟。Write 落地草稿/产出;WebSearch 查会议背景;code_execution 算时间/cron;
-  // schedule_* 创建/列/删定时任务。邮件/日历真收发(MCP)留 v2。
+  // doc 28: any "doer" role can author/list/cancel its own scheduled tasks (schedule_*). generalist/analyst
+  // create directly; the orchestrator (Danny) plans the chain and dispatches Joan to land it — quality, since
+  // Joan is a small model, so the heavy planning stays with Danny.
+  generalist: ['Read', 'WebFetch', 'code_execution', 'schedule_create', 'schedule_list', 'schedule_delete'],
+  analyst: ['Read', 'WebFetch', 'code_execution', 'schedule_create', 'schedule_list', 'schedule_delete'],
+  // scheduler (Joan): Read context, Write drafts/output, WebSearch for background, code_execution for
+  // time/cron math, schedule_* to create/list/delete tasks. Real email/calendar send (MCP) is v2.
   scheduler: ['Read', 'Write', 'WebFetch', 'WebSearch', 'code_execution', 'schedule_create', 'schedule_list', 'schedule_delete']
 }
 
