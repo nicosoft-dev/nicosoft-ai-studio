@@ -141,6 +141,11 @@ export async function* runAgent(
   const compactConfig: CompactConfig = { protocol: params.protocol, baseUrl, apiKey, model, signal: ctx.signal }
   const threshold = autocompactThreshold(contextWindow)
   let reactiveCompacted = false // bounce guard: if a send overflows right after a reactive compact, fail
+  // Transient-failure retry budget for the whole run: a network drop or an idle-timeout abort on a hung
+  // upstream (both surface as code 'network'; a user/run abort additionally sets ctx.signal, which we
+  // exclude) retries the turn instead of failing the run — capped so a persistently-dead upstream still ends.
+  let transientRetries = 0
+  const MAX_TRANSIENT_RETRIES = 3
 
   // Sub-agent spawner factory for the Task tool. Builds an isolated inner loop with the same LLM
   // config but no Task tool (recursion bounded to one level) and a fresh readFileState/todos,
@@ -272,6 +277,13 @@ export async function* runAgent(
       // before retrying or propagating — otherwise they run detached and, on a reactive-compaction
       // retry, get re-issued and executed twice.
       turnAbort.abort()
+      // Transient upstream failure → retry the turn a few times instead of failing the whole run. A network
+      // drop and an idle-timeout abort on a hung upstream both surface as code 'network'; a user/run abort
+      // additionally sets ctx.signal (excluded). This turns a hung LLM call into a recoverable blip.
+      if (err instanceof LlmError && err.code === 'network' && !ctx.signal.aborted && transientRetries < MAX_TRANSIENT_RETRIES) {
+        transientRetries++
+        continue
+      }
       // Reactive compaction: an overflow status (400/413) that slipped past the proactive check →
       // compact once and retry. Gate on STATUS + a "haven't already compacted for this send" guard,
       // NOT on the error message (a proxy may reshape it). If it overflows again right after a reactive

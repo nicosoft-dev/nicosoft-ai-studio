@@ -5,6 +5,7 @@
 // See docs/nicosoft-studio/16-openai-agent-loop.md.
 
 import { iterSSE, openStream, parseJSON, toLlmError } from '../llm/_shared'
+import { streamIdleGuard, LLM_STREAM_IDLE_MS } from './stream-timeout'
 import type { AgentLlmEvent, AgentLlmRequest } from './llm'
 import type {
   AgentMessage,
@@ -139,13 +140,6 @@ export async function* callWithToolsOpenAI(
     body.reasoning = { effort: req.thinking.effort }
     body.include = ['reasoning.encrypted_content']
   }
-  const reader = await openStream(PROVIDER, url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${req.apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    signal: req.signal,
-  })
-
   // Assemble content in output order. function_call args stream via .delta keyed by item_id; output_text
   // via .delta keyed by item_id; reasoning items arrive whole at output_item.done.
   const content: Array<TextBlock | ToolUseBlock | ServerBlock> = []
@@ -154,8 +148,19 @@ export async function* callWithToolsOpenAI(
   let inTokens = 0
   let outTokens = 0
 
+  // Idle-timeout: the fetch has no per-request timeout, so a hung upstream would wedge the loop forever.
+  // Arm before opening (covers a hang before the first byte) + reset on every payload; dispose in finally.
+  const guard = streamIdleGuard(req.signal, LLM_STREAM_IDLE_MS)
   try {
+    guard.reset()
+    const reader = await openStream(PROVIDER, url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${req.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: guard.signal,
+    })
     for await (const payload of iterSSE(reader)) {
+      guard.reset()
       const ev = parseJSON(payload) as RespEvent | null
       if (!ev || typeof ev.type !== 'string') continue
       switch (ev.type) {
@@ -228,6 +233,8 @@ export async function* callWithToolsOpenAI(
     }
   } catch (err) {
     throw toLlmError(PROVIDER, err)
+  } finally {
+    guard.dispose()
   }
 
   // The loop decides continuation by "did the assistant request a tool", not stop_reason — a

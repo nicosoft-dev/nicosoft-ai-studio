@@ -4,6 +4,7 @@
 // Reuses the shared SSE plumbing. See docs/nicosoft-studio/12-hex-coding-agent.md §2.4.
 
 import { iterSSE, openStream, parseJSON, toLlmError } from '../llm/_shared'
+import { streamIdleGuard, LLM_STREAM_IDLE_MS } from './stream-timeout'
 import { callWithToolsOpenAI } from './llm-openai'
 import type { ThinkingParam } from '../llm/types'
 import type {
@@ -90,17 +91,6 @@ async function* callWithToolsAnthropic(
     body.thinking = { type: 'enabled', budget_tokens: budget }
     if (req.maxTokens <= budget) body.max_tokens = budget + req.maxTokens
   }
-  const reader = await openStream(PROVIDER, url, {
-    method: 'POST',
-    headers: {
-      'x-api-key': req.apiKey,
-      'anthropic-version': ANTHROPIC_VERSION,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(body),
-    signal: req.signal,
-  })
-
   const blocks: (Accum | undefined)[] = []
   let stopReason: StopReason = null
   let inTokens = 0
@@ -108,8 +98,23 @@ async function* callWithToolsAnthropic(
   let cacheReadTokens = 0
   let cacheCreationTokens = 0
 
+  // Idle-timeout: the fetch has no per-request timeout, so a hung upstream would wedge the loop forever.
+  // Arm before opening (covers a hang before the first byte) + reset on every payload; dispose in finally.
+  const guard = streamIdleGuard(req.signal, LLM_STREAM_IDLE_MS)
   try {
+    guard.reset()
+    const reader = await openStream(PROVIDER, url, {
+      method: 'POST',
+      headers: {
+        'x-api-key': req.apiKey,
+        'anthropic-version': ANTHROPIC_VERSION,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: guard.signal,
+    })
     for await (const payload of iterSSE(reader)) {
+      guard.reset()
       const ev = parseJSON(payload) as StreamEvent | null
       if (!ev || typeof ev.type !== 'string') continue
       const idx = ev.index ?? 0
@@ -184,6 +189,8 @@ async function* callWithToolsAnthropic(
     }
   } catch (err) {
     throw toLlmError(PROVIDER, err)
+  } finally {
+    guard.dispose()
   }
 
   // Assemble the full turn in index order. Server blocks are pushed verbatim (round-tripped, never
