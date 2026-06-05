@@ -73,24 +73,6 @@ function ThinkingReadout({ chars, inputTokens }: { chars: number; inputTokens: n
   )
 }
 
-// Finalized per-message token readout (after a reply completes): ↑ sent = THIS turn's measured prompt
-// tokens (per-message, so collab experts each show their own), ↓ reply = chars/4 estimate. Static (no clock).
-function MsgTokens({ inputTokens, chars }: { inputTokens: number; chars: number }): ReactElement {
-  const out = Math.round(chars / 4)
-  return (
-    <span className="thinking-readout msg-tokens" aria-label="tokens">
-      <span className="tr-dot" />
-      <span>↑ {fmtReadoutTokens(inputTokens)}</span>
-      {out > 0 ? (
-        <>
-          <span className="tr-sep">·</span>
-          <span>↓ {fmtReadoutTokens(out)} tokens</span>
-        </>
-      ) : null}
-    </span>
-  )
-}
-
 // True when this assistant message represents Coordinator's synthesis step — the final pipeline message
 // where Coordinator merges the experts' outputs. Detected by being expertId='coordinator' inside a dispatch chain.
 function isSynthesis(msg: ChatMessage): boolean {
@@ -182,13 +164,11 @@ function ChatSegment({
         {msg.tools && msg.tools.length > 0 ? msg.tools.map((t) => <ToolBubble key={t.id} tool={t} />) : null}
         {msg.servers && msg.servers.length > 0 ? msg.servers.map((sv, i) => <ServerBubble key={i} note={sv} />) : null}
         {msg.citations && msg.citations.length > 0 ? <Sources items={msg.citations} /> : null}
-        {/* Live readout (pulsing dot + elapsed + tokens) shows while streaming AND while tools are still
-            running — otherwise it vanished the instant the text finished but tools were mid-flight, leaving
-            the "agent is working" state blank for the whole tool-execution phase. */}
+        {/* Live readout (pulsing dot · elapsed · ↑↓ tokens) shows ONLY while the agent is working — streaming
+            or any tool still running. The moment the turn finishes / goes idle it disappears: a finished or
+            inactive conversation carries no lingering token status. */}
         {msg.streaming || msg.tools?.some((t) => t.status === 'running') ? (
           <ThinkingReadout chars={msg.text.length} inputTokens={inputTokens} />
-        ) : msg.inputTokens ? (
-          <MsgTokens inputTokens={msg.inputTokens} chars={msg.text.length} />
         ) : null}
       </div>
     </div>

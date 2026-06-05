@@ -54,14 +54,20 @@ for (let i = 0; i < 120; i++) {
   }
   if (!s.stop && i > 4) break
 }
+// After the turn finishes / goes idle, NO token readout should linger (it used to stay as a static row).
+await page.waitForTimeout(1500)
+const afterDone = await page.evaluate(() => ({
+  anyReadout: !!document.querySelector('.thinking-readout'),
+  stop: !!document.querySelector('.cmp-stop')
+}))
 await app.close()
 
-console.log('\n===== READOUT-DURING-TOOLS VERIFY =====')
-console.log('samples with a running tool:', toolRunningSamples)
-console.log('  → live readout present:', readoutDuringTool)
-console.log('  → only static msg-tokens:', sawStaticInstead)
+console.log('\n===== READOUT VERIFY (present during tools, gone when idle) =====')
+console.log('samples with a running tool:', toolRunningSamples, '| live readout present:', readoutDuringTool, '| only static:', sawStaticInstead)
+console.log('after done — idle:', !afterDone.stop, '| any readout lingering:', afterDone.anyReadout)
 const fails = []
 if (toolRunningSamples < 3) fails.push('never observed a running tool long enough (Bash may not have run) — inconclusive')
-else if (readoutDuringTool < Math.max(2, Math.floor(toolRunningSamples * 0.5))) fails.push(`live readout missing during tool execution (${readoutDuringTool}/${toolRunningSamples} samples) — the status still vanishes`)
-console.log(fails.length ? '\n✗ FAIL:\n  - ' + fails.join('\n  - ') : `\n✓ PASS — live token/elapsed readout stays visible during tool execution (${readoutDuringTool}/${toolRunningSamples} running-tool samples)`)
+else if (readoutDuringTool < Math.max(2, Math.floor(toolRunningSamples * 0.5))) fails.push(`live readout missing during tool execution (${readoutDuringTool}/${toolRunningSamples} samples)`)
+if (!afterDone.stop && afterDone.anyReadout) fails.push('a token readout is STILL showing after the turn finished — it must disappear when idle')
+console.log(fails.length ? '\n✗ FAIL:\n  - ' + fails.join('\n  - ') : `\n✓ PASS — readout present during tools (${readoutDuringTool}/${toolRunningSamples}), and gone once idle`)
 process.exit(fails.length ? 1 : 0)
