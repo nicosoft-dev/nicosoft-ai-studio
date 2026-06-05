@@ -17,6 +17,7 @@ import { viewImageTool } from './tools/view-image'
 import { webFetchTool } from './tools/web-fetch'
 import { webSearchTool } from './tools/web-search'
 import { writeTool } from './tools/write'
+import { scheduleCreateTool, scheduleListTool, scheduleDeleteTool } from './tools/schedule'
 
 export const CORE_TOOLS: readonly Tool[] = [
   readTool,
@@ -33,4 +34,7 @@ export const CORE_TOOLS: readonly Tool[] = [
   webSearchTool,
   todoTool,
   taskTool,
+  scheduleCreateTool,
+  scheduleListTool,
+  scheduleDeleteTool,
 ] as unknown as Tool[]

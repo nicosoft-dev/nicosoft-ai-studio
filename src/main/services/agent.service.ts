@@ -63,7 +63,9 @@ const DEV_PROMPT: Record<string, string> = { engineer: ENGINEER_SYSTEM_PROMPT, s
 const ROLE_CORE_TOOLS: Record<string, readonly string[]> = {
   generalist: ['Read', 'WebFetch', 'code_execution'], // quick math needs a real compute tool, not an external API
   analyst: ['Read', 'WebFetch', 'code_execution'],
-  scheduler: [] // email/calendar via MCP
+  // doc 28: cron 管理 + 草拟。Write 落地草稿/产出;WebSearch 查会议背景;code_execution 算时间/cron;
+  // schedule_* 创建/列/删定时任务。邮件/日历真收发(MCP)留 v2。
+  scheduler: ['Read', 'Write', 'WebFetch', 'WebSearch', 'code_execution', 'schedule_create', 'schedule_list', 'schedule_delete']
 }
 
 // Plan-mode tools (EnterPlanMode/ExitPlanMode) — every agent role gets them (doc 17). They're
