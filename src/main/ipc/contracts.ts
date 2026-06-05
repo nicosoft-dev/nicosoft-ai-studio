@@ -682,6 +682,16 @@ export interface ScheduledTask {
   convId?: string // target conversation to inject into (else a new one per fire)
   createdAt: number
   lastFiredAt?: number
+  runs?: TaskRun[] // recent fire results, newest first (capped) — drives the Scheduled page's status + history
+}
+
+// One past execution of a scheduled task — when it fired and how it went. Powers the Scheduled page's history
+// + the link to the conversation the chain ran in, and makes a silent background failure visible.
+export interface TaskRun {
+  firedAt: number
+  result: 'ok' | 'error'
+  convId?: string // the conversation the chain ran in (on success)
+  error?: string // failure reason (on error)
 }
 
 export interface CreateTaskInput {
@@ -696,5 +706,6 @@ export interface CreateTaskInput {
 // Next/Last times reflect the run live (the page loads on mount and otherwise wouldn't see a background fire).
 export interface ScheduledFiredEvent {
   taskId: string
-  convId: string
+  convId?: string // undefined on failure
+  ok: boolean
 }

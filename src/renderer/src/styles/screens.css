@@ -1353,6 +1353,11 @@
 .sched-last { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-4); white-space: nowrap; }
 .sched-last .sl-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-4); }
 .sched-last.ok .sl-dot { background: var(--success); }
+.sched-last.error .sl-dot { background: var(--error); }
+.sched-last.error { color: var(--error); }
+.sched-last.idle .sl-dot { background: var(--text-4); }
+.sched-last.link { cursor: pointer; }
+.sched-last.link:hover { color: var(--text-2); text-decoration: underline; }
 
 /* scheduled editor */
 .sched-inner.editor { display: flex; flex-direction: column; gap: 16px; }

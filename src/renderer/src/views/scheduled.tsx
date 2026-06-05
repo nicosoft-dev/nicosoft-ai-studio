@@ -17,10 +17,11 @@ import { MemToggle } from '@/views/memory'
 type TaskDto = Awaited<ReturnType<typeof window.api.scheduled.list>>[number]
 type StepDto = TaskDto['steps'][number]
 type StepKind = StepDto['kind']
-type TriggerType = 'once' | 'daily' | 'weekly' | 'cron'
+type TriggerType = 'once' | 'interval' | 'daily' | 'weekly' | 'cron'
 
 const TRIGGER_TYPES: { v: TriggerType; l: string }[] = [
   { v: 'once', l: 'Once' },
+  { v: 'interval', l: 'Interval' },
   { v: 'daily', l: 'Daily' },
   { v: 'weekly', l: 'Weekly' },
   { v: 'cron', l: 'Cron' },
@@ -47,6 +48,7 @@ const pad = (n: number): string => String(n).padStart(2, '0')
 interface TriggerForm {
   type: TriggerType
   datetime: string // once: <input type=datetime-local> value (YYYY-MM-DDTHH:MM)
+  interval: string // interval: "5m" / "2h" / "1d"
   time: string // daily/weekly: HH:MM
   dow: string // weekly: 0..6
   cron: string // cron: raw 5-field expr
@@ -54,6 +56,7 @@ interface TriggerForm {
 
 function buildSchedule(f: TriggerForm): string {
   if (f.type === 'once') return f.datetime
+  if (f.type === 'interval') return f.interval.trim()
   if (f.type === 'cron') return f.cron.trim()
   const [h, m] = (f.time || '09:00').split(':')
   const hh = parseInt(h, 10) || 0
@@ -67,12 +70,28 @@ function toLocalInput(ms: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-// Reverse a stored task back into the editor form. A null cron is a one-shot (use nextRunAt); a cron that
-// matches the daily/weekly shapes opens as Daily/Weekly, otherwise as raw Cron.
+// An interval (5m/2h/1d) is stored as a cron shape (*/5 * * * *, 0 */2 * * *, 0 0 */1 * *) by the engine —
+// reverse that to "5m"/"2h"/"1d" so editing round-trips. Returns null when the cron isn't an interval shape.
+function cronToInterval(cron: string): string | null {
+  const p = cron.split(/\s+/)
+  if (p.length !== 5) return null
+  const [m, h, dom, mon, dow] = p
+  if (mon !== '*' || dow !== '*') return null
+  let mm: RegExpMatchArray | null
+  if (h === '*' && dom === '*' && (mm = m.match(/^\*\/(\d+)$/))) return `${mm[1]}m`
+  if (m === '0' && dom === '*' && (mm = h.match(/^\*\/(\d+)$/))) return `${mm[1]}h`
+  if (m === '0' && h === '0' && (mm = dom.match(/^\*\/(\d+)$/))) return `${mm[1]}d`
+  return null
+}
+
+// Reverse a stored task back into the editor form. A null cron is a one-shot; an interval-shaped cron opens as
+// Interval; a daily/weekly-shaped cron opens as Daily/Weekly; otherwise raw Cron.
 function formFromTask(t: TaskDto | null): TriggerForm {
-  const base: TriggerForm = { type: 'weekly', datetime: '', time: '09:00', dow: '1', cron: '0 9 * * 1' }
+  const base: TriggerForm = { type: 'weekly', datetime: '', interval: '1d', time: '09:00', dow: '1', cron: '0 9 * * 1' }
   if (!t) return base
   if (!t.cron) return { ...base, type: 'once', datetime: toLocalInput(t.nextRunAt) }
+  const iv = cronToInterval(t.cron)
+  if (iv) return { ...base, type: 'interval', interval: iv, cron: t.cron }
   const p = t.cron.split(/\s+/)
   if (p.length === 5) {
     const [m, h, dom, mon, dowf] = p
@@ -86,6 +105,7 @@ function formFromTask(t: TaskDto | null): TriggerForm {
 function triggerLabel(t: TaskDto): string {
   if (!t.cron) return 'Once'
   const f = formFromTask(t)
+  if (f.type === 'interval') return `Every ${f.interval}`
   if (f.type === 'daily') return `Daily ${f.time}`
   if (f.type === 'weekly') return `${DOW[parseInt(f.dow, 10)]} ${f.time}`
   return t.cron
@@ -109,9 +129,7 @@ function StepChip({ step }: { step: StepDto }): ReactElement {
         <Avatar expert={e} size={18} /> {e.name}
       </span>
     ) : (
-      <span className="step-chip">
-        <Icons.bot size={13} /> {step.roleId ?? 'expert'}
-      </span>
+      <span className="step-chip">{step.roleId ?? 'expert'}</span>
     )
   }
   if (step.kind === 'email')
@@ -133,17 +151,38 @@ function StepChip({ step }: { step: StepDto }): ReactElement {
   )
 }
 
+// The Last cell: the most recent run's result (ok/error) + time, and — on success — a click-through to the
+// conversation the chain ran in. On error it surfaces the failure reason (title) so a background failure isn't
+// silent. Idle state until the task has fired.
+function LastRun({ task, onOpenConversation }: { task: TaskDto; onOpenConversation?: (id: string) => void }): ReactElement {
+  const last = task.runs?.[0]
+  const cls = !last ? 'sched-last idle' : last.result === 'error' ? 'sched-last error' : 'sched-last ok'
+  const clickable = !!(last?.result === 'ok' && last.convId && onOpenConversation)
+  return (
+    <span
+      className={cls + (clickable ? ' link' : '')}
+      title={last?.result === 'error' ? `Failed: ${last.error ?? 'unknown error'}` : clickable ? 'Open the conversation' : undefined}
+      onClick={clickable ? (e) => { e.stopPropagation(); onOpenConversation!(last!.convId!) } : undefined}
+    >
+      <span className="sl-dot" /> Last · {fmtTime(last?.firedAt ?? task.lastFiredAt)}
+      {last?.result === 'error' ? ' · failed' : ''}
+    </span>
+  )
+}
+
 /* — Scheduled list — */
 function ScheduledList({
   tasks,
   onToggle,
   onEdit,
   onNew,
+  onOpenConversation,
 }: {
   tasks: TaskDto[]
   onToggle: (t: TaskDto) => void
   onEdit: (id: string) => void
   onNew: () => void
+  onOpenConversation?: (id: string) => void
 }): ReactElement {
   return (
     <div className="main-col">
@@ -184,9 +223,7 @@ function ScheduledList({
                 </div>
                 <div className="sched-meta">
                   <span className="sched-next">Next · {fmtTime(t.nextRunAt)}</span>
-                  <span className={'sched-last ok'}>
-                    <span className="sl-dot" /> Last · {fmtTime(t.lastFiredAt)}
-                  </span>
+                  <LastRun task={t} onOpenConversation={onOpenConversation} />
                 </div>
                 <MemToggle on={t.enabled} onClick={() => onToggle(t)} />
                 <button className="icon-btn" title="Edit" onClick={() => onEdit(t.id)}>
@@ -220,6 +257,10 @@ function ScheduledEditor({
   )
   const [saving, setSaving] = useState(false)
   const expertOpts = EXPERTS.filter((e) => !e.unconfigured).map((e) => ({ v: e.id, l: e.name }))
+  const [projects, setProjects] = useState<{ v: string; l: string }[]>([]) // for the project-step "advance" picker
+  useEffect(() => {
+    void window.api.project.list().then((ps) => setProjects(ps.map((p) => ({ v: p.id, l: p.title }))))
+  }, [])
 
   const setTrig = (patch: Partial<TriggerForm>): void => setTf((p) => ({ ...p, ...patch }))
   const setStep = (i: number, patch: Partial<StepDto>): void => setSteps((p) => p.map((s, j) => (j === i ? { ...s, ...patch } : s)))
@@ -291,6 +332,9 @@ function ScheduledEditor({
               {tf.type === 'once' && (
                 <input className="input" type="datetime-local" value={tf.datetime} onChange={(e) => setTrig({ datetime: e.target.value })} />
               )}
+              {tf.type === 'interval' && (
+                <input className="input mono" value={tf.interval} onChange={(e) => setTrig({ interval: e.target.value })} placeholder="2h  ·  5m / 2h / 1d" />
+              )}
               {tf.type === 'daily' && (
                 <input className="input" type="time" value={tf.time} onChange={(e) => setTrig({ time: e.target.value })} />
               )}
@@ -353,9 +397,15 @@ function ScheduledEditor({
                         <input className="input se-instr" value={s.subject ?? ''} onChange={(e) => setStep(i, { subject: e.target.value })} placeholder="Subject…" />
                       </div>
                     )}
-                    {s.kind === 'project' && s.action === 'advance' && (
-                      <input className="input se-instr mono" value={s.projectId ?? ''} onChange={(e) => setStep(i, { projectId: e.target.value })} placeholder="Project id to advance…" />
-                    )}
+                    {s.kind === 'project' &&
+                      s.action === 'advance' &&
+                      (projects.length > 0 ? (
+                        <div style={{ marginTop: 6, maxWidth: 280 }}>
+                          <Dropdown options={projects} value={s.projectId || projects[0].v} onChange={(v) => setStep(i, { projectId: v })} />
+                        </div>
+                      ) : (
+                        <input className="input se-instr mono" value={s.projectId ?? ''} onChange={(e) => setStep(i, { projectId: e.target.value })} placeholder="No projects yet — paste a project id" />
+                      ))}
 
                     <input
                       className="input se-instr"
@@ -404,7 +454,7 @@ function ScheduledEditor({
   )
 }
 
-export function ScheduledView(): ReactElement {
+export function ScheduledView({ onOpenConversation }: { onOpenConversation?: (id: string) => void }): ReactElement {
   const [tasks, setTasks] = useState<TaskDto[]>([])
   const [editing, setEditing] = useState<{ id: string | null } | null>(null) // {id} edit | {id:null} new | null list
 
@@ -413,8 +463,13 @@ export function ScheduledView(): ReactElement {
   }, [])
   useEffect(() => {
     void reload()
-    // Live-refresh when the engine fires a task in the background — Next/Last update without a re-open.
-    return window.api.scheduled.onFired(() => void reload())
+    // Live-refresh: engine fired a task (Next/Last) OR any task mutation (e.g. a tool created/deleted one).
+    const offFired = window.api.scheduled.onFired(() => void reload())
+    const offChanged = window.api.scheduled.onChanged(() => void reload())
+    return () => {
+      offFired()
+      offChanged()
+    }
   }, [reload])
 
   const toggle = async (t: TaskDto): Promise<void> => {
@@ -430,5 +485,5 @@ export function ScheduledView(): ReactElement {
     const task = editing.id ? tasks.find((t) => t.id === editing.id) ?? null : null
     return <ScheduledEditor task={task} onBack={() => setEditing(null)} onSaved={onSaved} />
   }
-  return <ScheduledList tasks={tasks} onToggle={(t) => void toggle(t)} onEdit={(id) => setEditing({ id })} onNew={() => setEditing({ id: null })} />
+  return <ScheduledList tasks={tasks} onToggle={(t) => void toggle(t)} onEdit={(id) => setEditing({ id })} onNew={() => setEditing({ id: null })} onOpenConversation={onOpenConversation} />
 }

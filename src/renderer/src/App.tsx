@@ -229,7 +229,7 @@ export default function App(): ReactElement {
               onOpenExpert={(id: string) => selectExpert(id, activeProject)}
             />
           ) : view === 'scheduled' ? (
-            <ScheduledView />
+            <ScheduledView onOpenConversation={selectConv} />
           ) : view === 'expert' ? (
             <ExpertDetail
               expertId={activeExpert}

@@ -7,6 +7,7 @@ import { runIdleSweep } from './services/memory.service'
 import { connectEnabled as connectMcpServers } from './services/mcp.service'
 import { loadEnabled as loadSkills } from './services/skill.service'
 import { schedulerEngine } from './agent/scheduler/engine'
+import { scheduledTaskStore } from './agent/scheduler/store'
 
 // Privileged schemes MUST be declared before app.whenReady. nsai-media:// serves local image files
 // (media/storage.ts) so attachments load by reference instead of base64-inlining into the DB/DOM.
@@ -74,7 +75,12 @@ app.whenReady().then(() => {
   // On each fire, notify the renderer so the Scheduled page refreshes its Next/Last times live.
   schedulerEngine.start((info) => {
     for (const w of BrowserWindow.getAllWindows())
-      w.webContents.send('scheduled:fired', { taskId: info.task.id, convId: info.convId })
+      w.webContents.send('scheduled:fired', { taskId: info.task.id, convId: info.convId, ok: info.ok })
+  })
+  // Any task mutation (incl. a schedule_* tool, which bypasses the IPC handlers + their reload) → tell open
+  // Scheduled pages to refresh.
+  scheduledTaskStore.onChange(() => {
+    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('scheduled:changed')
   })
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

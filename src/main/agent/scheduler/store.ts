@@ -10,7 +10,9 @@ import { join, dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { parseSchedule, nextCronRun } from './cron'
 // Types live in ipc/contracts — single source; the same shapes are the wire DTO and this service's model.
-import type { ScheduledTask, CreateTaskInput } from '../../ipc/contracts'
+import type { ScheduledTask, CreateTaskInput, TaskRun } from '../../ipc/contracts'
+
+const MAX_RUNS = 10 // recent fire results kept per task (newest first)
 
 const FILE = join(homedir(), '.nsai', 'scheduled_tasks.json')
 
@@ -33,6 +35,18 @@ function writeDurable(tasks: ScheduledTask[]): void {
 }
 
 export class ScheduledTaskStore {
+  // Listeners notified after a task mutation (create/delete) — index.ts broadcasts scheduled:changed to the
+  // renderer so a task created via the schedule_* TOOL (which bypasses the IPC handlers + their reload) still
+  // refreshes an open Scheduled page. Returns an unsubscribe fn.
+  private changeListeners = new Set<() => void>()
+  onChange(cb: () => void): () => void {
+    this.changeListeners.add(cb)
+    return () => this.changeListeners.delete(cb)
+  }
+  private emitChange(): void {
+    for (const cb of this.changeListeners) cb()
+  }
+
   // Create a task. Parses the schedule into cron/one-shot + first nextRunAt; throws on an unparseable
   // schedule (the tool surfaces the message). durable → disk; else session-only.
   create(input: CreateTaskInput, nowMs: number): ScheduledTask {
@@ -63,6 +77,7 @@ export class ScheduledTaskStore {
     } else {
       sessionTasks.push(task)
     }
+    this.emitChange()
     return task
   }
 
@@ -80,11 +95,13 @@ export class ScheduledTaskStore {
     if (di >= 0) {
       durable.splice(di, 1)
       writeDurable(durable)
+      this.emitChange()
       return true
     }
     const si = sessionTasks.findIndex((t) => t.id === id)
     if (si >= 0) {
       sessionTasks.splice(si, 1)
+      this.emitChange()
       return true
     }
     return false
@@ -134,18 +151,32 @@ export class ScheduledTaskStore {
     return apply(durable, () => writeDurable(durable)) ?? apply(sessionTasks, () => {})
   }
 
-  // Mark a task fired: bump lastFiredAt; recurring → recompute nextRunAt from its cron; one-shot (or a
-  // recurring task whose cron can no longer schedule) → remove. Updates whichever store (disk/session) holds
-  // it. The engine calls this right after dispatching.
-  markFired(id: string, nowMs: number): void {
+  // Advance the schedule BEFORE a run so the next tick can't re-fire a recurring task: recurring → recompute
+  // nextRunAt from its cron. A one-shot keeps its nextRunAt and is deleted after the run by the engine.
+  reschedule(id: string, nowMs: number): void {
     const apply = (tasks: ScheduledTask[], persist: () => void): boolean => {
-      const i = tasks.findIndex((t) => t.id === id)
-      if (i < 0) return false
-      const t = tasks[i]
-      t.lastFiredAt = nowMs
+      const t = tasks.find((x) => x.id === id)
+      if (!t) return false
       const next = t.recurring && t.cron ? nextCronRun(t.cron, nowMs) : null
-      if (next) t.nextRunAt = next
-      else tasks.splice(i, 1) // one-shot done, or can't reschedule → drop
+      if (next) {
+        t.nextRunAt = next
+        persist()
+      }
+      return true
+    }
+    const durable = readDurable()
+    if (apply(durable, () => writeDurable(durable))) return
+    apply(sessionTasks, () => {})
+  }
+
+  // Record one execution AFTER the run: bump lastFiredAt + prepend the result to runs[] (capped). Makes a
+  // background failure visible (result:'error' + reason) and links a run to its conversation (convId).
+  recordRun(id: string, run: TaskRun, nowMs: number): void {
+    const apply = (tasks: ScheduledTask[], persist: () => void): boolean => {
+      const t = tasks.find((x) => x.id === id)
+      if (!t) return false
+      t.lastFiredAt = nowMs
+      t.runs = [run, ...(t.runs ?? [])].slice(0, MAX_RUNS)
       persist()
       return true
     }

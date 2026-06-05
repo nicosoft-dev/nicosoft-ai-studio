@@ -221,7 +221,8 @@ const api = {
     setEnabled: (id: string, enabled: boolean): Promise<boolean> =>
       ipcRenderer.invoke('scheduled:setEnabled', id, enabled),
     remove: (id: string): Promise<boolean> => ipcRenderer.invoke('scheduled:delete', id),
-    onFired: (cb: (d: ScheduledFiredEvent) => void): (() => void) => agentListen('scheduled:fired', cb)
+    onFired: (cb: (d: ScheduledFiredEvent) => void): (() => void) => agentListen('scheduled:fired', cb),
+    onChanged: (cb: () => void): (() => void) => agentListen('scheduled:changed', cb)
   },
 
   roles: {

@@ -3,7 +3,7 @@
 // ones. A task is a STEP CHAIN (doc 28 §5.3): an ordered list of steps, each an agent run by its own role,
 // permissionMode='bypass' confined to the task's pre-authorized cwd (§5.1). Steps run sequentially in one
 // conversation; each step's final reply is injected into the next step's prompt — a cross-role pipeline
-// (Turing computes → Joan drafts → …). Recurring tasks reschedule, one-shots are removed (markFired). A task
+// (Turing computes → Joan drafts → …). Recurring tasks reschedule, one-shots are removed after running. A task
 // already in flight is skipped (dedup).
 //
 // No file watcher: loadActive() re-reads the durable JSON every tick, so an external edit is picked up within
@@ -47,7 +47,12 @@ function emailInstruction(step: TaskStep): string {
 
 export interface FiredInfo {
   task: ScheduledTask
-  convId: string
+  convId?: string // undefined on failure
+  ok: boolean
+}
+
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e)
 }
 
 class SchedulerEngine {
@@ -77,17 +82,23 @@ class SchedulerEngine {
 
   private async fire(task: ScheduledTask, now: number): Promise<void> {
     this.running.add(task.id)
-    // Advance the schedule BEFORE running (recurring → next; one-shot → removed) so a long run can't be
-    // re-fired by the next tick.
-    scheduledTaskStore.markFired(task.id, now)
+    // Advance the schedule BEFORE running so the next tick can't re-fire a recurring task; a one-shot keeps its
+    // slot and is removed below once it has run (success or failure).
+    scheduledTaskStore.reschedule(task.id, now)
+    let convId: string | undefined
+    let ok = false
     try {
-      const convId = await this.runChain(task)
-      this.onFire?.({ task, convId })
-    } catch {
-      /* a failed scheduled run must not crash the engine */
+      convId = await this.runChain(task)
+      ok = true
+      scheduledTaskStore.recordRun(task.id, { firedAt: now, result: 'ok', convId }, now)
+    } catch (e) {
+      // A failed run must NOT vanish silently — record it so the Scheduled page shows the failure + reason.
+      scheduledTaskStore.recordRun(task.id, { firedAt: now, result: 'error', error: errorMessage(e) }, now)
     } finally {
+      if (!task.recurring) scheduledTaskStore.delete(task.id) // one-shot done (ok or error) → remove
       this.running.delete(task.id)
     }
+    this.onFire?.({ task, convId, ok }) // always notify (success or failure) so the page refreshes
   }
 
   // Run a task's step chain sequentially in one conversation, dispatching each step on its kind (doc 28 §5.3):
