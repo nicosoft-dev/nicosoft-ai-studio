@@ -61,7 +61,7 @@ const DEV_PROMPT: Record<string, string> = { engineer: ENGINEER_SYSTEM_PROMPT, s
 // web search via OpenAI's server-side web_search (a serverTool added in run(), not in this list).
 // MCP + Skill are layered on by scope for every agent role.
 const ROLE_CORE_TOOLS: Record<string, readonly string[]> = {
-  generalist: ['Read', 'WebFetch'],
+  generalist: ['Read', 'WebFetch', 'code_execution'], // quick math needs a real compute tool, not an external API
   analyst: ['Read', 'WebFetch', 'code_execution'],
   scheduler: [] // email/calendar via MCP
 }
@@ -633,20 +633,19 @@ const PLAN_FIRST =
   'decide when a task is big enough to warrant a plan. Never let planning become busywork on trivial changes.'
 
 // Tool awareness for non-dev agent roles (generalist / analyst / scheduler). Their role prompts are chat-
-// style with no mention of tools, so in the agent loop they don't realize they CAN act — observed: the
-// generalist fetched an online math API nine times to compute compound interest instead of running it
-// locally, and never finished. This is a NEUTRAL capability note — here are the tools, the choice (local vs
-// web) is yours — NOT a mandate to stay local. Dev roles (engineer / shuri) already carry detailed tool
-// guidance in their system prompts, so they don't get this.
+// style with no mention of tools, so in the agent loop they don't realize they CAN act (the generalist
+// fetched an online math API for arithmetic instead of computing it). This is a NEUTRAL capability note
+// that names NO specific tool — the roles' toolsets differ (generalist/analyst have code_execution,
+// scheduler has none), so it points at the tool schema rather than promising a tool the role lacks. NOT a
+// mandate to stay local. Dev roles (engineer / shuri) already carry detailed tool guidance, so skip this.
 const TOOL_AWARENESS =
-  '# You can act, not just answer — you are running with real tools\n' +
-  'You may use tools by your own judgment: run code in a local sandbox (Bash / code execution — compute, ' +
-  'transform data, parse, test a snippet, generate a file), read / write / edit files in the working ' +
-  'directory, search the project, and reach the web (fetch a page, search). There is NO rule that you must ' +
-  'stay local or that you must go online — pick whatever fits. Rule of thumb: anything you can compute or ' +
-  'derive yourself (math, statistics, data wrangling, parsing, formatting) is faster and more reliable done ' +
-  "locally than through an external service; go to the web when you genuinely need information you don't " +
-  'already have. The call is yours.'
+  '# You can act, not just answer — use the tools you have by your own judgment\n' +
+  "You're not limited to replying: the tools available to you this turn are in your tool schema — reach " +
+  'for them when they help, and do NOT report a result you have not actually produced with one. Rule of ' +
+  'thumb: anything you can compute or derive precisely (math, statistics, data wrangling, parsing, ' +
+  'formatting) is more reliable run through a code-execution tool — IF you have one — than estimated or ' +
+  "fetched from an external service; reach for the web when you genuinely need information you don't " +
+  'already have. There is no rule that you must stay local or must go online — the choice is yours.'
 
 // Project-convention files (CLAUDE.md / AGENTS.md) from the agent's working dir — the user's
 // project-specific rules. Injected as REFERENCE BELOW the hardcoded system rules (PLAN_FIRST), which
