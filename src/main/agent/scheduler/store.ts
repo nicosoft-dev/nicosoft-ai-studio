@@ -9,37 +9,8 @@ import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { parseSchedule, nextCronRun } from './cron'
-
-// One step in a task's chain — an agent run by roleId. Its output is injected into the next step's input, so
-// steps form a cross-role pipeline (Turing computes → Joan drafts → …). doc 28 §5.3.
-export interface TaskStep {
-  roleId: string // executor role for this step (any role)
-  prompt: string // what this step does; it also receives the previous step's output as context
-}
-
-export interface ScheduledTask {
-  id: string // 8-hex
-  name: string // human label, e.g. "Weekly report" (shown in the Scheduled page)
-  cron: string | null // recurring cron expr; null for a one-shot
-  nextRunAt: number // epoch ms — the only field the engine schedules on
-  recurring: boolean
-  permanent?: boolean // exempt from auto-expiry (ccb)
-  durable: boolean // true → disk; false → session-only
-  enabled: boolean // UI toggle; a disabled task is kept but never fired
-  steps: TaskStep[] // ordered chain; each step's output feeds the next (cross-role pipeline)
-  cwd?: string // pre-authorized working dir for every step (full perms inside it — §5.1)
-  convId?: string // target conversation to inject into (else a new one per fire)
-  createdAt: number
-  lastFiredAt?: number
-}
-
-export interface CreateTaskInput {
-  name: string
-  schedule: string // interval (5m/2h/1d) | one-shot ISO | 5-field cron
-  steps: TaskStep[] // at least one
-  cwd?: string
-  durable?: boolean
-}
+// Types live in ipc/contracts — single source; the same shapes are the wire DTO and this service's model.
+import type { ScheduledTask, CreateTaskInput } from '../../ipc/contracts'
 
 const FILE = join(homedir(), '.nsai', 'scheduled_tasks.json')
 
@@ -139,6 +110,28 @@ export class ScheduledTaskStore {
     const durable = readDurable()
     if (apply(durable, () => writeDurable(durable))) return true
     return apply(sessionTasks, () => {})
+  }
+
+  // Edit a task in place (Scheduled page Save): re-parse the schedule (recomputing cron/nextRunAt/recurring)
+  // and replace name/steps/cwd. Keeps id/createdAt/lastFiredAt/enabled/durable. Returns the updated task, or
+  // null if the id isn't found or the schedule/steps are invalid.
+  update(id: string, input: CreateTaskInput, nowMs: number): ScheduledTask | null {
+    const parsed = parseSchedule(input.schedule, nowMs)
+    if (!parsed || !input.steps?.length) return null
+    const apply = (tasks: ScheduledTask[], persist: () => void): ScheduledTask | null => {
+      const t = tasks.find((x) => x.id === id)
+      if (!t) return null
+      t.name = input.name
+      t.steps = input.steps
+      t.cwd = input.cwd
+      t.cron = parsed.cron
+      t.nextRunAt = parsed.nextRunAt
+      t.recurring = parsed.recurring
+      persist()
+      return t
+    }
+    const durable = readDurable()
+    return apply(durable, () => writeDurable(durable)) ?? apply(sessionTasks, () => {})
   }
 
   // Mark a task fired: bump lastFiredAt; recurring → recompute nextRunAt from its cron; one-shot (or a

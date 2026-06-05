@@ -7,12 +7,17 @@
 import { z } from 'zod'
 import { buildTool } from '../tool'
 import type { ToolResultBlock } from '../types'
-import { scheduledTaskStore, type ScheduledTask } from '../scheduler/store'
+import { scheduledTaskStore } from '../scheduler/store'
+import type { ScheduledTask } from '../../ipc/contracts'
+
+function stepLabel(s: ScheduledTask['steps'][number]): string {
+  return s.kind === 'expert' ? (s.roleId ?? 'expert') : s.kind
+}
 
 function fmtTask(t: ScheduledTask): string {
   const when = new Date(t.nextRunAt).toLocaleString()
   const kind = t.recurring ? `recurring (${t.cron})` : 'one-shot'
-  const chain = t.steps.map((s) => s.roleId).join(' → ')
+  const chain = t.steps.map(stepLabel).join(' → ')
   const flags = `${t.durable ? ' · durable' : ''}${t.enabled ? '' : ' · disabled'}`
   return `${t.id}  "${t.name}"  next=${when}  ${kind}${flags}  [${chain}] — ${t.steps[0]?.prompt.slice(0, 50) ?? ''}`
 }
@@ -33,19 +38,29 @@ export const scheduleCreateTool = buildTool({
     steps: z
       .array(
         z.object({
-          role: z
-            .string()
-            .describe('Executor role id for this step (any role, e.g. "engineer", "analyst", "scheduler")'),
+          kind: z
+            .enum(['expert', 'tool', 'email', 'project'])
+            .describe(
+              'expert = run a role; tool = use an MCP tool; email = send via an email MCP (or draft if none connected); project = create/advance a Project'
+            ),
           prompt: z
             .string()
             .describe(
               "What this step does. Each step also receives the previous step's output, so later steps build on earlier ones."
             ),
+          role: z
+            .string()
+            .optional()
+            .describe('expert: executor role id (e.g. "analyst"); tool/email: optional override, default scheduler'),
+          to: z.string().optional().describe('email: recipient address'),
+          subject: z.string().optional().describe('email: subject line'),
+          action: z.enum(['create', 'advance']).optional().describe('project: create a new project or advance one'),
+          projectId: z.string().optional().describe('project (advance): the target project id'),
         })
       )
       .min(1)
       .describe(
-        'Ordered step chain. One step for a simple task; multiple steps hand work across roles (e.g. analyst computes the numbers → scheduler drafts the email). Each step runs as an agent turn and its reply feeds the next step.'
+        'Ordered step chain. One step for a simple task; multiple steps hand work across roles/kinds (e.g. analyst computes → email step sends the result). Each step runs and its output feeds the next.'
       ),
     cwd: z
       .string()
@@ -74,7 +89,15 @@ export const scheduleCreateTool = buildTool({
       {
         name: input.name,
         schedule: input.schedule,
-        steps: input.steps.map((s) => ({ roleId: s.role, prompt: s.prompt })),
+        steps: input.steps.map((s) => ({
+          kind: s.kind,
+          prompt: s.prompt,
+          roleId: s.role,
+          to: s.to,
+          subject: s.subject,
+          action: s.action,
+          projectId: s.projectId,
+        })),
         cwd: input.cwd ?? ctx.cwd,
         durable: input.durable,
       },

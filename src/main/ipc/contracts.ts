@@ -644,3 +644,50 @@ export interface ProjectServiceEvent {
   projectId: string
   services: ProjectServiceDto[]
 }
+
+// ── Scheduled tasks (doc 28) ─────────────────────────────────────────────────────────────────────────
+// A scheduled task is a first-class background entity that fires a step chain on a schedule. These types are
+// both the wire DTO (renderer ↔ main) and the scheduler service's model — one source, no mapping layer.
+
+// A step's kind decides how the engine runs it (engine.ts dispatches on it):
+//   expert  — run an agent by roleId; the role completes the instruction with its own tools
+//   tool    — an agent turn (default scheduler) told to use its MCP tools for the instruction
+//   email   — an agent turn that sends via a connected email MCP, or leaves a draft if none (Studio never
+//             sends mail itself); to/subject set the envelope, prompt + prior output the body
+//   project — create a new Project or advance an existing one (projectService) — no agent
+// Every kind's output is captured and piped into the next step's input (cross-role pipeline, doc 28 §5.3).
+export type StepKind = 'expert' | 'tool' | 'email' | 'project'
+
+export interface TaskStep {
+  kind: StepKind
+  prompt: string // the instruction; also receives the previous step's output as context
+  roleId?: string // expert: executor role (required); tool/email: optional override (default scheduler)
+  to?: string // email: recipient
+  subject?: string // email: subject line
+  action?: 'create' | 'advance' // project: create a new project vs advance an existing one
+  projectId?: string // project (advance): target project id
+}
+
+export interface ScheduledTask {
+  id: string // 8-hex
+  name: string // human label shown in the Scheduled page
+  cron: string | null // recurring cron expr; null for a one-shot
+  nextRunAt: number // epoch ms — the only field the engine schedules on
+  recurring: boolean
+  permanent?: boolean // exempt from auto-expiry
+  durable: boolean // true → disk (survives restart); false → session-only
+  enabled: boolean // UI toggle; a disabled task is kept but never fired
+  steps: TaskStep[] // ordered chain; each step's output feeds the next
+  cwd?: string // pre-authorized working dir for every step (full perms inside it)
+  convId?: string // target conversation to inject into (else a new one per fire)
+  createdAt: number
+  lastFiredAt?: number
+}
+
+export interface CreateTaskInput {
+  name: string
+  schedule: string // interval (5m/2h/1d) | one-shot ISO | 5-field cron
+  steps: TaskStep[] // at least one
+  cwd?: string
+  durable?: boolean
+}

@@ -41,8 +41,8 @@ await page.reload()
 await page.waitForTimeout(1500)
 const prompt = [
   'Use your schedule tools to do exactly this:',
-  '1. schedule_create a DURABLE recurring task — name "E2E standup", schedule "0 9 * * 1-5", durable true, and a single step whose role is "scheduler" and prompt is "morning standup reminder".',
-  '2. schedule_create a one-shot task — name "E2E oneshot", schedule "2030-01-15T15:00", and a single step whose role is "scheduler" and prompt is "one-shot test".',
+  '1. schedule_create a DURABLE recurring task — name "E2E standup", schedule "0 9 * * 1-5", durable true, and a single step with kind "expert", role "scheduler", prompt "morning standup reminder".',
+  '2. schedule_create a one-shot task — name "E2E oneshot", schedule "2030-01-15T15:00", and a single step with kind "expert", role "scheduler", prompt "one-shot test".',
   '3. schedule_list to list all tasks.',
   'Report the two task ids you created.',
 ].join('\n')

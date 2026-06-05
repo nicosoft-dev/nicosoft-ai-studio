@@ -12,8 +12,10 @@
 // Email/send sink is NOT here yet (doc 28 后续待完成 v2): a step that should email goes through an email MCP
 // tool or leaves a draft — Studio never sends mail itself.
 
-import { scheduledTaskStore, type ScheduledTask } from './store'
+import { scheduledTaskStore } from './store'
+import type { ScheduledTask, TaskStep } from '../../ipc/contracts'
 import { run, type AgentCallbacks } from '../../services/agent.service'
+import * as projectService from '../../services/project.service'
 import * as rolesService from '../../services/roles.service'
 import * as endpointRepo from '../../repos/endpoint.repo'
 import * as convRepo from '../../repos/conversation.repo'
@@ -29,6 +31,18 @@ const HEADLESS_CB: AgentCallbacks = {
   onEvent: () => {},
   requestPermission: async () => ({ allow: false }),
   askUser: undefined,
+}
+
+const DEFAULT_EXECUTOR = 'scheduler' // role for non-expert steps (tool/email) and as a fallback executor
+
+// email step → a single agent instruction: send via the connected email MCP, or output a draft if none
+// (Studio never sends mail itself).
+function emailInstruction(step: TaskStep): string {
+  return (
+    'Compose and send an email using your connected email MCP tool. If no email tool is available, output ' +
+    'the email as a draft instead and say it is a draft — never claim it was sent.\n' +
+    `To: ${step.to ?? '(unspecified)'}\nSubject: ${step.subject ?? '(unspecified)'}\n\n${step.prompt}`
+  )
 }
 
 export interface FiredInfo {
@@ -76,46 +90,82 @@ class SchedulerEngine {
     }
   }
 
-  // Run a task's step chain sequentially in one conversation. Each step is an agent run by its own role
-  // (cross-role pipeline §5.3); the previous step's final reply is injected into the next step's prompt so
-  // roles hand off work (Turing computes → Joan drafts). bypass + cwd-confined for every step (§5.1). Reuses
-  // run() so each step's turn is persisted + usage-recorded exactly like a chat turn. Throws if any step's
-  // role isn't bound — fire() swallows it, so a misconfigured task simply doesn't run.
+  // Run a task's step chain sequentially in one conversation, dispatching each step on its kind (doc 28 §5.3):
+  // expert/tool/email execute as one agent turn (runAgentStep), project hits projectService directly. Each
+  // step's output is piped into the next step's prompt so roles hand off work (Turing computes → Joan drafts).
+  // fire() swallows a throw, so a misconfigured step just stops that task.
   private async runChain(task: ScheduledTask): Promise<string> {
+    const primaryRoleId = task.steps[0]?.roleId ?? DEFAULT_EXECUTOR
     const convId =
-      task.convId ??
-      conversationService.create({ kind: 'chat', primaryRoleId: task.steps[0].roleId, title: `Scheduled · ${task.name}` })
-        .id
+      task.convId ?? conversationService.create({ kind: 'chat', primaryRoleId, title: `Scheduled · ${task.name}` }).id
 
     const controller = new AbortController() // one abort scope for the whole chain
-    let prior = '' // previous step's reply — injected into the next step's prompt
+    let prior = '' // previous step's output — injected into the next step
     for (let i = 0; i < task.steps.length; i++) {
       const step = task.steps[i]
-      const where = `scheduled task ${task.id} step ${i + 1} (${step.roleId})`
-      const binding = rolesService.getBinding(step.roleId)
-      if (!binding?.endpointId || !binding.model) throw new Error(`${where}: role not bound`)
-      if (!endpointRepo.getById(binding.endpointId)) throw new Error(`${where}: endpoint missing`)
-      if (!keychain.getApiKey(binding.endpointId)) throw new Error(`${where}: no api key`)
-
-      const prompt = prior ? `${step.prompt}\n\n--- Output from the previous step ---\n${prior}` : step.prompt
-      const res = await run(
-        {
-          convId,
-          endpointId: binding.endpointId,
-          model: binding.model,
-          prompt,
-          cwd: task.cwd ?? '',
-          roleId: step.roleId,
-          permissionMode: 'bypass', // full perms inside the pre-authorized cwd; confineReal blocks outside (§5.1)
-        },
-        HEADLESS_CB,
-        controller.signal,
-      )
-      // The step's output = the assistant turn run() just persisted under this run_id; feed it to the next step.
-      prior =
-        convRepo.listByConversation(convId).find((m) => m.runId === res.runId && m.author === 'expert')?.content ?? ''
+      const where = `scheduled task ${task.id} step ${i + 1} (${step.kind})`
+      const role = step.roleId ?? DEFAULT_EXECUTOR
+      switch (step.kind) {
+        case 'expert':
+          prior = await this.runAgentStep(where, role, step.prompt, prior, task, convId, controller.signal)
+          break
+        case 'tool':
+          prior = await this.runAgentStep(where, role, `Use your available MCP tools to do the following.\n\n${step.prompt}`, prior, task, convId, controller.signal)
+          break
+        case 'email':
+          prior = await this.runAgentStep(where, role, emailInstruction(step), prior, task, convId, controller.signal)
+          break
+        case 'project':
+          prior = await this.runProjectStep(step, prior)
+          break
+      }
     }
     return convId
+  }
+
+  // expert / tool / email steps all execute as one bypass + cwd-confined agent turn — the kind only changes
+  // the instruction. Returns the assistant's final reply (read back by the run_id run() just persisted) so the
+  // next step can consume it. Throws if the role isn't bound.
+  private async runAgentStep(
+    where: string,
+    roleId: string,
+    instruction: string,
+    prior: string,
+    task: ScheduledTask,
+    convId: string,
+    signal: AbortSignal,
+  ): Promise<string> {
+    const binding = rolesService.getBinding(roleId)
+    if (!binding?.endpointId || !binding.model) throw new Error(`${where}: role "${roleId}" not bound`)
+    if (!endpointRepo.getById(binding.endpointId)) throw new Error(`${where}: endpoint missing`)
+    if (!keychain.getApiKey(binding.endpointId)) throw new Error(`${where}: no api key`)
+
+    const prompt = prior ? `${instruction}\n\n--- Output from the previous step ---\n${prior}` : instruction
+    const res = await run(
+      {
+        convId,
+        endpointId: binding.endpointId,
+        model: binding.model,
+        prompt,
+        cwd: task.cwd ?? '',
+        roleId,
+        permissionMode: 'bypass', // full perms inside the pre-authorized cwd; confineReal blocks outside (§5.1)
+      },
+      HEADLESS_CB,
+      signal,
+    )
+    return convRepo.listByConversation(convId).find((m) => m.runId === res.runId && m.author === 'expert')?.content ?? ''
+  }
+
+  // project step: advance an existing project to 'executing', or create a new one (goal = prior output, or the
+  // step prompt on the first step). No agent — projectService is a direct call. Returns a one-line summary.
+  private async runProjectStep(step: TaskStep, prior: string): Promise<string> {
+    if (step.action === 'advance' && step.projectId) {
+      projectService.setPhase(step.projectId, 'executing')
+      return `Advanced project ${step.projectId} to executing.`
+    }
+    const p = await projectService.create({ goal: prior || step.prompt, title: step.prompt.slice(0, 60) })
+    return `Created project "${p.title}" (${p.id}).`
   }
 }
 

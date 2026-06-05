@@ -49,8 +49,8 @@ const task = {
   durable: true,
   enabled: true,
   steps: [
-    { roleId: 'scheduler', prompt: 'Output exactly the number 42 and nothing else. No words.' },
-    { roleId: 'scheduler', prompt: 'Add 1 to the number from the previous step. Output only the resulting number, nothing else.' },
+    { kind: 'expert', roleId: 'scheduler', prompt: 'Output exactly the number 42 and nothing else. No words.' },
+    { kind: 'expert', roleId: 'scheduler', prompt: 'Add 1 to the number from the previous step. Output only the resulting number, nothing else.' },
   ],
   cwd: '/tmp',
   createdAt: Date.now(),
