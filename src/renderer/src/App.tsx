@@ -244,7 +244,7 @@ export default function App(): ReactElement {
           ) : (
             <ChatView expert={expert} onOpenSettings={openEndpointsSettings} onBackToProject={fromProject ? () => openProject(fromProject) : undefined} />
           )}
-            {view === 'app' && drawerOpen && <WorkspaceDrawer onClose={() => setDrawerOpen(false)} />}
+            {view === 'app' && drawerOpen && <WorkspaceDrawer onClose={() => setDrawerOpen(false)} activeConv={chat.activeConv} />}
           </div>
           </div>
         </div>

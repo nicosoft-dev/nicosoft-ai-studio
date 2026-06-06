@@ -98,6 +98,10 @@ const api = {
   // broadcast so the renderer attaches it to the in-flight assistant bubble without base64 crossing IPC.
   onConvImage: (cb: (d: ConvImage) => void): (() => void) => agentListen('conv:image', cb),
 
+  // Reveal a file the agent produced in the OS file manager (Finder / Explorer). cwd resolves relative
+  // transcript paths. Returns true if it revealed the file (or its parent dir as a fallback).
+  revealFile: (path: string, cwd?: string): Promise<boolean> => ipcRenderer.invoke('shell:reveal', path, cwd),
+
   endpoints: {
     list: (): Promise<EndpointDto[]> => ipcRenderer.invoke('endpoints:list'),
     add: (input: EndpointInput): Promise<EndpointDto> => ipcRenderer.invoke('endpoints:add', input),

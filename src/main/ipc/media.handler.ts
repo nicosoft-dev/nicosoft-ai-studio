@@ -1,5 +1,7 @@
-import { ipcMain, dialog } from 'electron'
+import { ipcMain, dialog, shell } from 'electron'
 import { writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { isAbsolute, join, dirname } from 'node:path'
 import { readMediaFile } from '../media/storage'
 
 // IPC boundary for generated media (designer's images). save() writes an nsai-media:// image to a
@@ -18,5 +20,23 @@ export function registerMediaHandlers(): void {
     if (result.canceled || !result.filePath) return null
     await writeFile(result.filePath, file.buffer)
     return result.filePath
+  })
+
+  // Reveal a file the agent produced in the OS file manager (Finder / Explorer). Transcript-logged paths may
+  // be relative to the run's cwd, so resolve against the conversation's cwd. If the exact file is gone (moved
+  // / deleted), fall back to opening its parent directory; return false when there's nothing to show.
+  ipcMain.handle('shell:reveal', async (_e, filePath: string, cwd?: string): Promise<boolean> => {
+    if (!filePath) return false
+    const abs = isAbsolute(filePath) ? filePath : cwd ? join(cwd, filePath) : filePath
+    if (existsSync(abs)) {
+      shell.showItemInFolder(abs)
+      return true
+    }
+    const dir = dirname(abs)
+    if (existsSync(dir)) {
+      await shell.openPath(dir)
+      return true
+    }
+    return false
   })
 }

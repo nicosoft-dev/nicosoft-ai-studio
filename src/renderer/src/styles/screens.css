@@ -1209,11 +1209,9 @@
 
 .ws-header { height: 48px; flex: 0 0 48px; display: flex; align-items: center; gap: 9px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--border-1); }
 .ws-title { font-size: 14px; color: var(--text-1); font-weight: 500; }
-.ws-future { font-size: 10px; color: var(--text-4); border: 1px solid var(--border-2); border-radius: 4px; padding: 1px 6px; }
 
 .ws-scroll { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 22px; }
 .ws-section-head { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); margin-bottom: 10px; }
-.ws-by { color: var(--text-4); font-weight: 500; letter-spacing: 0; text-transform: none; }
 
 .ws-files { display: flex; flex-direction: column; gap: 2px; }
 .ws-file { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 7px; cursor: pointer; transition: background 0.1s; }
@@ -1224,18 +1222,17 @@
 
 .ws-images { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .ws-thumb {
-  aspect-ratio: 1; border-radius: 8px; border: 1px solid var(--border-1); overflow: hidden;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; cursor: pointer;
+  aspect-ratio: 1; border-radius: 8px; border: 1px solid var(--border-1); overflow: hidden; cursor: pointer;
 }
 .ws-thumb:hover { border-color: var(--border-2); }
-.wt-bar { width: 40%; height: 3px; border-radius: 2px; }
-.wt-bar.sm { width: 26%; height: 2px; }
-.wt-label { font-size: 13px; font-weight: 800; letter-spacing: 0.04em; }
+.ws-images img.ws-thumb { display: block; width: 100%; height: 100%; }
 
-.ws-notes { display: flex; flex-direction: column; gap: 8px; }
-.ws-note { background: var(--bg-2); border: 1px solid var(--border-1); border-radius: var(--r-md); padding: 10px 12px; }
-.wn-title { font-size: 12.5px; color: var(--text-1); font-weight: 600; margin-bottom: 4px; }
-.wn-body { font-size: 12px; color: var(--text-3); line-height: 1.5; }
+.ws-tasks { display: flex; flex-direction: column; gap: 8px; }
+.ws-task { display: flex; align-items: center; gap: 8px; }
+.ws-task-label { flex: 1; min-width: 0; font-size: 12.5px; color: var(--text-2); line-height: 1.4; }
+.ws-task-label.done { color: var(--text-4); text-decoration: line-through; }
+
+.ws-empty { font-size: 12px; color: var(--text-4); line-height: 1.5; }
 
 /* ============================================================
    Projects

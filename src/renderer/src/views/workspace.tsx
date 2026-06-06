@@ -1,85 +1,158 @@
 /* ============================================================
-   NicoSoft AI Studio — right workspace drawer (mock)
-   Sections: Files · Recent images · Notes. Hairline, flat.
+   NicoSoft AI Studio — right workspace drawer (real, per active conversation)
+   Files (what the agent produced) · Recent images (generated) · Tasks (the
+   agent's TodoWrite list). All derived from the active conversation's
+   transcript + messages — no mock. Re-derives as the conversation grows.
    ============================================================ */
-import type { ReactElement } from 'react'
+import { useEffect, useState, type ReactElement } from 'react'
 import { Icons } from '@/components/icons'
+import { ImageViewer, type ViewerImage } from '@/components/image-viewer'
+import { useChat } from '@/stores/chat'
+import { useWorkspace } from '@/stores/workspace'
 
-const WS_FILES = [
-  { name: "design-brief.pdf", size: "1.2 MB", icon: "file" },
-  { name: "data.csv", size: "84 KB", icon: "table" },
-  { name: "scraper.log", size: "12 KB", icon: "terminal" },
-];
-
-const WS_NOTES = [
-  { title: "OAuth fix", body: "Abort the in-flight token request on cleanup so two refreshes can't race." },
-  { title: "Q2 launch", body: "Waitlist API + hero illustration done; funnel model still queued." },
-];
-
-/* small flat thumbnails standing in for Designer's generated images */
-function ImageThumb({ idx }: { idx: number }): ReactElement {
-  const looks = [
-    { bg: "#0a0a0f", a: "oklch(0.78 0.19 330)", b: "oklch(0.82 0.16 90)", t: "GAME" },
-    { bg: "#0a0d0c", a: "oklch(0.72 0.16 195)", b: "oklch(0.75 0.10 158)", t: "ECO" },
-    { bg: "#0d0a0c", a: "oklch(0.74 0.11 50)", b: "oklch(0.74 0.13 322)", t: "ARC" },
-    { bg: "#090b0f", a: "oklch(0.70 0.12 255)", b: "oklch(0.76 0.10 205)", t: "SKY" },
-  ];
-  const l = looks[idx % looks.length];
-  return (
-    <div className="ws-thumb" style={{ background: l.bg }}>
-      <span className="wt-bar" style={{ background: l.a }} />
-      <span className="wt-label" style={{ color: l.a, fontFamily: "var(--mono)" }}>{l.t}</span>
-      <span className="wt-bar sm" style={{ background: l.b }} />
-    </div>
-  );
+const basename = (p: string): string => p.split(/[\\/]/).pop() || p
+// Tools that CREATE/CHANGE a file on disk — only these count as "produced" (Read is excluded by design).
+const PRODUCE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'WritePdf'])
+// Agent TodoWrite statuses → the existing .task-status pill class + a readable label.
+const TASK: Record<string, { cls: string; label: string }> = {
+  pending: { cls: 'todo', label: 'To do' },
+  in_progress: { cls: 'doing', label: 'In progress' },
+  completed: { cls: 'done', label: 'Done' }
 }
 
-export function WorkspaceDrawer({ onClose }: { onClose: () => void }): ReactElement {
+interface WsFile {
+  path: string
+  name: string
+  op: string
+}
+interface WsTask {
+  content: string
+  status: string
+}
+
+export function WorkspaceDrawer({ onClose, activeConv }: { onClose: () => void; activeConv: string | null }): ReactElement {
+  const [files, setFiles] = useState<WsFile[]>([])
+  const [images, setImages] = useState<ViewerImage[]>([])
+  const [tasks, setTasks] = useState<WsTask[]>([])
+  const [viewer, setViewer] = useState<number | null>(null)
+  // Re-derive when the conversation grows or a run ends (new files/images/tasks land).
+  const msgCount = useChat((s) => (activeConv ? (s.byConversation[activeConv]?.length ?? 0) : 0))
+  const streaming = useChat((s) => (activeConv ? !!s.streaming[activeConv] : false))
+  const conv = useChat((s) => s.conversations.find((c) => c.id === activeConv))
+  const cwd = useWorkspace((s) => (conv?.primaryRoleId ? s.cwdByExpert[conv.primaryRoleId] : undefined))
+
+  useEffect(() => {
+    if (!activeConv) {
+      setFiles([])
+      setImages([])
+      setTasks([])
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      const [transcript, msgs] = await Promise.all([
+        window.api.agent.transcript(activeConv),
+        window.api.conversations.messages(activeConv)
+      ])
+      if (cancelled) return
+      const fileMap = new Map<string, WsFile>()
+      let latestTodos: WsTask[] | null = null
+      for (const run of Object.values(transcript)) {
+        for (const t of run.tools) {
+          if (PRODUCE_TOOLS.has(t.name)) {
+            const p = (t.input as { file_path?: string } | null)?.file_path
+            if (typeof p === 'string' && p) fileMap.set(p, { path: p, name: basename(p), op: t.name })
+          } else if (t.name === 'TodoWrite') {
+            const todos = (t.input as { todos?: WsTask[] } | null)?.todos
+            if (Array.isArray(todos)) latestTodos = todos
+          }
+        }
+      }
+      setFiles([...fileMap.values()])
+      setTasks(latestTodos ?? [])
+      setImages(
+        msgs
+          .filter((m) => m.author !== 'user')
+          .flatMap((m) => m.attachments ?? [])
+          .filter((a) => (a.kind ?? 'image') === 'image' && typeof a.url === 'string')
+          .map((a) => ({ url: a.url, name: a.name ?? 'image' }))
+      )
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [activeConv, msgCount, streaming])
+
   return (
     <div className="workspace-drawer">
       <div className="ws-header">
         <span className="ws-title">Workspace</span>
-        <span className="ws-future">later</span>
-        <button className="icon-btn" title="Collapse" onClick={onClose} style={{ marginLeft: "auto" }}>
+        <button className="icon-btn" title="Collapse" onClick={onClose} style={{ marginLeft: 'auto' }}>
           <Icons.panelRight size={16} />
         </button>
       </div>
       <div className="ws-scroll">
         <div className="ws-section">
           <div className="ws-section-head">Files</div>
-          <div className="ws-files">
-            {WS_FILES.map((f) => {
-              const I = Icons[f.icon];
-              return (
-                <div className="ws-file" key={f.name}>
-                  <span className="wf-ic"><I size={15} /></span>
+          {files.length === 0 ? (
+            <div className="ws-empty">No files created in this chat yet.</div>
+          ) : (
+            <div className="ws-files">
+              {files.map((f) => (
+                <div className="ws-file" key={f.path} title={`${f.path} — click to reveal`} role="button" onClick={() => void window.api.revealFile(f.path, cwd)}>
+                  <span className="wf-ic">
+                    <Icons.file size={15} />
+                  </span>
                   <span className="wf-name">{f.name}</span>
-                  <span className="wf-size">{f.size}</span>
+                  <span className="wf-size">{f.op.toLowerCase()}</span>
                 </div>
-              );
-            })}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="ws-section">
-          <div className="ws-section-head">Recent images <span className="ws-by">· Georgia</span></div>
-          <div className="ws-images">
-            {[0, 1, 2, 3].map((i) => <ImageThumb key={i} idx={i} />)}
-          </div>
+          <div className="ws-section-head">Recent images</div>
+          {images.length === 0 ? (
+            <div className="ws-empty">No images generated yet.</div>
+          ) : (
+            <div className="ws-images">
+              {images.map((img, i) => (
+                <img key={img.url + i} className="ws-thumb" style={{ objectFit: 'cover' }} src={img.url} alt={img.name} onClick={() => setViewer(i)} />
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="ws-section">
-          <div className="ws-section-head">Notes</div>
-          <div className="ws-notes">
-            {WS_NOTES.map((n) => (
-              <div className="ws-note" key={n.title}>
-                <div className="wn-title">{n.title}</div>
-                <div className="wn-body">{n.body}</div>
-              </div>
-            ))}
-          </div>
+          <div className="ws-section-head">Tasks</div>
+          {tasks.length === 0 ? (
+            <div className="ws-empty">No task list for this chat.</div>
+          ) : (
+            <div className="ws-tasks">
+              {tasks.map((t, i) => {
+                const meta = TASK[t.status] ?? TASK.pending
+                return (
+                  <div className="ws-task" key={i}>
+                    <span className={'ws-task-label' + (meta.cls === 'done' ? ' done' : '')}>{t.content}</span>
+                    <span className={'task-status ' + meta.cls}>{meta.label}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       </div>
+
+      {viewer !== null && images[viewer] && (
+        <ImageViewer
+          items={images}
+          index={viewer}
+          onClose={() => setViewer(null)}
+          onStep={(d) => setViewer((v) => (v === null ? null : Math.max(0, Math.min(images.length - 1, v + d))))}
+          onDownload={(img) => void window.api.media.save(img.url, img.name)}
+        />
+      )}
     </div>
-  );
+  )
 }
