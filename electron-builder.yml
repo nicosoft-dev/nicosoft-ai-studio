@@ -1,0 +1,49 @@
+appId: com.nicosoft.aistudio
+productName: NicoSoft AI Studio
+copyright: Copyright © NicoSoft
+
+directories:
+  # electron-builder auto-discovers build/icon.{icns,ico,png} here; icons are also set explicitly below.
+  buildResources: build
+  output: dist
+
+# electron-vite emits the app to out/; ship that + the manifest, drop dev-only sources.
+files:
+  - out/**
+  - package.json
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!e2e/*'
+  - '!scripts/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!electron-builder.yml'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - '!{.eslintrc.cjs,.eslintignore,.prettierrc,.prettierignore,.editorconfig}'
+
+# node:sqlite is built into the Electron runtime — no native modules to rebuild.
+npmRebuild: false
+
+mac:
+  icon: build/icon.icns
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+    - zip
+  # darkModeSupport keeps the title bar / vibrancy consistent with the dark UI.
+  darkModeSupport: true
+
+win:
+  icon: build/icon.ico
+  target:
+    - nsis
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+
+linux:
+  icon: build/icon.png
+  category: Development
+  target:
+    - AppImage
