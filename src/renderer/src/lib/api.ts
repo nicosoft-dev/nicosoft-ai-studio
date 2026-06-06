@@ -12,6 +12,7 @@ export type CustomRoleUpdateDto = Parameters<typeof window.api.roles.updateCusto
 export type ConversationDto = Awaited<ReturnType<typeof window.api.conversations.list>>[number]
 export type MemoryDto = Awaited<ReturnType<typeof window.api.memory.list>>[number]
 export type AnalyticsSummary = Awaited<ReturnType<typeof window.api.analytics.summary>>
+export type AppInfo = Awaited<ReturnType<typeof window.api.app.info>>
 export type McpServerDto = Awaited<ReturnType<typeof window.api.mcp.list>>[number]
 export type McpServerInput = Parameters<typeof window.api.mcp.add>[0]
 export type McpTestResult = Awaited<ReturnType<typeof window.api.mcp.test>>

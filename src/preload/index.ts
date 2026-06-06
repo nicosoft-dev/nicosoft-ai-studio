@@ -13,6 +13,7 @@ import type {
   ConvUsage,
   ConvImage,
   AnalyticsSummary,
+  AppInfo,
   AgentToolStart,
   AgentAssistant,
   AgentToolResults,
@@ -268,6 +269,10 @@ const api = {
   analytics: {
     // Aggregated local stats for the Overview › Stats page. Re-fetch when the tab mounts.
     summary: (): Promise<AnalyticsSummary> => ipcRenderer.invoke('analytics:summary')
+  },
+  app: {
+    // Version + local data dir + on-device counts for Settings › About / Privacy.
+    info: (): Promise<AppInfo> => ipcRenderer.invoke('app:info')
   },
   mcp: {
     list: (): Promise<McpServerDto[]> => ipcRenderer.invoke('mcp:list'),

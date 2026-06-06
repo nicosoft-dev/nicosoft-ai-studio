@@ -433,6 +433,23 @@
 .settings-title { font-size: 20px; color: var(--text-1); font-weight: 600; letter-spacing: -0.02em; margin-bottom: 5px; }
 .settings-desc { font-size: 13px; color: var(--text-3); margin-bottom: 22px; line-height: 1.5; }
 
+/* General / Privacy / About settings rows */
+.set-list { display: flex; flex-direction: column; border: 1px solid var(--border-1); border-radius: var(--r-md); overflow: hidden; }
+.set-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--border-1); }
+.set-row:last-child { border-bottom: none; }
+.set-row.clickable { cursor: pointer; transition: background 0.1s; }
+.set-row.clickable:hover { background: var(--bg-2); }
+.set-row-label { font-size: 13px; color: var(--text-2); flex: 0 0 130px; }
+.set-row-val { flex: 1; min-width: 0; font-size: 13px; color: var(--text-1); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.set-row-val.mono { font-family: var(--mono); font-size: 12px; color: var(--text-3); }
+.set-row-ic { color: var(--text-4); display: grid; place-items: center; flex: 0 0 auto; }
+.set-points { margin: 0 0 22px; padding-left: 18px; display: flex; flex-direction: column; gap: 7px; }
+.set-points li { font-size: 13px; color: var(--text-3); line-height: 1.5; }
+.settings-note { margin-top: 14px; font-size: 12px; color: var(--text-4); line-height: 1.5; }
+.about-hero { margin-bottom: 18px; }
+.about-name { font-size: 17px; color: var(--text-1); font-weight: 600; }
+.about-ver { margin-top: 4px; font-size: 12.5px; color: var(--text-4); font-variant-numeric: tabular-nums; }
+
 /* endpoint rows */
 .endpoint-list { border: 1px solid var(--border-1); border-radius: var(--r-md); overflow: hidden; }
 .endpoint-row { display: flex; align-items: center; gap: 14px; padding: 13px 15px; border-bottom: 1px solid var(--border-1); transition: background 0.1s; }

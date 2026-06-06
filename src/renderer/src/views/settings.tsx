@@ -12,7 +12,7 @@ import { EndpointDialog } from '@/components/dialogs'
 import { ProfilePage, Dropdown } from '@/views/profile'
 import { MemorySettings } from '@/views/memory'
 import type { Expert } from '@/types'
-import type { EndpointDto, EndpointInput } from '@/lib/api'
+import type { EndpointDto, EndpointInput, AppInfo } from '@/lib/api'
 import { THINKING_OPTIONS } from '@/lib/thinking'
 import { useRoleBinding, FAMILY_LABEL } from '@/lib/use-role-binding'
 
@@ -200,21 +200,68 @@ function RolesPage({ onAddEndpoint }: { onAddEndpoint: () => void }): ReactEleme
 }
 
 function GenericSettingsPage({ id }: { id: string }): ReactElement {
-  const map: Record<string, { title: string; desc: string }> = {
-    general: { title: "General", desc: "Appearance, language, and startup behavior. (Dark theme is the only theme in v0.1.)" },
-    privacy: { title: "Privacy", desc: "Your keys, conversations, and memory stay on this device. Nothing is sent to NicoSoft servers." },
-    about:   { title: "About", desc: "NicoSoft AI Studio · v0.1.0 · open source. A desktop workspace where a team of named AI experts works for you." },
-  };
-  const m = map[id] || map.general;
+  const [info, setInfo] = useState<AppInfo | null>(null)
+  useEffect(() => {
+    void window.api.app.info().then(setInfo)
+  }, [])
+
+  if (id === "privacy") {
+    return (
+      <div className="sc-wrap">
+        <div className="settings-title">Privacy</div>
+        <div className="settings-desc">Everything you do here stays on this device.</div>
+        <ul className="set-points">
+          <li>Your API keys are encrypted in the OS keychain.</li>
+          <li>Conversations and memory live in a local database — nothing is sent to NicoSoft.</li>
+          <li>Model requests go straight to the providers you configure; none are proxied through us.</li>
+        </ul>
+        <div className="set-list">
+          <div className="set-row">
+            <span className="set-row-label">On this device</span>
+            <span className="set-row-val">{info ? `${info.conversations} conversations · ${info.memories} memories` : "—"}</span>
+          </div>
+          {info && (
+            <div className="set-row clickable" onClick={() => void window.api.revealFile(info.dataDir)} title="Reveal in Finder">
+              <span className="set-row-label">Data folder</span>
+              <span className="set-row-val mono">{info.dataDir}</span>
+              <span className="set-row-ic"><Icons.folder size={14} /></span>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  if (id === "about") {
+    return (
+      <div className="sc-wrap">
+        <div className="settings-title">About</div>
+        <div className="about-hero">
+          <div className="about-name">NicoSoft AI Studio</div>
+          <div className="about-ver">v{info?.version ?? "…"} · Apache-2.0 · open source</div>
+        </div>
+        <div className="settings-desc">A desktop workspace where a team of named AI experts — engineers, a designer, a translator, an editor, an analyst, a scheduler, and a coordinator — works for you, running on the model providers you choose.</div>
+        <div className="set-list">
+          <div className="set-row"><span className="set-row-label">Version</span><span className="set-row-val">{info?.version ?? "…"}</span></div>
+          <div className="set-row"><span className="set-row-label">License</span><span className="set-row-val">Apache-2.0</span></div>
+          <div className="set-row"><span className="set-row-label">Author</span><span className="set-row-val">NicoSoft</span></div>
+        </div>
+      </div>
+    )
+  }
+
+  // general
   return (
     <div className="sc-wrap">
-      <div className="settings-title">{m.title}</div>
-      <div className="settings-desc">{m.desc}</div>
-      <div style={{ padding: "40px 0", color: "var(--text-4)", fontSize: 13, textAlign: "center", border: "1px dashed var(--border-1)", borderRadius: 8 }}>
-        {m.title} settings
+      <div className="settings-title">General</div>
+      <div className="settings-desc">Appearance and language.</div>
+      <div className="set-list">
+        <div className="set-row"><span className="set-row-label">Theme</span><span className="set-row-val">Dark</span></div>
+        <div className="set-row"><span className="set-row-label">Language</span><span className="set-row-val">English</span></div>
       </div>
+      <div className="settings-note">Light theme and additional languages are planned for a future release.</div>
     </div>
-  );
+  )
 }
 
 export function SettingsView({

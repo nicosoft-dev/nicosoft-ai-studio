@@ -124,6 +124,15 @@ export interface ConvImage {
   attachment: MessageAttachmentDto
 }
 
+// App-level info for the Settings › About / Privacy pages: version, the local data directory (for "reveal
+// data folder"), and on-device counts that back the privacy summary.
+export interface AppInfo {
+  version: string
+  dataDir: string
+  conversations: number
+  memories: number
+}
+
 // Aggregated local analytics for the Overview › Stats page (analytics.service). All real, on-device:
 // tokens/activity from messages, providers from usage_events, memory from memories/memory_versions, tool
 // calls today from the per-run transcripts. inProgress/done conversation counts are derived in the renderer
