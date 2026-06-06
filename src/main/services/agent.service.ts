@@ -77,7 +77,11 @@ const ROLE_CORE_TOOLS: Record<string, readonly string[]> = {
   designer: ['ns_generate_image', 'Read', 'Write', 'WritePdf', 'Grep', 'Glob', 'WebFetch', 'WebSearch'],
   // scheduler (Joan): Read context, Write drafts/output, WebSearch for background, code_execution for
   // time/cron math, schedule_* to create/list/delete tasks. Real email/calendar send (MCP) is v2.
-  scheduler: ['Read', 'Write', 'WebFetch', 'WebSearch', 'code_execution', 'schedule_create', 'schedule_list', 'schedule_delete']
+  scheduler: ['Read', 'Write', 'WebFetch', 'WebSearch', 'code_execution', 'schedule_create', 'schedule_list', 'schedule_delete'],
+  // coordinator (Danny) in DIRECT mode only: a READ-ONLY kit so the front door can answer a quick file /
+  // web lookup itself instead of dispatching. Deliberately no Write/Edit/Bash/code — mutating or multi-step
+  // work is a specialist's job (the prompt steers him to hand off). Read/Glob need a cwd; WebSearch doesn't.
+  coordinator: ['Read', 'Glob', 'WebSearch']
 }
 
 // Plan-mode tools (EnterPlanMode/ExitPlanMode) — every agent role gets them (doc 17). They're
@@ -464,6 +468,10 @@ export interface DispatchedAgentInput {
   memories: MemoryRow[]
   summary: string | null
   imageModel?: string // image backend slug for ns_generate_image (dispatched designer / Georgia); Gemini only
+  // Full system prompt override, used verbatim instead of buildAgentSystem(roleId, …). The coordinator's
+  // DIRECT mode passes its own DIRECT prompt (+ memories/summary) here so it runs the agent loop with the
+  // read-only kit but Danny's front-door persona — not the dispatched-expert coding system.
+  systemPromptOverride?: string
 }
 
 export async function runDispatchedAgent(
@@ -473,9 +481,9 @@ export async function runDispatchedAgent(
 ): Promise<{ text: string; inTokens: number; outTokens: number; attachments: MessageAttachmentDto[] }> {
   let tools = toolsForAgentRole(d.roleId)
   if (DEV_ROLES.has(d.roleId)) tools = [...tools, ...SERVICE_TOOLS, ...SUBAGENT_TOOLS, lspTool as unknown as Tool]
-  if (!d.cwd && !DEV_ROLES.has(d.roleId)) tools = tools.filter((t) => t.name !== 'Read')
+  if (!d.cwd && !DEV_ROLES.has(d.roleId)) tools = tools.filter((t) => t.name !== 'Read' && t.name !== 'Glob')
   const serverTools: ServerToolSchema[] = d.protocol === 'openai' ? [{ type: 'web_search', name: 'web_search' }] : []
-  const system = buildAgentSystem(d.roleId, d.memories, d.summary, skillManager.listingForRole(d.roleId), d.cwd)
+  const system = d.systemPromptOverride ?? buildAgentSystem(d.roleId, d.memories, d.summary, skillManager.listingForRole(d.roleId), d.cwd)
 
   let seed: AgentMessage[]
   if (d.includeHistory) {

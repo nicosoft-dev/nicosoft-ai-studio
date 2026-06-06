@@ -124,6 +124,7 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
       dispatch: null,
       includeHistory: true,
       isDirect: true,
+      cwd: input.cwdByRole?.['coordinator'], // so Danny's read-only Read/Glob have a project boundary
       cb,
       signal
     })
@@ -509,6 +510,15 @@ interface RunStepOptions {
   isCouncilSynthesis?: boolean
 }
 
+// Coordinator's system = a base prompt section (direct / synthesis) + his recalled memories + the running
+// summary — the same shape whether he runs the agent loop (DIRECT) or the tool-less merge (synthesis).
+function withCoordinatorContext(base: string, memories: MemoryRow[], summary: string | null): string {
+  const parts = [base]
+  if (memories.length) parts.push('What you remember about the user:\n' + memories.map((m) => `- ${m.content}`).join('\n'))
+  if (summary) parts.push('Summary of earlier conversation:\n' + summary)
+  return parts.join('\n\n')
+}
+
 async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputTokens: number; outputTokens: number; endpointId: string; model: string }> {
   const { convId, roleId, prompt, dispatch, cb, signal, cwd, includeHistory = false, isSynthesis = false, isDirect = false, isParallelSynthesis = false, isCouncilSynthesis = false } = opts
   const binding = rolesService.getBinding(roleId)
@@ -543,7 +553,9 @@ async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputT
   // any of the three runs the full tool loop (mirrors agent.service.run's protocol gate).
   const agentProtocol: 'anthropic' | 'openai' | 'gemini' | null =
     ep.protocol === 'anthropic' ? 'anthropic' : ep.protocol === 'openai' || ep.protocol === 'custom' ? 'openai' : ep.protocol === 'gemini' ? 'gemini' : null
-  if (agentProtocol && agentService.AGENT_ROLE_IDS.has(roleId) && !isCoordinatorSelf) {
+  // Agent path: a dispatched expert (full kit), OR Danny's DIRECT turn (isDirect → his read-only kit +
+  // the DIRECT persona via systemPromptOverride). Synthesis turns stay on the tool-less llmChat path below.
+  if (agentProtocol && ((agentService.AGENT_ROLE_IDS.has(roleId) && !isCoordinatorSelf) || isDirect)) {
     let text = ''
     const agentCb: agentService.AgentCallbacks = {
       onStream: (ev) => {
@@ -577,7 +589,10 @@ async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputT
         memories,
         summary: summaryContent,
         permissionMode: opts.permissionMode,
-        imageModel: binding.imageModel ?? undefined
+        imageModel: binding.imageModel ?? undefined,
+        // DIRECT: run the loop with Danny's front-door persona + his recalled context, not the
+        // dispatched-expert coding system. Undefined for real dispatches → buildAgentSystem as before.
+        systemPromptOverride: isDirect ? withCoordinatorContext(COORDINATOR_DIRECT_PROMPT, memories, summaryContent) : undefined
       },
       agentCb,
       signal
@@ -614,10 +629,7 @@ async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputT
           : buildRolePrompt(roleId)
   if (!systemPrompt) throw new LlmError('bad_request', `unknown role "${roleId}"`)
 
-  const parts = [systemPrompt]
-  if (memories.length) parts.push('What you remember about the user:\n' + memories.map((m) => `- ${m.content}`).join('\n'))
-  if (summaryContent) parts.push('Summary of earlier conversation:\n' + summaryContent)
-  const system = parts.join('\n\n')
+  const system = withCoordinatorContext(systemPrompt, memories, summaryContent)
 
   // Build the conversation messages. With history: replay turns after the latest summary's boundary,
   // verbatim — the trailing user turn IS the current request (renderer persisted it before coordinator:run),
