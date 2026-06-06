@@ -124,33 +124,44 @@ function RoleBindRow({ expert }: { expert: Expert }): ReactElement {
         <span className="rb-name">{expert.name}</span>
       </div>
       <div className="rb-binding">
-        <span className={"proto-chip " + (b.family ?? 'openai')}><span className="pc-dot" /> {FAMILY_LABEL[b.family ?? 'openai']}</span>
-        <div className="rb-controls">
-          <div style={{ width: 150 }}>
-            <Dropdown options={b.endpoints.map((e) => ({ v: e.id, l: e.name }))} value={b.endpointId} onChange={b.onEndpoint} />
-          </div>
-          {/* Model options are the selected endpoint's configured slug list (set in the endpoint
-              dialog). Switching endpoint repopulates them and resets to its first model. */}
-          <div style={{ width: 168 }}>
-            <Dropdown
-              options={(b.models.length ? b.models : ['']).map((m) => ({ v: m, l: m || '— no models —' }))}
-              value={b.model}
-              onChange={b.onModel}
-            />
-          </div>
-          {b.depths.length > 0 && (
-            <div style={{ width: 150 }}>
-              <Dropdown
-                options={[
-                  { v: '', l: 'Default thinking' },
-                  ...THINKING_OPTIONS.filter((t) => b.depths.includes(t.value)).map((t) => ({ v: t.value, l: t.label }))
-                ]}
-                value={b.depth}
-                onChange={b.onDepth}
-              />
+        {/* Mirror ExpertDetail's InlineBinding guards: b.endpoints is [] on the first async frame (and
+            stays empty if no endpoint exists), so render the binding controls only once loaded and
+            non-empty — otherwise the endpoint Dropdown gets empty options and the row crashes. */}
+        {!b.loaded ? (
+          <span className="rb-needs" style={{ opacity: 0.6 }}>Loading…</span>
+        ) : b.endpoints.length === 0 ? (
+          <span className="rb-needs"><Icons.alert size={14} /> No endpoint configured</span>
+        ) : (
+          <>
+            <span className={"proto-chip " + (b.family ?? 'openai')}><span className="pc-dot" /> {FAMILY_LABEL[b.family ?? 'openai']}</span>
+            <div className="rb-controls">
+              <div style={{ width: 150 }}>
+                <Dropdown options={b.endpoints.map((e) => ({ v: e.id, l: e.name }))} value={b.endpointId} onChange={b.onEndpoint} />
+              </div>
+              {/* Model options are the selected endpoint's configured slug list (set in the endpoint
+                  dialog). Switching endpoint repopulates them and resets to its first model. */}
+              <div style={{ width: 168 }}>
+                <Dropdown
+                  options={(b.models.length ? b.models : ['']).map((m) => ({ v: m, l: m || '— no models —' }))}
+                  value={b.model}
+                  onChange={b.onModel}
+                />
+              </div>
+              {b.depths.length > 0 && (
+                <div style={{ width: 150 }}>
+                  <Dropdown
+                    options={[
+                      { v: '', l: 'Default thinking' },
+                      ...THINKING_OPTIONS.filter((t) => b.depths.includes(t.value)).map((t) => ({ v: t.value, l: t.label }))
+                    ]}
+                    value={b.depth}
+                    onChange={b.onDepth}
+                  />
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </>
+        )}
       </div>
     </div>
   );

@@ -69,7 +69,8 @@ export function Dropdown({
 }: SelectControlProps & { icon?: string }): ReactElement {
   const [open, setOpen] = useState(false)
   const norm: DropdownOption[] = options.map((o) => (typeof o === 'string' ? { v: o, l: o } : o))
-  const current = norm.find((o) => o.v === value) || norm[0]
+  // Never index into an empty list — a caller passing no options must not crash the dropdown.
+  const current = norm.find((o) => o.v === value) || norm[0] || { v: '', l: '—' }
   const I = icon ? Icons[icon] : null
   return (
     <div className="dropdown" style={{ position: 'relative' }}>
