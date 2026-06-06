@@ -751,12 +751,6 @@
 .ts-dot.working { animation: pulse-soft 1.9s ease-in-out infinite; }
 
 .tl-foot { max-width: 680px; margin: 4px auto 0; font-size: 11px; color: var(--text-4); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.tl-idle-toggle {
-  font-size: 11px; color: var(--text-4); padding: 4px 9px; border-radius: 6px;
-  border: 1px dashed var(--border-2); white-space: nowrap;
-  transition: background 0.12s, color 0.12s, border-color 0.12s;
-}
-.tl-idle-toggle:hover { background: var(--bg-2); color: var(--text-2); border-color: var(--text-4); }
 
 /* idle: team-ready strip */
 .team-ready { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 36px 30px; max-width: 640px; margin: 0 auto; }
@@ -772,6 +766,12 @@
 .trc-meta { min-width: 0; }
 .trc-name { font-size: 13px; color: var(--text-1); font-weight: 500; }
 .trc-spec { font-size: 11px; color: var(--text-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* in-progress empty state — the section stays visible (count 0) and shows nothing is running */
+.tl-empty { padding-top: 2px; }
+.tl-empty-line { font-size: 13px; color: var(--text-2); margin-bottom: 2px; }
+.tl-empty .team-ready { padding: 8px 0 2px; margin: 0; max-width: none; }
+.tl-empty .tr-prompt { text-align: left; font-size: 12.5px; color: var(--text-3); margin-bottom: 14px; }
 
 /* ============================================================
    Extensions — MCP · Skills · Plugins

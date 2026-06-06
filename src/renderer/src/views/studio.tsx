@@ -112,38 +112,39 @@ function ActivityTimeline({
   useEffect(() => {
     void window.api.project.list().then((p) => setProjects(p.filter((x) => x.phase !== 'done')))
   }, [])
-  const hasWork = inProgress.length > 0 || projects.length > 0
 
   return (
     <div className="timeline-wrap">
       <div className="tl-scroll">
-        {hasWork ? (
-          <>
-            {inProgress.length > 0 && (
-              <div className="tl-group">
-                <div className="tl-group-head">
-                  <span>In progress</span>
-                  <span className="tl-count">{inProgress.length}</span>
-                </div>
-                <div className="tl-list">{inProgress.map((c) => <InProgressRow key={c.id} conv={c} onOpenConv={onOpenConv} />)}</div>
-              </div>
-            )}
-            {projects.length > 0 && (
-              <div className="tl-group">
-                <div className="tl-group-head">
-                  <span>Collaboration projects</span>
-                  <span className="tl-count">{projects.length}</span>
-                </div>
-                <div className="tl-list">{projects.map((p) => <ProjectRow key={p.id} project={p} onOpenProject={onOpenProject} />)}</div>
-              </div>
-            )}
-          </>
-        ) : (
-          <TeamReady onOpenExpert={onOpenExpert} />
+        {/* "In progress" is a permanent section — when nothing is streaming it renders an empty state
+            (count 0 + the ready team), it is never hidden. */}
+        <div className="tl-group">
+          <div className="tl-group-head">
+            <span>In progress</span>
+            <span className="tl-count">{inProgress.length}</span>
+          </div>
+          {inProgress.length > 0 ? (
+            <div className="tl-list">{inProgress.map((c) => <InProgressRow key={c.id} conv={c} onOpenConv={onOpenConv} />)}</div>
+          ) : (
+            <div className="tl-empty">
+              <div className="tl-empty-line">Nothing running right now.</div>
+              <TeamReady onOpenExpert={onOpenExpert} />
+            </div>
+          )}
+        </div>
+
+        {projects.length > 0 && (
+          <div className="tl-group">
+            <div className="tl-group-head">
+              <span>Collaboration projects</span>
+              <span className="tl-count">{projects.length}</span>
+            </div>
+            <div className="tl-list">{projects.map((p) => <ProjectRow key={p.id} project={p} onOpenProject={onOpenProject} />)}</div>
+          </div>
         )}
 
         <div className="tl-foot">
-          <span>{hasWork ? 'Live work only · finished conversations move to History' : 'Nothing running right now'}</span>
+          <span>Live work only · finished conversations move to History</span>
         </div>
       </div>
     </div>
