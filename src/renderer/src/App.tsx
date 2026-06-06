@@ -105,11 +105,13 @@ export default function App(): ReactElement {
     // unconditional newConversation() reset activeConv=null and lost the running collaboration.
     const cur = chat.conversations.find((c) => c.id === chat.activeConv)
     if (cur?.primaryRoleId !== id) {
-      // Switching to a different expert: don't blank out an IN-FLIGHT run. If this expert has a streaming
-      // conversation, restore it (tabbing away and back used to drop you on an empty screen while the run
-      // kept going invisibly); otherwise start fresh as before.
+      // Switching to a different expert: RESTORE its session rather than always blanking. Prefer an
+      // in-flight run (never drop you on an empty screen while a run keeps going invisibly), else the
+      // expert's most-recent conversation (conversations is updated_at-DESC, so the first match for this
+      // role is its latest), else start fresh. "Switch back to Flynn → continue where I left off."
       const running = chat.conversations.find((c) => c.primaryRoleId === id && chat.streaming[c.id])
-      if (running) void chat.openConversation(running.id)
+      const restore = running ?? chat.conversations.find((c) => c.primaryRoleId === id)
+      if (restore) void chat.openConversation(restore.id)
       else chat.newConversation()
     }
     setView('app')

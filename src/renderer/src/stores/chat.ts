@@ -802,9 +802,34 @@ export const useChat = create<ChatState>((set, get) => {
           coordinatorMeta.delete(sid)
         }
       }
-      // Also clear any pending approval: stop just deleted the agentMeta, so the backend's done/cancel
-      // events would meta-miss and leave the ApprovalDialog stuck on screen otherwise.
-      set((s) => ({ streaming: { ...s.streaming, [cid]: false }, permission: { ...s.permission, [cid]: null }, question: { ...s.question, [cid]: null } }))
+      // stop() deleted the meta above, so the backend's terminal done/error/cancel events will meta-miss and
+      // SKIP their normal cleanup. So we finalize everything HERE, or it never happens:
+      //  - close out EVERY in-flight assistant bubble (parallel/council stream several at once) — a message
+      //    left `streaming:true`, or a tool left `status:'running'`, keeps ThinkingReadout's 250ms clock
+      //    ticking forever ("still counting tokens / time after stop").
+      //  - drop a trailing empty placeholder (stopped before any output) so there's no blank bubble.
+      //  - clear any pending approval/question dialog (same meta-miss reason).
+      set((s) => {
+        const msgs = (s.byConversation[cid] ?? []).map((m) => {
+          if (m.role !== 'assistant' || !m.streaming) return m
+          const tools = m.tools?.some((t) => t.status === 'running')
+            ? m.tools.map((t) => (t.status === 'running' ? { ...t, status: 'error' as const } : t))
+            : m.tools
+          return { ...m, streaming: false, tools }
+        })
+        const tail = msgs[msgs.length - 1]
+        const cleaned =
+          tail && tail.role === 'assistant' && !tail.text.trim() && !tail.images?.length && !tail.tools?.length
+            ? msgs.slice(0, -1)
+            : msgs
+        return {
+          byConversation: { ...s.byConversation, [cid]: cleaned },
+          streaming: { ...s.streaming, [cid]: false },
+          permission: { ...s.permission, [cid]: null },
+          question: { ...s.question, [cid]: null },
+          approvals: { ...s.approvals, [cid]: [] } // drop stale coordinator approval cards from the killed run
+        }
+      })
     },
 
     respondPermission: (convId, allow) => {
