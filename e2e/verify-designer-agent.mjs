@@ -36,22 +36,26 @@ const page = await app.firstWindow()
 await page.waitForLoadState('domcontentloaded')
 await page.waitForTimeout(1000)
 
-const setup = await page.evaluate(async () => {
+// Optional image-model override (e.g. E2E_IMAGE_MODEL=nano-banana-pro-preview) — defaults to the user's
+// bound backend. The binding is always restored to the original regardless of the override.
+const overrideImageModel = process.env.E2E_IMAGE_MODEL || ''
+const setup = await page.evaluate(async (override) => {
   const b = (await window.api.roles.listBindings()).find((x) => x.roleId === 'designer')
   const ep = (await window.api.endpoints.list()).find((e) => e.id === b?.endpointId)
   if (!b?.endpointId || !b?.model || !ep?.hasKey || ep.protocol !== 'gemini') return { ok: false }
   const orig = { model: b.model, imageModel: b.imageModel || 'nano-banana-pro-preview' }
-  // Swap ONLY the chat model to a known-working one (designer's -latest default 400s the agent loop). Keep
-  // the user's bound image backend — that's the one their nsai upstream actually serves.
+  const useImageModel = override || orig.imageModel
+  // Swap ONLY the chat model to a known-working one (designer's -latest default 400s the agent loop). Use
+  // the override image backend if given, else the user's bound one.
   await window.api.roles.setBinding('designer', {
     endpointId: b.endpointId,
     model: 'nicosoft/gemini-3-flash-agent',
     thinkingDepth: b.thinkingDepth ?? null,
-    imageModel: orig.imageModel
+    imageModel: useImageModel
   })
   for (const c of (await window.api.conversations.list()).filter((c) => c.primaryRoleId === 'designer')) await window.api.conversations.remove(c.id)
-  return { ok: true, orig }
-})
+  return { ok: true, orig, using: useImageModel }
+}, overrideImageModel)
 console.log('setup:', JSON.stringify(setup))
 if (!setup.ok) { console.log('SKIP — designer not bound to a keyed gemini endpoint'); await app.close(); process.exit(0) }
 
