@@ -8,13 +8,16 @@
 // reported back so the model re-issues WebFetch with the new URL (an open-redirect can't silently
 // bounce us to another origin).
 
+import { request as httpsRequest } from 'node:https'
+import { request as httpRequest } from 'node:http'
+import type { IncomingMessage } from 'node:http'
 import TurndownService from 'turndown'
 import { z } from 'zod'
 import { chatAnthropic } from '../../llm/anthropic'
 import type { AgentLlmAccess } from '../context'
 import { buildTool } from '../tool'
 import type { ToolResultBlock } from '../types'
-import { checkUrlSsrf } from './ssrf'
+import { checkUrlSsrf, ssrfSafeLookup } from './ssrf'
 
 const inputSchema = z.object({
   url: z.string().url().describe('The URL to fetch (http upgraded to https)'),
@@ -52,6 +55,72 @@ type FetchOutcome =
   | { kind: 'content'; markdown: string; contentType: string }
   | { kind: 'redirect'; redirectUrl: string }
 
+interface HttpResult {
+  status: number
+  statusMessage: string
+  location: string | null
+  contentType: string
+  body: Buffer
+}
+
+// GET over node http/https with ssrfSafeLookup pinned as the connection's DNS resolver — the address the
+// socket dials is re-validated at connect time (DNS-rebinding gate). No auto-redirects (the caller
+// re-guards each hop); agent: false so every hop makes a fresh, validated connection (no pooled-socket
+// reuse). Body is capped, abort + timeout honoured.
+function httpGet(target: string, signal: AbortSignal): Promise<HttpResult> {
+  const reqFn = new URL(target).protocol === 'http:' ? httpRequest : httpsRequest
+  const combined = AbortSignal.any([signal, AbortSignal.timeout(FETCH_TIMEOUT_MS)])
+  return new Promise<HttpResult>((resolve, reject) => {
+    const req = reqFn(
+      target,
+      {
+        method: 'GET',
+        lookup: ssrfSafeLookup,
+        agent: false,
+        signal: combined,
+        headers: { Accept: 'text/markdown, text/html, */*', 'User-Agent': 'NicoSoft-AI-Studio/WebFetch' },
+      },
+      (res: IncomingMessage) => {
+        const status = res.statusCode ?? 0
+        const statusMessage = res.statusMessage ?? ''
+        if (status >= 300 && status < 400) {
+          res.resume() // drain to free the socket; we don't read a redirect body
+          const loc = res.headers.location
+          resolve({ status, statusMessage, location: typeof loc === 'string' ? loc : null, contentType: '', body: Buffer.alloc(0) })
+          return
+        }
+        const contentType = String(res.headers['content-type'] ?? '')
+        const chunks: Buffer[] = []
+        let total = 0
+        let settled = false
+        const finish = (): void => {
+          if (settled) return
+          settled = true
+          resolve({ status, statusMessage, location: null, contentType, body: Buffer.concat(chunks).subarray(0, MAX_CONTENT_BYTES) })
+        }
+        res.on('data', (c: Buffer) => {
+          chunks.push(c)
+          total += c.length
+          if (total >= MAX_CONTENT_BYTES) {
+            res.destroy() // stop a huge/streaming body from exhausting memory
+            finish()
+          }
+        })
+        res.on('end', finish)
+        res.on('close', finish)
+        res.on('error', (e) => {
+          if (!settled) {
+            settled = true
+            reject(e)
+          }
+        })
+      },
+    )
+    req.on('error', reject) // includes the ssrf-guard error raised by ssrfSafeLookup at connect time
+    req.end()
+  })
+}
+
 async function fetchPage(rawUrl: string, signal: AbortSignal, depth = 0): Promise<FetchOutcome> {
   if (depth > MAX_REDIRECTS) throw new Error(`too many redirects (exceeded ${MAX_REDIRECTS})`)
   // Upgrade http → https before connecting.
@@ -59,52 +128,23 @@ async function fetchPage(rawUrl: string, signal: AbortSignal, depth = 0): Promis
   if (u.protocol === 'http:') u.protocol = 'https:'
   const target = u.toString()
 
-  const res = await fetch(target, {
-    redirect: 'manual',
-    signal: AbortSignal.any([signal, AbortSignal.timeout(FETCH_TIMEOUT_MS)]),
-    headers: { Accept: 'text/markdown, text/html, */*', 'User-Agent': 'NicoSoft-AI-Studio/WebFetch' },
-  })
+  const res = await httpGet(target, signal)
 
   if (res.status >= 300 && res.status < 400) {
-    const loc = res.headers.get('location')
-    if (!loc) throw new Error('redirect response missing Location header')
-    const redirectUrl = new URL(loc, target).toString()
+    if (!res.location) throw new Error('redirect response missing Location header')
+    const redirectUrl = new URL(res.location, target).toString()
     if (isSameHostRedirect(target, redirectUrl)) {
-      const blocked = await checkUrlSsrf(redirectUrl) // re-guard the redirect target
+      const blocked = await checkUrlSsrf(redirectUrl) // re-guard the redirect target (pre-flight)
       if (blocked) throw new Error(`redirect blocked: ${blocked}`)
       return fetchPage(redirectUrl, signal, depth + 1)
     }
     return { kind: 'redirect', redirectUrl }
   }
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`)
+  if (res.status < 200 || res.status >= 300) throw new Error(`HTTP ${res.status} ${res.statusMessage}`.trimEnd())
 
-  const contentType = res.headers.get('content-type') ?? ''
-  const body = await readCapped(res, MAX_CONTENT_BYTES)
-  const text = body.toString('utf-8')
-  const markdown = contentType.includes('text/html') ? htmlToMarkdown(text) : text
-  return { kind: 'content', markdown, contentType }
-}
-
-// Read the body stream up to `cap` bytes, then cancel — prevents a huge/streaming response from
-// exhausting memory (fetch's arrayBuffer() has no size limit).
-async function readCapped(res: Response, cap: number): Promise<Buffer> {
-  if (!res.body) return Buffer.alloc(0)
-  const reader = res.body.getReader()
-  const chunks: Buffer[] = []
-  let total = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    if (value && value.length > 0) {
-      chunks.push(Buffer.from(value))
-      total += value.length
-      if (total >= cap) {
-        await reader.cancel()
-        break
-      }
-    }
-  }
-  return Buffer.concat(chunks).subarray(0, cap)
+  const text = res.body.toString('utf-8')
+  const markdown = res.contentType.includes('text/html') ? htmlToMarkdown(text) : text
+  return { kind: 'content', markdown, contentType: res.contentType }
 }
 
 // Run the user's extraction prompt over the page content with the small model. Copyright guardrails

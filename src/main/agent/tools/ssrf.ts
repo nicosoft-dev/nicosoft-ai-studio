@@ -1,15 +1,18 @@
 // SSRF guard for the WebFetch tool. The dedicated Read/Grep tools and bash args are path-confined,
 // but WebFetch opens an OUTBOUND connection — a model coached into fetching an internal address
-// (cloud metadata 169.254.169.254, localhost admin panels, RFC1918 ranges) must be blocked. We
-// resolve the hostname and reject if ANY resolved address is private/loopback/link-local, so a
-// public domain that points at an internal IP is caught too, not just IP-literal URLs.
+// (cloud metadata 169.254.169.254, localhost admin panels, RFC1918 ranges) must be blocked.
 //
-// Residual risk: DNS rebinding after the check (TTL expiry → re-resolve to an internal IP at fetch
-// time). A future hardening can pin the resolved IP into the fetch dispatcher; for now the check +
-// the same-host-only redirect policy bound the exposure. Mirrors nsai's first-gate ValidateExternalURL.
+// Two gates, mirroring nsai's ValidateExternalURL (first) + ssrfDialControl (second):
+//   1. checkUrlSsrf — pre-flight: reject bad scheme / embedded creds / internal hostnames, and resolve
+//      the host rejecting if ANY address is private (a public domain pointing at an internal IP is caught).
+//   2. ssrfSafeLookup — the dns.lookup the socket actually dials through: it re-validates the address at
+//      CONNECT time, closing the DNS-rebinding window (TTL expiry → re-resolve to an internal IP between
+//      the pre-flight check and the connection). Used as http(s).request's `lookup` option in web-fetch.
 
 import { lookup } from 'node:dns/promises'
+import { lookup as lookupCb } from 'node:dns'
 import { isIP } from 'node:net'
+import type { LookupFunction } from 'node:net'
 
 // Returns null if the URL is safe to fetch, or a human-readable reason if it must be blocked.
 export async function checkUrlSsrf(rawUrl: string): Promise<string | null> {
@@ -50,6 +53,27 @@ export async function checkUrlSsrf(rawUrl: string): Promise<string | null> {
     if (isPrivateIp(ip)) return `${host} resolves to a non-public address (${ip})`
   }
   return null
+}
+
+// The second gate: a dns.lookup drop-in passed as http(s).request's `lookup`, so the address it returns
+// is the one the socket actually connects to. Rejects private/loopback/link-local at connect time —
+// even if DNS rebound to an internal IP after checkUrlSsrf ran. The error surfaces as the request's
+// 'error' event (WebFetch reports it like any other fetch failure).
+export const ssrfSafeLookup: LookupFunction = (hostname, options, callback) => {
+  lookupCb(hostname, options, (err, address, family) => {
+    if (err) {
+      callback(err, address as string, family as number)
+      return
+    }
+    // `address` is a string when options.all is false (how net.connect calls it) or an array when true.
+    const addrs = Array.isArray(address) ? address.map((a) => a.address) : [address]
+    const bad = addrs.find((ip) => isPrivateIp(ip))
+    if (bad) {
+      callback(new Error(`ssrf guard: ${hostname} resolved to a non-public address (${bad})`), address as string, family as number)
+      return
+    }
+    callback(null, address as string, family as number)
+  })
 }
 
 function isPrivateIp(ip: string): boolean {
