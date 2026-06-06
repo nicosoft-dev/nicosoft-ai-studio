@@ -1,20 +1,13 @@
-// Mock data + exact copy — recreated from the prototype's data.jsx.
-// Batch 0: this is the (mock) data source the UI renders. Later batches replace it with
-// real IPC-backed services; the shapes live in '@/types'.
-import type {
-  Expert,
-  StudioData,
-  MemoryData,
-  ExtensionsData,
-  StudioModule,
-  EndpointHealth,
-  EndpointRow,
-  RoleBinding,
-  Greeting,
-  HistoryGroup,
-  Conversation,
-  Project
-} from '@/types'
+// Static seed data for the studio UI — NOT a mock backend. These are real defaults / config:
+//   - EXPERTS / EXPERT_BY_ID: the built-in expert roster (names, colors, specialties, default models)
+//   - USER_PROFILE: the display name shown on the user avatar; hydrated from real storage at runtime
+//   - GREETINGS: the per-expert greeting + starter chips on a fresh chat
+//   - EXTENSIONS: still-mock per-expert MCP/skills shown on the expert PROFILE page (the Extensions
+//     settings screen itself uses real window.api.mcp/skills/plugins)
+//   - PHASES / PHASE_INDEX: collaboration-project phase labels
+// The prototype's mock projects / conversations / analytics / memory / endpoint fixtures were removed —
+// those screens read real IPC-backed data now.
+import type { Expert, StudioData, ExtensionsData, Greeting } from '@/types'
 
 const EXPERTS: Expert[] = [
   { id: 'coordinator', name: 'Danny', color: 'var(--exp-coordinator)', specialty: 'Coordinator — routes & merges', personality: 'Calm air-traffic-controller', model: 'nicosoft/claude-opus-4-8', family: 'anthropic', coordinator: true },
@@ -32,48 +25,9 @@ const EXPERT_BY_ID: Record<string, Expert> = Object.fromEntries(EXPERTS.map((e) 
 
 const USER_PROFILE = { name: 'Nico' }
 
-const MEMORY: MemoryData = {
-  selfLearning: {
-    master: true,
-    perExpert: { coordinator: true, generalist: true, engineer: true, designer: true, translator: true, editor: true, analyst: true, scheduler: true }
-  },
-  shared: [
-    { id: 's1', text: 'Goes by Nico; prefers terse, code-first answers over prose.' },
-    { id: 's2', text: 'Primary stack: TypeScript, React, Python. Uses pnpm + Vite.' },
-    { id: 's3', text: 'Pacific time zone; usually works mornings.' },
-    { id: 's4', text: "Would rather be told they're wrong than flattered." }
-  ],
-  byExpert: {
-    engineer: {
-      role: [
-        { id: 'h1', text: 'Runs React 19 with StrictMode on in development.' },
-        { id: 'h2', text: 'Prefers AbortController over boolean flags for effect cleanup.' },
-        { id: 'h3', text: 'Reviews must include a one-line summary before the diff.' }
-      ],
-      collab: [{ id: 'h4', text: 'When an error is non-English, Translator translates it before Flynn debugs.' }]
-    },
-    analyst: {
-      role: [
-        { id: 'q1', text: 'Always wants a confidence interval, not just a point estimate.' },
-        { id: 'q2', text: 'Prefers small-multiples charts over a single busy chart.' }
-      ],
-      collab: [{ id: 'q3', text: 'Hands finished figures to Editor to fold into summaries.' }]
-    },
-    translator: {
-      role: [{ id: 'e1', text: 'Targets German and Japanese most often; keeps an informal register.' }],
-      collab: [{ id: 'e2', text: 'Passes translated stack traces to Flynn with the original kept inline.' }]
-    },
-    coordinator: {
-      role: [{ id: 'a1', text: 'Prefers a one-line synthesis at the end of multi-expert tasks.' }],
-      collab: [{ id: 'a2', text: 'Routes code + non-English errors to Translator → Flynn in that order.' }]
-    },
-    editor: { role: [{ id: 'sg1', text: 'Wants action items as bullets, max three, no preamble.' }], collab: [] },
-    generalist: { role: [{ id: 'i1', text: 'Likes 2–3 framed options before committing to one.' }], collab: [] },
-    designer: { role: [{ id: 'l1', text: 'Default vibe: flat, restrained, no gradients.' }], collab: [] },
-    scheduler: { role: [{ id: 'm1', text: 'Signs emails simply; proposes three time slots by default.' }], collab: [] }
-  }
-}
-
+// Per-expert extensions shown on the expert PROFILE page. Still mock (the real per-installation MCP /
+// skills live behind window.api on the Extensions settings screen); kept until the profile page reads
+// the real catalog filtered by role scope.
 const EXTENSIONS: ExtensionsData = {
   mcp: [
     { name: 'GitHub', transport: 'http', endpoint: 'https://mcp.github.com/sse', status: 'connected', tools: 8, scope: 'all' },
@@ -101,120 +55,6 @@ const EXTENSIONS: ExtensionsData = {
   ]
 }
 
-const STUDIO: StudioModule = {
-  status: { coordinator: 'routing', generalist: 'idle', engineer: 'working', designer: 'idle', translator: 'working', editor: 'idle', analyst: 'working', scheduler: 'idle' },
-  activity: { coordinator: 6, generalist: 3, engineer: 8, designer: 2, translator: 5, editor: 1, analyst: 4, scheduler: 2 },
-  stats: {
-    tokensToday: '48.3K',
-    tokensIn: '32.1K',
-    tokensOut: '16.2K',
-    conversations: { inProgress: 2, done: 14, total: 16 },
-    share: [
-      { id: 'engineer', pct: 26 }, { id: 'coordinator', pct: 19 }, { id: 'translator', pct: 16 }, { id: 'analyst', pct: 13 },
-      { id: 'generalist', pct: 10 }, { id: 'designer', pct: 6 }, { id: 'scheduler', pct: 6 }, { id: 'editor', pct: 4 }
-    ]
-  },
-  timeline: {
-    inProgress: [
-      { convId: 'oauth', expert: 'engineer', title: 'Fix OAuth refresh race', progress: '3 turns · 2m' },
-      { convId: 'standup', expert: 'editor', title: 'Summarize standup notes', progress: 'streaming…' },
-      { convId: 'churn', expert: 'analyst', title: 'Q1 churn analysis', progress: '2 turns · 5m' }
-    ],
-    projects: [
-      {
-        id: 'launch',
-        title: 'Q2 launch kit',
-        chain: ['coordinator', 'engineer', 'designer', 'analyst'],
-        status: '2 of 4 steps',
-        steps: [
-          { expert: 'coordinator', role: 'Coordinating — routes & merges the work', state: 'active' },
-          { expert: 'engineer', role: 'Waitlist API + rate limiting', state: 'done' },
-          { expert: 'designer', role: 'Hero illustration for the page', state: 'done' },
-          { expert: 'analyst', role: 'Model the conversion funnel', state: 'queued' }
-        ]
-      }
-    ]
-  },
-  analytics: {
-    usage: {
-      tokensIn: '32.1K',
-      tokensOut: '16.2K',
-      tokensTotal: '48.3K',
-      tokensAllTime: '1.2M',
-      byDay: [
-        { d: 'Mon', v: 31 }, { d: 'Tue', v: 44 }, { d: 'Wed', v: 27 }, { d: 'Thu', v: 39 },
-        { d: 'Fri', v: 52 }, { d: 'Sat', v: 18 }, { d: 'Sun', v: 48 }
-      ],
-      conversations: { inProgress: 2, done: 14, total: 16 },
-      byExpert: [
-        { id: 'engineer', v: 12.6 }, { id: 'coordinator', v: 9.2 }, { id: 'translator', v: 7.7 }, { id: 'analyst', v: 6.3 },
-        { id: 'generalist', v: 4.8 }, { id: 'designer', v: 2.9 }, { id: 'scheduler', v: 2.9 }, { id: 'editor', v: 1.9 }
-      ],
-      byModel: [
-        { label: 'claude-sonnet-4.6', v: 12.6, family: 'anthropic' },
-        { label: 'claude-haiku-4', v: 9.2, family: 'anthropic' },
-        { label: 'gemini-2.5-flash', v: 9.6, family: 'gemini' },
-        { label: 'gpt-5.4-mini', v: 7.7, family: 'openai' },
-        { label: 'gpt-5', v: 6.3, family: 'openai' },
-        { label: 'imagen-4', v: 2.9, family: 'gemini' }
-      ],
-      byProvider: [
-        { label: 'Anthropic', v: 21.8, family: 'anthropic' },
-        { label: 'OpenAI', v: 14.0, family: 'openai' },
-        { label: 'Gemini', v: 12.5, family: 'gemini' }
-      ]
-    },
-    memory: {
-      perExpert: [
-        { id: 'engineer', v: 31 }, { id: 'coordinator', v: 24 }, { id: 'analyst', v: 14 }, { id: 'generalist', v: 12 },
-        { id: 'translator', v: 9 }, { id: 'scheduler', v: 8 }, { id: 'editor', v: 7 }, { id: 'designer', v: 5 }
-      ],
-      total: 110,
-      layers: [
-        { key: 'SHARED', label: 'Shared', v: 38, hint: 'about you · all experts' },
-        { key: 'ROLE', label: 'Role', v: 52, hint: 'per-expert specifics' },
-        { key: 'COLLAB', label: 'Collab', v: 20, hint: 'learned across hand-offs' }
-      ],
-      learning: { corrected: 18, approved: 63, byWeek: [14, 19, 23, 28] }
-    },
-    activity: {
-      byDay: [6, 9, 4, 11, 7, 3, 2, 8, 12, 5, 10, 14, 9, 16],
-      mostActive: { id: 'engineer', today: 8, week: 39 },
-      tools: [
-        { label: 'Web search', v: 47, icon: 'search' },
-        { label: 'Image generation', v: 12, icon: 'image' },
-        { label: 'Code execution', v: 23, icon: 'command' }
-      ],
-      peakHours: [0, 0, 0, 0, 0, 1, 2, 4, 7, 9, 12, 11, 8, 6, 9, 13, 10, 7, 5, 4, 3, 2, 1, 0]
-    }
-  }
-}
-
-const ENDPOINT_HEALTH: EndpointHealth[] = [
-  { family: 'Anthropic', status: 'healthy', models: 2, checked: '30s ago' },
-  { family: 'OpenAI', status: 'healthy', models: 2, checked: '30s ago' },
-  { family: 'Gemini', status: 'healthy', models: 3, checked: '1m ago' }
-]
-
-// All three route through nsai (api.nicosoft.ai) — one key, three protocols, slugs per protocol.
-// The real key lives in the OS keychain (Batch 2), never in source; this masked tail is display-only.
-const ENDPOINTS: EndpointRow[] = [
-  { name: 'Anthropic', proto: 'anthropic', status: 'healthy', models: ['nicosoft/claude-sonnet-4-6', 'nicosoft/claude-haiku-4-5-20251001'], key: '••••••8lHs', baseURL: 'https://api.nicosoft.ai' },
-  { name: 'OpenAI', proto: 'openai', status: 'healthy', models: ['nicosoft/gpt-5.5', 'nicosoft/gpt-5.4-mini'], key: '••••••8lHs', baseURL: 'https://api.nicosoft.ai' },
-  { name: 'Google Gemini', proto: 'gemini', status: 'healthy', models: ['gemini-2.5-flash', 'gemini-2.5-pro', 'imagen-4'], key: '••••••8lHs', baseURL: 'https://api.nicosoft.ai' }
-]
-
-const ROLE_BINDINGS: RoleBinding[] = [
-  { id: 'coordinator', family: 'anthropic', model: 'nicosoft/claude-haiku-4-5-20251001' },
-  { id: 'generalist', family: 'openai', model: 'nicosoft/gpt-5.5' },
-  { id: 'engineer', family: 'anthropic', model: 'nicosoft/claude-sonnet-4-6' },
-  { id: 'designer', family: 'gemini', model: 'gemini-pro-latest' },
-  { id: 'translator', family: 'gemini', model: 'nicosoft/gemini-3-flash-agent' },
-  { id: 'editor', family: 'gemini', model: 'gemini-pro-latest' },
-  { id: 'analyst', family: 'openai', model: 'nicosoft/gpt-5.5' },
-  { id: 'scheduler', family: 'openai', model: 'nicosoft/gpt-5.4-mini' }
-]
-
 const GREETINGS: Record<string, Greeting> = {
   generalist: { greeting: "Hi, I'm Amélie. I handle the everyday stuff — ask me anything, or I'll point you to the right expert.", chips: ['Explain this error message', 'Brainstorm names for my app', 'Plan a 3-day trip'] },
   engineer: { greeting: 'I build the backend — APIs, databases, services, business logic. Paste code or describe what the server should do.', chips: ['Design a REST API', 'Why is this query slow?', 'Add auth to this endpoint'] },
@@ -227,170 +67,13 @@ const GREETINGS: Record<string, Greeting> = {
   scheduler: { greeting: 'I draft emails, replies, and agendas. Tell me the recipient and the gist.', chips: ['Reply to this investor', 'Draft a meeting agenda', 'Polish this cold email'] }
 }
 
-const HISTORY: HistoryGroup[] = [
-  {
-    group: 'Today',
-    items: [
-      { id: 'oauth', title: 'Fix OAuth refresh race', expert: 'engineer' },
-      { id: 'scraper', title: 'Scraper connection errors', expert: 'coordinator' },
-      { id: 'churn', title: 'Q1 churn analysis', expert: 'analyst' },
-      { id: 'standup', title: 'Summarize standup notes', expert: 'editor' },
-      { id: 'debugbuild', title: 'Debug failing build', expert: 'engineer' },
-      { id: 'crunching', title: 'Forecast Q2 signups', expert: 'analyst' }
-    ]
-  },
-  {
-    group: 'Yesterday',
-    items: [
-      { id: 'landing', title: 'Translate landing page', expert: 'translator' },
-      { id: 'poster', title: 'Game night poster', expert: 'designer' }
-    ]
-  },
-  { group: 'Earlier', items: [{ id: 'investor', title: 'Reply to investor', expert: 'scheduler' }] }
-]
-
-const CONVERSATIONS: Record<string, Conversation> = {
-  oauth: {
-    title: 'Fix OAuth refresh race',
-    expert: 'engineer',
-    segments: [
-      { who: 'user', ts: '2:13 PM', blocks: [{ type: 'para', html: 'Why does my <code class="inline">useEffect</code> run twice in React 19 dev?' }] },
-      {
-        who: 'engineer',
-        model: 'claude-sonnet-4.6',
-        ts: '2:14 PM',
-        blocks: [
-          { type: 'para', html: "That's <strong>StrictMode</strong> intentionally double-invoking your effects in development to surface missing cleanup. It only happens in dev — production mounts once." },
-          { type: 'para', html: "The fix isn't to disable StrictMode; it's to make the effect <strong>idempotent</strong>. Return a cleanup function and guard against the race:" },
-          { type: 'code', lang: 'tsx', code: 'useEffect(() => {\n  const controller = new AbortController();\n  fetchUser(id, { signal: controller.signal })\n    .then(setUser)\n    .catch((e) => {\n      if (e.name !== "AbortError") throw e;\n    });\n  return () => controller.abort();   // cleanup cancels the first run\n}, [id]);' },
-          { type: 'para', html: "Now the first invocation's request is aborted by its cleanup before the second fires — no duplicate state writes, no warning. The same pattern fixes your OAuth refresh: abort the in-flight token request on cleanup so two refreshes can't race." }
-        ]
-      }
-    ]
-  },
-  scraper: {
-    title: 'Scraper connection errors',
-    expert: 'coordinator',
-    collab: true,
-    dispatch: ['translator', 'engineer'],
-    segments: [
-      { who: 'user', ts: '10:02 AM', blocks: [{ type: 'para', html: "Here's a stack trace from our scraper. The error is in German — translate it and tell me what's actually breaking:" }, { type: 'quote', html: 'ConnectionResetError: Verbindung vom Server zurückgesetzt' }] },
-      { who: 'translator', model: 'gemini-2.5-flash', ts: '10:02 AM', blocks: [{ type: 'para', html: '<strong>Translation:</strong> "Connection reset by the server."' }, { type: 'para', html: '(German "zurückgesetzt" here = reset/dropped, not "reset to defaults".)' }] },
-      { who: 'engineer', model: 'claude-sonnet-4.6', ts: '10:03 AM', blocks: [{ type: 'para', html: "This isn't a bug in your code — the remote server is dropping the connection mid-request, usually rate-limiting or bot detection. Add retry-with-backoff and rotate the User-Agent:" }, { type: 'code', lang: 'python', code: 'for attempt in range(5):\n    try:\n        return session.get(url, timeout=10)\n    except ConnectionResetError:\n        time.sleep(2 ** attempt)   # 1s, 2s, 4s, 8s, 16s' }] },
-      { who: 'coordinator', model: 'claude-haiku-4', ts: '10:03 AM', synthesis: true, blocks: [{ type: 'para', html: 'Louise confirmed the error means the server reset the connection; Flynn diagnosed it as server-side rate-limiting, not your code. <strong>Fix:</strong> wrap the request in exponential backoff (snippet above) and rotate the User-Agent. If it persists, you\'re being bot-detected — slow the crawl rate.' }] }
-    ]
-  },
-  churn: {
-    title: 'Q1 churn analysis',
-    expert: 'analyst',
-    segments: [
-      { who: 'user', ts: '9:41 AM', blocks: [{ type: 'para', html: 'Our Q1 churn went from 3.1% to 4.4% month-over-month. Is that a real trend or noise?' }] },
-      { who: 'analyst', model: 'gpt-5', ts: '9:42 AM', blocks: [{ type: 'para', html: 'With your cohort sizes (~2,400 accounts), a jump from 3.1% to 4.4% is <strong>statistically significant</strong> — a two-proportion z-test gives <code class="inline">p ≈ 0.018</code>, so it\'s unlikely to be noise.' }, { type: 'para', html: "That said, significance isn't causation. Before acting, I'd segment by plan tier and signup channel — aggregate churn often hides one bad cohort. <strong>Recommended chart:</strong> a small-multiples line chart, one panel per plan tier, so a single regressing segment stands out." }] }
-    ]
-  },
-  landing: {
-    title: 'Translate landing page',
-    expert: 'translator',
-    segments: [
-      { who: 'user', ts: 'Yesterday 4:20 PM', blocks: [{ type: 'para', html: 'Translate our hero line to German: "Ship your ideas faster."' }] },
-      { who: 'translator', model: 'gemini-2.5-flash', ts: 'Yesterday 4:20 PM', blocks: [{ type: 'para', html: '<strong>"Bring deine Ideen schneller auf den Markt."</strong>' }, { type: 'para', html: 'A literal "Verschicke deine Ideen" would read like shipping a parcel. This phrasing keeps the product-launch sense and uses the informal <em>du</em>, which fits a startup landing page. For a more formal B2B tone, swap to <em>Ihre Ideen</em>.' }] }
-    ]
-  },
-  poster: {
-    title: 'Game night poster',
-    expert: 'designer',
-    segments: [
-      { who: 'user', ts: 'Yesterday 6:05 PM', blocks: [{ type: 'para', html: 'Poster for our Friday game night — retro arcade vibe, must include the text "GAME NIGHT · FRIDAY 8PM".' }] },
-      { who: 'designer', model: 'imagen-4', ts: 'Yesterday 6:06 PM', blocks: [{ type: 'para', html: "Here's a retro-arcade take — neon on black, chunky display type." }, { type: 'imagecard' }, { type: 'para', html: 'Want a warmer palette, or tighter crop on the title?' }] }
-    ]
-  },
-  investor: {
-    title: 'Reply to investor',
-    expert: 'scheduler',
-    segments: [
-      { who: 'user', ts: 'Mon 11:30 AM', blocks: [{ type: 'para', html: 'Draft a warm but brief reply to Dana thanking her for the intro and proposing three times next week.' }] },
-      { who: 'scheduler', model: 'nicosoft/gpt-5.4-mini', ts: 'Mon 11:30 AM', blocks: [{ type: 'para', html: '<strong>Subject:</strong> Thanks for the intro — a few times next week' }, { type: 'para', html: "Hi Dana, thank you for connecting us — I really appreciate it. I'd love to find time next week. Would any of these work: <strong>Tue 2pm</strong>, <strong>Wed 10am</strong>, or <strong>Thu 4pm</strong> (all PT)? Happy to adjust to your calendar. Looking forward to it." }] }
-    ]
-  },
-  standup: {
-    title: 'Summarize standup notes',
-    expert: 'editor',
-    segments: [
-      { who: 'user', ts: '9:58 AM', blocks: [{ type: 'para', html: 'Condense these standup notes into 3 bullet action items: “Auth refactor is blocked on the OAuth race — Flynn is on it. Churn dashboard shipped to staging. Need a decision on the Q2 launch date by Friday.”' }] },
-      { who: 'editor', model: 'gemini-2.5-flash', ts: '9:58 AM', streaming: true, blocks: [{ type: 'para', html: '<strong>Action items</strong>' }, { type: 'para', html: '• Unblock the auth refactor — Flynn to land the OAuth race fix<br>• Verify the churn dashboard on staging before promoting<br>• Lock the Q2 launch da' }] }
-    ]
-  },
-  debugbuild: {
-    title: 'Debug failing build',
-    expert: 'engineer',
-    notice: true,
-    segments: [{ who: 'user', ts: '8:41 AM', blocks: [{ type: 'para', html: 'The CI build is failing on <code class="inline">tsc --noEmit</code> but it passes locally. Any idea why?' }] }]
-  },
-  crunching: {
-    title: 'Forecast Q2 signups',
-    expert: 'analyst',
-    loading: true,
-    segments: [{ who: 'user', ts: '11:12 AM', blocks: [{ type: 'para', html: 'Given the last 6 months of signups, project Q2 and tell me the confidence interval.' }] }]
-  }
-}
-
-const PROJECTS: Project[] = [
-  {
-    id: 'launch',
-    title: 'Q2 launch kit',
-    summary: 'Waitlist page, API, hero image & funnel model',
-    goal: 'Ship the Q2 launch: a waitlist page with a working API, a hero illustration, and a conversion-funnel model — coordinated end to end so marketing can go live Friday.',
-    phase: 'Executing',
-    progress: 0.5,
-    chair: 'coordinator',
-    experts: ['coordinator', 'engineer', 'designer', 'analyst'],
-    plan: [
-      { id: 't1', title: 'Waitlist API + rate limiting', expert: 'engineer', deps: [], status: 'done', output: 'POST /waitlist live on staging · 5 req/s limit.' },
-      { id: 't2', title: 'Hero illustration for the page', expert: 'designer', deps: [], status: 'done', output: 'Delivered 3 variants · picked the isometric one.' },
-      { id: 't3', title: 'Wire the page to the API', expert: 'engineer', deps: ['t1', 't2'], status: 'doing', output: 'Form posts to the API; success-state copy pending.' },
-      { id: 't4', title: 'Conversion-funnel model', expert: 'analyst', deps: ['t1'], status: 'doing', output: 'Baseline funnel built; sensitivity analysis next.' },
-      { id: 't5', title: 'QA the end-to-end flow', expert: 'engineer', deps: ['t3', 't4'], status: 'todo', output: null }
-    ],
-    tests: [
-      { id: 'v1', title: 'Form submits and persists to the database', status: 'pass' },
-      { id: 'v2', title: 'Rate limit returns 429 past 5 req/s', status: 'pass' },
-      { id: 'v3', title: 'Funnel projection within ±5% of last quarter', status: 'pending' },
-      { id: 'v4', title: 'Hero image passes the brand checklist', status: 'pending' }
-    ]
-  },
-  {
-    id: 'onboarding',
-    title: 'Onboarding revamp',
-    summary: 'Rework first-run flow & welcome emails',
-    goal: 'Cut first-run drop-off: simplify the setup flow and add a 3-touch welcome email sequence.',
-    phase: 'Planning',
-    progress: 0.12,
-    chair: 'coordinator',
-    experts: ['coordinator', 'generalist', 'scheduler'],
-    plan: [
-      { id: 'o1', title: 'Audit the current flow & drop-off points', expert: 'generalist', deps: [], status: 'doing', output: 'Mapping the 4 setup steps; key drop is at endpoint.' },
-      { id: 'o2', title: 'Draft the welcome email sequence', expert: 'scheduler', deps: [], status: 'todo', output: null },
-      { id: 'o3', title: 'Propose the simplified flow', expert: 'generalist', deps: ['o1'], status: 'todo', output: null }
-    ],
-    tests: [{ id: 'ov1', title: 'New flow completes in under 90 seconds', status: 'pending' }]
-  }
-]
-
 export const PHASES = ['Plan', 'Execute', 'Test', 'Done']
 export const PHASE_INDEX: Record<string, number> = { Planning: 0, Executing: 1, Testing: 2, Done: 3 }
 
 export const STUDIO_DATA: StudioData = {
   EXPERTS,
   EXPERT_BY_ID,
-  ENDPOINT_HEALTH,
-  ENDPOINTS,
-  ROLE_BINDINGS,
-  GREETINGS,
-  HISTORY,
-  CONVERSATIONS,
-  STUDIO,
   USER_PROFILE,
-  EXTENSIONS,
-  MEMORY,
-  PROJECTS
+  GREETINGS,
+  EXTENSIONS
 }
