@@ -243,6 +243,8 @@ export async function run(
 
   // Record usage — a dev-agent run spans many turns; without this it's invisible to usage stats.
   usageRepo.record({
+    conversationId: convId,
+    expertId: roleId,
     model: input.model,
     provider: ep.protocol,
     inTokens: loopRes.inTokens,
@@ -328,7 +330,8 @@ export async function runAgentLoop(
   const transcript = createWriteStream(join(sessionDir, 'transcript.jsonl'), { flags: 'a' })
   // Without an 'error' listener a failed write (disk full / perms) crashes the main process — swallow.
   transcript.on('error', () => {})
-  const log = (obj: unknown): void => void transcript.write(JSON.stringify(obj) + '\n')
+  // Stamp every line with a wall-clock ts so analytics can attribute tool calls to a day ("tool calls today").
+  const log = (obj: Record<string, unknown>): void => void transcript.write(JSON.stringify({ ...obj, ts: Date.now() }) + '\n')
   log({ t: 'run', runId: loop.runId, convId: loop.convId, cwd: loop.cwd, model: loop.model })
 
   // Per-run service registry: dev roles start dev servers through it (start_service); everything it

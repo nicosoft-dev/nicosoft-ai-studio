@@ -3,16 +3,39 @@
    Restrained charts: thin lines, low-sat bars, hairline gridlines.
    No gradients / 3D / glow. No cost-billing. No reliability panel.
    ============================================================ */
+import { useEffect, useState } from 'react'
 import type { ReactElement, ReactNode } from 'react'
 import { Icons } from '@/components/icons'
 import { Avatar } from '@/components/primitives'
 import { STUDIO_DATA } from '@/data/studio-data'
+import { useChat } from '@/stores/chat'
+import type { AnalyticsSummary } from '@/lib/api'
 
 const FAMILY_COLOR: Record<string, string> = {
   anthropic: "oklch(0.76 0.10 50)",
   openai: "oklch(0.75 0.10 158)",
   gemini: "oklch(0.74 0.10 250)",
 };
+
+// model slug → provider family, for the by-model bar colors (messages/usage_events store the slug).
+function providerOf(model: string): string {
+  const m = model.toLowerCase()
+  if (m.includes('claude')) return 'anthropic'
+  if (m.includes('gpt') || m.startsWith('o1') || m.startsWith('o3') || m.includes('openai')) return 'openai'
+  if (m.includes('gemini') || m.includes('imagen') || m.includes('nano-banana')) return 'gemini'
+  return 'other'
+}
+// expert id → display name + color (built-ins; unknown/custom ids fall back to the raw id).
+function expertMeta(id: string): { name: string; color: string } {
+  const e = STUDIO_DATA.EXPERT_BY_ID[id]
+  return e ? { name: e.name, color: e.color } : { name: id || '—', color: 'var(--text-3)' }
+}
+// compact token count: 6_214_668 → "6.2M", 707_147 → "707k".
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
+  if (n >= 1_000) return Math.round(n / 1_000) + 'k'
+  return String(n)
+}
 
 type TrendPoint = number | { v: number }
 
@@ -104,21 +127,24 @@ function AnCard({ title, sub, children, wide }: { title: string; sub?: string; c
 }
 
 export function StatsPage(): ReactElement {
-  const { STUDIO, EXPERT_BY_ID } = STUDIO_DATA;
-  const A = STUDIO.analytics;
+  const [a, setA] = useState<AnalyticsSummary | null>(null)
+  // In-progress conversations = whatever is streaming right now (live renderer state); total from the summary.
+  const streamingCount = useChat((s) => Object.values(s.streaming).filter(Boolean).length)
+  useEffect(() => {
+    void window.api.analytics.summary().then(setA)
+  }, [])
 
-  const expertRows = A.usage.byExpert.map((r) => {
-    const e = EXPERT_BY_ID[r.id!];
-    return { name: e.name, v: r.v, val: r.v + "K", color: e.color };
-  });
-  const modelRows = A.usage.byModel.map((r) => ({ name: r.label!, v: r.v, val: r.v + "K", color: FAMILY_COLOR[r.family!] }));
-  const providerRows = A.usage.byProvider.map((r) => ({ name: r.label!, v: r.v, val: r.v + "K", color: FAMILY_COLOR[r.family!] }));
-  const memRows = A.memory.perExpert.map((r) => {
-    const e = EXPERT_BY_ID[r.id!];
-    return { name: e.name, v: r.v, val: String(r.v), color: e.color };
-  });
-  const mostActive = EXPERT_BY_ID[A.activity.mostActive.id];
-  const layerMax = A.memory.layers.reduce((s, l) => s + l.v, 0);
+  if (!a) return <div className="studio-analytics"><div className="an-foot">Loading analytics…</div></div>
+
+  const expertRows = a.usage.byExpert.map((r) => { const e = expertMeta(r.id); return { name: e.name, v: r.v, val: fmtTokens(r.v), color: e.color } })
+  const modelRows = a.usage.byModel.map((r) => ({ name: r.label, v: r.v, val: fmtTokens(r.v), color: FAMILY_COLOR[providerOf(r.label)] ?? 'var(--text-3)' }))
+  const providerRows = a.usage.byProvider.map((r) => ({ name: r.label, v: r.v, val: fmtTokens(r.v), color: FAMILY_COLOR[r.label] ?? 'var(--text-3)' }))
+  const memRows = a.memory.perExpert.map((r) => { const e = expertMeta(r.id); return { name: e.name, v: r.v, val: String(r.v), color: e.color } })
+  const ma = expertMeta(a.activity.mostActive.id)
+  const layerMax = a.memory.layers.reduce((s, l) => s + l.v, 0) || 1
+  const total = a.usage.conversationsTotal
+  const inProgress = Math.min(streamingCount, total)
+  const inPct = a.usage.tokensToday > 0 ? Math.round((a.usage.tokensIn / a.usage.tokensToday) * 100) : 0
 
   return (
     <div className="studio-analytics">
@@ -128,50 +154,36 @@ export function StatsPage(): ReactElement {
         <div className="an-grid">
           <AnCard title="Tokens">
             <div className="token-totals">
-              <div className="tt-cell">
-                <div className="tt-num">{A.usage.tokensTotal}</div>
-                <div className="tt-lbl">today</div>
-              </div>
-              <div className="tt-cell">
-                <div className="tt-num">{A.usage.tokensAllTime}</div>
-                <div className="tt-lbl">all-time</div>
-              </div>
+              <div className="tt-cell"><div className="tt-num">{fmtTokens(a.usage.tokensToday)}</div><div className="tt-lbl">today</div></div>
+              <div className="tt-cell"><div className="tt-num">{fmtTokens(a.usage.tokensAllTime)}</div><div className="tt-lbl">all-time</div></div>
             </div>
             <div className="an-mini-label" style={{ marginTop: 14 }}>Today · in / out</div>
             <div className="io-split">
-              <div className="io-row">
-                <span className="io-label">In</span>
-                <span className="io-track"><span className="io-fill in" style={{ width: "66%" }} /></span>
-                <span className="io-val">{A.usage.tokensIn}</span>
-              </div>
-              <div className="io-row">
-                <span className="io-label">Out</span>
-                <span className="io-track"><span className="io-fill out" style={{ width: "34%" }} /></span>
-                <span className="io-val">{A.usage.tokensOut}</span>
-              </div>
+              <div className="io-row"><span className="io-label">In</span><span className="io-track"><span className="io-fill in" style={{ width: inPct + "%" }} /></span><span className="io-val">{fmtTokens(a.usage.tokensIn)}</span></div>
+              <div className="io-row"><span className="io-label">Out</span><span className="io-track"><span className="io-fill out" style={{ width: 100 - inPct + "%" }} /></span><span className="io-val">{fmtTokens(a.usage.tokensOut)}</span></div>
             </div>
             <div className="an-divider" />
             <div className="an-mini-label">Tokens · last 7 days</div>
-            <LineTrend data={A.usage.byDay} labels={A.usage.byDay.map((d) => d.d)} />
+            <LineTrend data={a.usage.byDay.map((d) => d.v)} labels={a.usage.byDay.map((d) => d.d)} />
           </AnCard>
 
           <AnCard title="Conversations">
             <div className="stat-triple">
-              <div className="st-cell"><div className="st-num">{A.usage.conversations.inProgress}</div><div className="st-lbl">in progress</div></div>
-              <div className="st-cell"><div className="st-num">{A.usage.conversations.done}</div><div className="st-lbl">done</div></div>
-              <div className="st-cell"><div className="st-num">{A.usage.conversations.total}</div><div className="st-lbl">total</div></div>
+              <div className="st-cell"><div className="st-num">{inProgress}</div><div className="st-lbl">in progress</div></div>
+              <div className="st-cell"><div className="st-num">{total - inProgress}</div><div className="st-lbl">done</div></div>
+              <div className="st-cell"><div className="st-num">{total}</div><div className="st-lbl">total</div></div>
             </div>
             <div className="an-divider" />
             <div className="an-mini-label">By provider</div>
-            <BarList rows={providerRows} />
+            {providerRows.length ? <BarList rows={providerRows} /> : <div className="an-mini-label">No usage yet.</div>}
           </AnCard>
 
           <AnCard title="By expert">
-            <BarList rows={expertRows} />
+            {expertRows.length ? <BarList rows={expertRows} /> : <div className="an-mini-label">No usage yet.</div>}
           </AnCard>
 
           <AnCard title="By model">
-            <BarList rows={modelRows} />
+            {modelRows.length ? <BarList rows={modelRows} /> : <div className="an-mini-label">No usage yet.</div>}
           </AnCard>
         </div>
       </div>
@@ -180,18 +192,18 @@ export function StatsPage(): ReactElement {
       <div className="an-section">
         <div className="an-section-head">Memory &amp; growth <span className="an-section-note">— how well the team knows you</span></div>
         <div className="an-grid">
-          <AnCard title="Memory by expert" sub={A.memory.total + " total"}>
-            <BarList rows={memRows} />
+          <AnCard title="Memory by expert" sub={a.memory.total + " total"}>
+            {memRows.length ? <BarList rows={memRows} /> : <div className="an-mini-label">Nothing learned yet.</div>}
           </AnCard>
 
           <AnCard title="Memory layers">
             <div className="stacked-bar">
-              {A.memory.layers.map((l) => (
+              {a.memory.layers.map((l) => (
                 <span key={l.key} className={"stk-seg " + l.key.toLowerCase()} style={{ width: (l.v / layerMax) * 100 + "%" }} />
               ))}
             </div>
             <div className="layer-legend">
-              {A.memory.layers.map((l) => (
+              {a.memory.layers.map((l) => (
                 <div className="ll-row" key={l.key}>
                   <span className={"ll-dot " + l.key.toLowerCase()} />
                   <span className="ll-key">{l.key}</span>
@@ -204,19 +216,12 @@ export function StatsPage(): ReactElement {
 
           <AnCard title="Self-learning" sub="getting to know you">
             <div className="learn-stats">
-              <div className="learn-cell">
-                <div className="learn-num">{A.memory.learning.approved}</div>
-                <div className="learn-lbl">approved</div>
-              </div>
-              <div className="learn-cell">
-                <div className="learn-num">{A.memory.learning.corrected}</div>
-                <div className="learn-lbl">corrected</div>
-              </div>
+              <div className="learn-cell"><div className="learn-num">{a.memory.learning.approved}</div><div className="learn-lbl">approved</div></div>
+              <div className="learn-cell"><div className="learn-num">{a.memory.learning.corrected}</div><div className="learn-lbl">corrected</div></div>
             </div>
             <div className="an-divider" />
             <div className="an-mini-label">Learning events · last 4 weeks</div>
-            <LineTrend data={A.memory.learning.byWeek} color="var(--exp-editor)" height={52}
-              labels={["W1", "W2", "W3", "W4"]} />
+            <LineTrend data={a.memory.learning.byWeek} color="var(--exp-editor)" height={52} labels={["W1", "W2", "W3", "W4"]} />
           </AnCard>
         </div>
       </div>
@@ -226,35 +231,36 @@ export function StatsPage(): ReactElement {
         <div className="an-section-head">Activity</div>
         <div className="an-grid">
           <AnCard title="Activity trend" sub="last 14 days" wide>
-            <LineTrend data={A.activity.byDay} color="var(--exp-engineer)" height={68} />
+            <LineTrend data={a.activity.byDay} color="var(--exp-engineer)" height={68} />
           </AnCard>
 
           <AnCard title="Most active">
             <div className="most-active">
-              <Avatar expert={mostActive} size={34} />
+              <Avatar expert={STUDIO_DATA.EXPERT_BY_ID[a.activity.mostActive.id] ?? null} size={34} />
               <div>
-                <div className="ma-name">{mostActive.name}</div>
-                <div className="ma-sub">{A.activity.mostActive.today} today · {A.activity.mostActive.week} this week</div>
+                <div className="ma-name">{ma.name}</div>
+                <div className="ma-sub">{a.activity.mostActive.today} today · {a.activity.mostActive.week} this week</div>
               </div>
             </div>
             <div className="an-divider" />
             <div className="an-mini-label">Tool calls · today</div>
             <div className="tool-list">
-              {A.activity.tools.map((t) => {
-                const I = Icons[t.icon];
-                return (
+              {a.activity.tools.length === 0 ? (
+                <div className="an-mini-label">No tool calls today.</div>
+              ) : (
+                a.activity.tools.map((t) => (
                   <div className="tool-row" key={t.label}>
-                    <span className="tool-ic"><I size={14} /></span>
+                    <span className="tool-ic"><Icons.file size={14} /></span>
                     <span className="tool-lbl">{t.label}</span>
                     <span className="tool-val">{t.v}</span>
                   </div>
-                );
-              })}
+                ))
+              )}
             </div>
           </AnCard>
 
           <AnCard title="Peak hours" sub="by hour · today">
-            <MiniBars data={A.activity.peakHours} />
+            <MiniBars data={a.activity.peakHours} />
             <div className="hour-labels"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
           </AnCard>
         </div>
@@ -262,5 +268,5 @@ export function StatsPage(): ReactElement {
 
       <div className="an-foot">Local analytics · stays on this device · no usage leaves the app</div>
     </div>
-  );
+  )
 }

@@ -12,6 +12,7 @@ import type {
   AgentTextDelta,
   ConvUsage,
   ConvImage,
+  AnalyticsSummary,
   AgentToolStart,
   AgentAssistant,
   AgentToolResults,
@@ -263,6 +264,10 @@ const api = {
   media: {
     // Save a generated image (nsai-media:// ref) to a user-chosen path; returns the path or null.
     save: (url: string, name: string): Promise<string | null> => ipcRenderer.invoke('media:save', url, name)
+  },
+  analytics: {
+    // Aggregated local stats for the Overview › Stats page. Re-fetch when the tab mounts.
+    summary: (): Promise<AnalyticsSummary> => ipcRenderer.invoke('analytics:summary')
   },
   mcp: {
     list: (): Promise<McpServerDto[]> => ipcRenderer.invoke('mcp:list'),

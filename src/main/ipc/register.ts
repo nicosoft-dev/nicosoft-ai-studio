@@ -13,6 +13,7 @@ import { registerSkillHandlers } from './skill.handler'
 import { registerPluginHandlers } from './plugin.handler'
 import { registerApprovalHandlers } from './approval.handler'
 import { registerScheduledHandlers } from './scheduled.handler'
+import { registerAnalyticsHandlers } from './analytics.handler'
 
 // Single entry point — main/index.ts calls this once on app ready.
 export function registerIpc(): void {
@@ -31,4 +32,5 @@ export function registerIpc(): void {
   registerPluginHandlers()
   registerApprovalHandlers()
   registerScheduledHandlers()
+  registerAnalyticsHandlers()
 }

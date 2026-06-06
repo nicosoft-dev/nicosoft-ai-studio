@@ -123,6 +123,36 @@ export interface ConvImage {
   convId: string
   attachment: MessageAttachmentDto
 }
+
+// Aggregated local analytics for the Overview › Stats page (analytics.service). All real, on-device:
+// tokens/activity from messages, providers from usage_events, memory from memories/memory_versions, tool
+// calls today from the per-run transcripts. inProgress/done conversation counts are derived in the renderer
+// (streaming is live renderer state); the backend supplies the total.
+export interface AnalyticsSummary {
+  usage: {
+    tokensToday: number
+    tokensAllTime: number
+    tokensIn: number
+    tokensOut: number
+    byDay: { d: string; v: number }[] // last 7 local days, oldest→newest (d = MM-DD)
+    conversationsTotal: number
+    byExpert: { id: string; v: number }[] // tokens, all-time, desc
+    byModel: { label: string; v: number }[]
+    byProvider: { label: string; v: number }[]
+  }
+  memory: {
+    total: number
+    perExpert: { id: string; v: number }[] // memory item count by role
+    layers: { key: string; hint: string; v: number }[] // Shared / Role / Collab
+    learning: { approved: number; corrected: number; byWeek: number[] } // approved = learning items, corrected = revisions
+  }
+  activity: {
+    byDay: number[] // last 14 local days, message counts
+    mostActive: { id: string; today: number; week: number }
+    tools: { label: string; v: number }[] // tool calls today, by tool, desc
+    peakHours: number[] // 24 entries, message counts by local hour today
+  }
+}
 // A tool the model just started calling — streamed the moment the call begins, before the turn
 // finishes, so the renderer can show a running tool card immediately instead of waiting. The full
 // input (and thus the card's summary) arrives with the finished turn (AgentAssistant).

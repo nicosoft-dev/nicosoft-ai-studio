@@ -612,7 +612,7 @@ async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputT
         outputTokens: res.outTokens
       })
     }
-    usageRepo.record({ model: binding.model, provider: ep.protocol, inTokens: res.inTokens, outTokens: res.outTokens })
+    usageRepo.record({ conversationId: convId, expertId: roleId, model: binding.model, provider: ep.protocol, inTokens: res.inTokens, outTokens: res.outTokens })
     cb.onStepDone(roleId, text, res.inTokens, res.outTokens)
     return { text, inputTokens: res.inTokens, outputTokens: res.outTokens, endpointId: binding.endpointId, model: binding.model }
   }
@@ -693,7 +693,7 @@ async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputT
       outputTokens: result.usage.outTokens
     })
   }
-  usageRepo.record({ model: binding.model, provider: ep.protocol, inTokens: result.usage.inTokens, outTokens: result.usage.outTokens })
+  usageRepo.record({ conversationId: convId, expertId: roleId, model: binding.model, provider: ep.protocol, inTokens: result.usage.inTokens, outTokens: result.usage.outTokens })
   cb.onStepDone(roleId, text, inputTokens, result.usage.outTokens)
 
   return { text, inputTokens, outputTokens: result.usage.outTokens, endpointId: binding.endpointId, model: binding.model }

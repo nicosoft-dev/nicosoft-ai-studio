@@ -60,6 +60,8 @@ export async function send(
   )
 
   usageRepo.record({
+    conversationId: input.convId,
+    expertId: input.roleId,
     model: input.model,
     provider: ep.protocol,
     inTokens: result.usage.inTokens,
