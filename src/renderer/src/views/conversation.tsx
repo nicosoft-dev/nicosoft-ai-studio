@@ -24,6 +24,7 @@ import { fileToImage, imagesFromClipboard, type ImageAttachment } from '@/lib/im
 import { getThinkingCapability, resolveThinking, type ThinkingDepth } from '@/lib/thinking'
 import { useAllExperts } from '@/lib/all-experts'
 import { toast } from '@/stores/toast'
+import { useT } from '@/stores/locale'
 import type { Expert } from '@/types'
 
 // Compact token readout: K below 1M, M at/above it (1M, 1.05M, 1.5M — trailing zeros trimmed).
@@ -48,6 +49,7 @@ function fmtElapsed(ms: number): string {
 // opacity — no spin) + elapsed · output-token estimate (chars/4, a common heuristic).
 // Tokens/elapsed appear once they're meaningful, so the pure-thinking phase (no text yet) is just the dot.
 function ThinkingReadout({ chars, inputTokens, outputTokens }: { chars: number; inputTokens: number; outputTokens?: number }): ReactElement {
+  const t = useT()
   const startRef = useRef(Date.now())
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
@@ -62,7 +64,7 @@ function ThinkingReadout({ chars, inputTokens, outputTokens }: { chars: number; 
   const parts: ReactElement[] = []
   if (elapsed >= 1000) parts.push(<span>{fmtElapsed(elapsed)}</span>)
   if (inputTokens > 0) parts.push(<span>↑ {fmtReadoutTokens(inputTokens)}</span>)
-  if (out > 0) parts.push(<span>↓ {fmtReadoutTokens(out)} tokens</span>)
+  if (out > 0) parts.push(<span>↓ {fmtReadoutTokens(out)} {t('conv.tokensSuffix')}</span>)
   return (
     <span className="thinking-readout" aria-label="thinking">
       <span className="tr-dot" />
@@ -80,6 +82,7 @@ function ThinkingReadout({ chars, inputTokens, outputTokens }: { chars: number; 
 // elapsed counts the TOTAL time spent retrying (the store keeps `since` from the first attempt), so a long
 // outage reads e.g. "Request failed · retrying (3/10) · 3m 27s" instead of silently hanging.
 function RetryReadout({ attempt, max, since }: { attempt: number; max: number; since: number }): ReactElement {
+  const t = useT()
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     const clock = setInterval(() => setNow(Date.now()), 500)
@@ -90,7 +93,7 @@ function RetryReadout({ attempt, max, since }: { attempt: number; max: number; s
     <div className="retry-readout" role="status">
       <span className="rr-dot" />
       <span>
-        Request failed · retrying ({attempt}/{max})
+        {t('conv.requestFailedRetrying', { attempt, max })}
         {elapsed >= 1000 ? ` · ${fmtElapsed(elapsed)}` : ''}
       </span>
     </div>
@@ -102,11 +105,12 @@ function RetryReadout({ attempt, max, since }: { attempt: number; max: number; s
 // corrected upstream numbers from the done event. All four paths (chat/agent/coordinator/image) converge
 // on this one component, so the finalized cost reads identically no matter which produced the turn.
 function TokenSummary({ inputTokens, outputTokens }: { inputTokens?: number; outputTokens?: number }): ReactElement | null {
+  const t = useT()
   const parts: string[] = []
   if (inputTokens) parts.push(`↑ ${fmtReadoutTokens(inputTokens)}`)
   if (outputTokens) parts.push(`↓ ${fmtReadoutTokens(outputTokens)}`)
   if (!parts.length) return null
-  return <span className="token-summary">{parts.join(' · ')} tokens</span>
+  return <span className="token-summary">{parts.join(' · ')} {t('conv.tokensSuffix')}</span>
 }
 
 // True when this assistant message represents Coordinator's synthesis step — the final pipeline message
@@ -132,6 +136,7 @@ function ChatSegment({
   inputTokens: number
   outputTokens: number
 }): ReactElement {
+  const t = useT()
   const isUser = msg.role === 'user'
   // Lookup the per-message expert if Coordinator tagged it; fall back to the prop (the conversation's
   // primary role) so direct chats / agents render the same as before. expertById is the merged
@@ -160,9 +165,9 @@ function ChatSegment({
         <Avatar expert={isUser ? null : renderExpert} you={isUser} size={28} streaming={msg.streaming} />
         <div className="seg-meta">
           <NameChip expert={isUser ? null : renderExpert} neutral={isUser} />
-          {synthesis ? <span className="synthesis-tag">synthesis</span> : null}
+          {synthesis ? <span className="synthesis-tag">{t('conv.synthesis')}</span> : null}
           {foldable ? (
-            <button className="fold-toggle" onClick={() => setExpanded((e) => !e)}>{expanded ? 'Collapse' : 'View full'}</button>
+            <button className="fold-toggle" onClick={() => setExpanded((e) => !e)}>{expanded ? t('conv.collapse') : t('conv.viewFull')}</button>
           ) : null}
         </div>
       </div>
@@ -247,6 +252,7 @@ function Composer({
   onOpenSettings?: () => void
   focusNonce?: number
 }): ReactElement {
+  const t = useT()
   const chat = useChat()
   const b = useRoleBinding(expert)
   const cwd = useWorkspace((s) => s.cwdByExpert[expert.id] ?? '')
@@ -364,11 +370,11 @@ function Composer({
             <Icons.plug size={15} style={{ color: 'var(--text-3)' }} />
             <span>
               {needAgentProto
-                ? `${expert.name} is an agent — bind an Anthropic, OpenAI, or Gemini endpoint in its profile`
-                : `Bind an endpoint with a key and model to chat with ${expert.name}`}
+                ? t('conv.needAgentProto', { name: expert.name })
+                : t('conv.bindEndpoint', { name: expert.name })}
             </span>
             <span className="db-arrow" onClick={onOpenSettings}>
-              Open settings <Icons.arrowRight size={13} />
+              {t('conv.openSettings')} <Icons.arrowRight size={13} />
             </span>
           </div>
         ) : null}
@@ -399,8 +405,8 @@ function Composer({
             value={value}
             placeholder={
               needsCwd && !cwd
-                ? 'Choose a project folder above to start'
-                : `Ask ${expert.name} — Enter to send, Shift+Enter for newline`
+                ? t('conv.chooseFolder')
+                : t('conv.askPlaceholder', { name: expert.name })
             }
             onChange={(e) => {
               setValue(e.target.value)
@@ -443,18 +449,18 @@ function Composer({
             disabled={!ready}
           />
           <div className="cmp-bottom">
-            <button className="icon-btn" title="Attach image" disabled={!ready} onClick={() => fileInputRef.current?.click()}>
+            <button className="icon-btn" title={t('conv.attachImage')} disabled={!ready} onClick={() => fileInputRef.current?.click()}>
               <Icons.paperclip size={16} />
             </button>
             <input ref={fileInputRef} type="file" accept="image/*" multiple hidden onChange={onPickFiles} />
             <div className="tb-spacer" />
             {streaming ? (
               <button className="cmp-stop" onClick={() => chat.stop()}>
-                <span className="stop-sq" /> Stop
+                <span className="stop-sq" /> {t('conv.stop')}
               </button>
             ) : (
               <button className="cmp-send" disabled={(!value.trim() && attach.length === 0) || !ready} onClick={send}>
-                Send <Icons.arrowUp size={14} />
+                {t('conv.send')} <Icons.arrowUp size={14} />
               </button>
             )}
           </div>
@@ -466,6 +472,7 @@ function Composer({
 
 /* — The full conversation view for a non-Engineer role — */
 export function ChatView({ expert, onOpenSettings, onBackToProject }: { expert: Expert; onOpenSettings?: () => void; onBackToProject?: () => void }): ReactElement {
+  const t = useT()
   const chat = useChat()
   const { byId: expertById } = useAllExperts()
   const activeConv = chat.activeConv
@@ -542,14 +549,14 @@ export function ChatView({ expert, onOpenSettings, onBackToProject }: { expert: 
   const downloadImage = (img: ViewerImage): void => {
     void window.api.media
       .save(img.url, img.name)
-      .then((path) => { if (path) toast.success('Image saved') })
-      .catch(() => toast.error('Couldn’t save image'))
+      .then((path) => { if (path) toast.success(t('conv.imageSaved')) })
+      .catch(() => toast.error(t('conv.imageSaveFailed')))
   }
   // Refine: close the viewer, seed the composer with a refine lead-in and focus it. The designer keeps
   // the prior image + its prompt in context, so the user just types the change and sends → regenerate.
   const refineImage = (): void => {
     setViewer(null)
-    setValue((v) => (v.trim() ? v : 'Refine the image above — '))
+    setValue((v) => (v.trim() ? v : t('conv.refineLeadIn')))
     setFocusNonce((n) => n + 1)
   }
 
@@ -558,7 +565,7 @@ export function ChatView({ expert, onOpenSettings, onBackToProject }: { expert: 
       {onBackToProject && (
         <div className="chat-crumb-bar">
           <button className="chat-crumb" onClick={onBackToProject}>
-            <Icons.chevronLeft size={14} /> Back to project
+            <Icons.chevronLeft size={14} /> {t('conv.backToProject')}
           </button>
         </div>
       )}

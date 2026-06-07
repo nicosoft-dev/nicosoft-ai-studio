@@ -9,6 +9,7 @@ import { Icons } from '@/components/icons'
 import { STUDIO_DATA } from '@/data/studio-data'
 import { toast } from '@/stores/toast'
 import { useAnchoredMenu } from '@/lib/use-anchored-menu'
+import { useT } from '@/stores/locale'
 
 interface DropdownOption {
   v: string
@@ -16,11 +17,17 @@ interface DropdownOption {
 }
 type SelectOption = string | DropdownOption
 
+// Canonical tone values stay in code (persisted as-is); only their display labels are translated.
 const TONES = ['Formal', 'Friendly', 'Direct']
-const REPLY_LANGS: DropdownOption[] = [
-  { v: 'auto', l: 'Auto' },
-  { v: 'en', l: 'English' },
-  { v: 'zh', l: 'Chinese' }
+const TONE_LABEL_KEYS: Record<string, string> = {
+  Formal: 'profile.toneFormal',
+  Friendly: 'profile.toneFriendly',
+  Direct: 'profile.toneDirect'
+}
+const REPLY_LANG_KEYS: { v: string; labelKey: string }[] = [
+  { v: 'auto', labelKey: 'profile.langAuto' },
+  { v: 'en', labelKey: 'profile.langEn' },
+  { v: 'zh', labelKey: 'profile.langZh' }
 ]
 const TIMEZONES = [
   '(UTC−08:00) Pacific Time',
@@ -118,6 +125,9 @@ export function Dropdown({
 }
 
 export function ProfileForm({ compact, nudgeName }: { compact?: boolean; nudgeName?: boolean }): ReactElement {
+  const t = useT()
+  const toneOptions: DropdownOption[] = TONES.map((v) => ({ v, l: t(TONE_LABEL_KEYS[v]) }))
+  const langOptions: DropdownOption[] = REPLY_LANG_KEYS.map((o) => ({ v: o.v, l: t(o.labelKey) }))
   const [p, setP] = useState(PROFILE_DEFAULTS)
   const [loaded, setLoaded] = useState(false)
   const [dirty, setDirty] = useState(false)
@@ -156,9 +166,9 @@ export function ProfileForm({ compact, nudgeName }: { compact?: boolean; nudgeNa
     try {
       await window.api.settings.set('profile', p)
       setDirty(false)
-      toast.success('Profile saved')
+      toast.success(t('profile.saved'))
     } catch {
-      toast.error('Couldn’t save profile — please try again')
+      toast.error(t('profile.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -171,9 +181,9 @@ export function ProfileForm({ compact, nudgeName }: { compact?: boolean; nudgeNa
       setP(next)
       setDirty(false)
       STUDIO_DATA.USER_PROFILE.name = next.name.trim()
-      toast.info('Reverted to your saved profile')
+      toast.info(t('profile.reverted'))
     } catch {
-      toast.error('Couldn’t reset the form')
+      toast.error(t('profile.resetFailed'))
     }
   }
   // Settings (full form) uses dropdowns; the compact onboarding step keeps segmented.
@@ -184,73 +194,73 @@ export function ProfileForm({ compact, nudgeName }: { compact?: boolean; nudgeNa
     <div className="profile-form">
       <div className="pf-grid">
         <div className="pf-field">
-          <label className="field-label">Display name{nudgeName && <span className="pf-req"> · recommended</span>}</label>
+          <label className="field-label">{t('profile.displayName')}{nudgeName && <span className="pf-req">{t('profile.recommended')}</span>}</label>
           <input
             className={'input' + (nudgeName ? ' nudge' : '')}
             value={p.name}
             autoFocus={nudgeName ? true : undefined}
             onChange={(e) => setName(e.target.value)}
-            placeholder="What should we call you?"
+            placeholder={t('profile.namePlaceholder')}
           />
-          {nudgeName && <div className="pf-hint">The team will address you by this name.</div>}
+          {nudgeName && <div className="pf-hint">{t('profile.nameHint')}</div>}
         </div>
         <div className="pf-field">
-          <label className="field-label">Role / occupation</label>
+          <label className="field-label">{t('profile.occupation')}</label>
           <input
             className="input"
             value={p.occupation}
             onChange={(e) => set('occupation')(e.target.value)}
-            placeholder="e.g. Product designer"
+            placeholder={t('profile.occupationPlaceholder')}
           />
         </div>
       </div>
 
       <div className="pf-field">
-        <label className="field-label">Usual tech stack / domain</label>
+        <label className="field-label">{t('profile.stack')}</label>
         <input
           className="input"
           value={p.stack}
           onChange={(e) => set('stack')(e.target.value)}
-          placeholder="e.g. TypeScript · React · Postgres"
+          placeholder={t('profile.stackPlaceholder')}
         />
       </div>
 
       <div className="pf-grid">
         <div className="pf-field">
-          <label className="field-label">Preferred tone</label>
-          <ToneControl options={TONES} value={p.tone} onChange={set('tone')} />
+          <label className="field-label">{t('profile.tone')}</label>
+          <ToneControl options={toneOptions} value={p.tone} onChange={set('tone')} />
         </div>
         <div className="pf-field">
-          <label className="field-label">Preferred reply language</label>
-          <LangControl options={REPLY_LANGS} value={p.lang} onChange={set('lang')} />
+          <label className="field-label">{t('profile.replyLang')}</label>
+          <LangControl options={langOptions} value={p.lang} onChange={set('lang')} />
         </div>
       </div>
 
       {!compact && (
         <div className="pf-field">
-          <label className="field-label">Time zone</label>
+          <label className="field-label">{t('profile.timezone')}</label>
           <Dropdown options={TIMEZONES} value={p.tz} onChange={set('tz')} icon="globe" />
         </div>
       )}
 
       <div className="pf-field">
-        <label className="field-label">About me</label>
+        <label className="field-label">{t('profile.about')}</label>
         <textarea
           className="input"
           style={{ height: compact ? 64 : 84, paddingTop: 9, resize: 'none', lineHeight: 1.5 }}
           value={p.about}
           onChange={(e) => set('about')(e.target.value)}
-          placeholder="Anything the team should keep in mind — how you like to work, what you're building, what to avoid."
+          placeholder={t('profile.aboutPlaceholder')}
         />
       </div>
 
       {!compact && (
         <div style={{ display: 'flex', gap: 9, marginTop: 20 }}>
           <button className="btn primary sm" onClick={() => void saveNow()} disabled={saving}>
-            {saving ? 'Saving…' : 'Save profile'}
+            {saving ? t('profile.saving') : t('profile.save')}
           </button>
           <button className="btn ghost sm" onClick={() => void resetForm()}>
-            Reset
+            {t('profile.reset')}
           </button>
         </div>
       )}
@@ -259,12 +269,11 @@ export function ProfileForm({ compact, nudgeName }: { compact?: boolean; nudgeNa
 }
 
 export function ProfilePage(): ReactElement {
+  const t = useT()
   return (
     <div className="sc-wrap">
-      <div className="settings-title">Profile</div>
-      <div className="settings-desc">
-        Shared context that helps every expert understand you. It's added to each request and stays on this device.
-      </div>
+      <div className="settings-title">{t('profile.title')}</div>
+      <div className="settings-desc">{t('profile.desc')}</div>
       <ProfileForm />
     </div>
   )

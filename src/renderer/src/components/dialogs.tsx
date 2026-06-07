@@ -10,6 +10,7 @@ import { useRoles } from '@/stores/roles'
 import { useChat, roleHasAgent } from '@/stores/chat'
 import { useCustomRoles } from '@/stores/custom-roles'
 import { toast } from '@/stores/toast'
+import { useT } from '@/stores/locale'
 import type { Expert } from '@/types'
 import type { EndpointDto, EndpointInput, ModelInfo, McpServerDto, McpServerInput, McpTransport, SkillDto, SkillInput, SkillSource } from '@/lib/api'
 
@@ -54,6 +55,7 @@ export function EndpointDialog({
   const [testState, setTestState] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle')
   const [testMsg, setTestMsg] = useState("")
   const editing = !!initial
+  const t = useT()
 
   const updateModel = (k: string, patch: Partial<ModelInfo>): void =>
     setModels((ms) => ms.map((m) => (m._k === k ? { ...m, ...patch } : m)))
@@ -81,7 +83,7 @@ export function EndpointDialog({
   const test = async (): Promise<void> => {
     if (!initial) {
       setTestState('fail')
-      setTestMsg('Save the endpoint first, then test the connection.')
+      setTestMsg(t('ep.testFirst'))
       return
     }
     setTestState('testing')
@@ -90,7 +92,7 @@ export function EndpointDialog({
     if (r.ok) setTestState('ok')
     else {
       setTestState('fail')
-      setTestMsg(r.error?.message ?? 'Connection failed')
+      setTestMsg(r.error?.message ?? t('ep.connectionFailed'))
     }
   }
 
@@ -98,34 +100,34 @@ export function EndpointDialog({
     <div className="overlay" onMouseDown={onClose}>
       <div className="dialog" onMouseDown={(e) => e.stopPropagation()}>
         <div className="dialog-head">
-          <span className="dh-title">{editing ? "Edit endpoint" : "Add endpoint"}</span>
+          <span className="dh-title">{editing ? t('ep.editTitle') : t('ep.addTitle')}</span>
           <button className="icon-btn" onClick={onClose}><Icons.x size={16} /></button>
         </div>
         <div className="dialog-body">
           <div>
-            <label className="field-label">Name</label>
-            <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="My endpoint" />
+            <label className="field-label">{t('ep.name')}</label>
+            <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('ep.namePlaceholder')} />
           </div>
           <div>
-            <label className="field-label">Protocol</label>
+            <label className="field-label">{t('ep.protocol')}</label>
             <div className="segmented">
               {(["openai", "anthropic", "gemini", "custom"] as const).map((p) => (
                 <button key={p} className={proto === p ? "active" : ""}
                   onClick={() => { setProto(p); setBaseURL(PROTO_BASE[p]); }}>
-                  {p === "openai" ? "OpenAI" : p === "anthropic" ? "Anthropic" : p === "gemini" ? "Gemini" : "Custom"}
+                  {p === "openai" ? "OpenAI" : p === "anthropic" ? "Anthropic" : p === "gemini" ? "Gemini" : t('ep.protoCustom')}
                 </button>
               ))}
             </div>
           </div>
           <div>
-            <label className="field-label">Base URL</label>
+            <label className="field-label">{t('ep.baseUrl')}</label>
             <input className="input mono" value={baseURL} onChange={(e) => setBaseURL(e.target.value)} />
           </div>
           <div>
-            <label className="field-label">API key</label>
+            <label className="field-label">{t('ep.apiKey')}</label>
             <div className="key-input-wrap">
               <input className="input mono" type={showKey ? "text" : "password"} value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)} placeholder={editing ? "•••••• (unchanged)" : "sk-…"} />
+                onChange={(e) => setApiKey(e.target.value)} placeholder={editing ? t('ep.apiKeyUnchanged') : "sk-…"} />
               <button className="key-toggle" onClick={() => setShowKey((s) => !s)}>
                 {showKey ? <Icons.eyeOff size={15} /> : <Icons.eye size={15} />}
               </button>
@@ -133,12 +135,12 @@ export function EndpointDialog({
           </div>
           <div>
             <label className="field-label">
-              Models <span style={{ color: "var(--text-4)", fontWeight: 400 }}>· {models.filter((m) => m.slug.trim()).length}</span>
+              {t('ep.models')} <span style={{ color: "var(--text-4)", fontWeight: 400 }}>· {models.filter((m) => m.slug.trim()).length}</span>
             </label>
             <div className="model-rows">
               <div className="model-row head">
-                <span className="mr-h mr-slug">Model slug</span>
-                <span className="mr-h mr-ctx">Context (tokens)</span>
+                <span className="mr-h mr-slug">{t('ep.modelSlug')}</span>
+                <span className="mr-h mr-ctx">{t('ep.contextTokens')}</span>
                 <span className="mr-h-sp" />
               </div>
               {models.map((m) => (
@@ -162,26 +164,26 @@ export function EndpointDialog({
                       updateModel(m._k, { contextLength: Number.isFinite(n) && n > 0 ? n : 0 })
                     }}
                   />
-                  <button className="mr-del" title="Remove" onClick={() => removeRow(m._k)} disabled={models.length <= 1}>
+                  <button className="mr-del" title={t('ep.removeRow')} onClick={() => removeRow(m._k)} disabled={models.length <= 1}>
                     <Icons.x size={13} />
                   </button>
                 </div>
               ))}
               <button className="mr-add" onClick={addRow}>
-                <Icons.plus size={14} /> Add model
+                <Icons.plus size={14} /> {t('ep.addModel')}
               </button>
             </div>
           </div>
-          {testState === 'ok' && <div className="test-success"><Icons.check size={15} /> Connection OK</div>}
+          {testState === 'ok' && <div className="test-success"><Icons.check size={15} /> {t('ep.connectionOk')}</div>}
           {testState === 'fail' && <div className="rb-needs"><Icons.alert size={14} /> {testMsg}</div>}
         </div>
         <div className="dialog-foot">
           <button className="btn secondary sm" onClick={() => void test()} disabled={testState === 'testing'}>
-            {testState === 'testing' ? 'Testing…' : 'Test connection'}
+            {testState === 'testing' ? t('ep.testing') : t('ep.testConnection')}
           </button>
           <div className="df-spacer" />
-          <button className="btn ghost sm" onClick={onClose}>Cancel</button>
-          <button className="btn primary sm" onClick={save}>Save</button>
+          <button className="btn ghost sm" onClick={onClose}>{t('ep.cancel')}</button>
+          <button className="btn primary sm" onClick={save}>{t('ep.save')}</button>
         </div>
       </div>
     </div>
@@ -205,6 +207,7 @@ export function McpDialog({
   onSaved: () => void
 }): ReactElement {
   const { EXPERTS } = STUDIO_DATA
+  const t = useT()
   const [name, setName] = useState(initial?.name ?? '')
   const [transport, setTransport] = useState<McpTransport>(initial?.transport ?? 'stdio')
   const [endpointOrCmd, setEndpointOrCmd] = useState(initial?.endpointOrCmd ?? '')
@@ -240,17 +243,17 @@ export function McpDialog({
     try {
       if (initial) await window.api.mcp.update(initial.id, buildInput())
       else await window.api.mcp.add(buildInput())
-      toast.success('Server saved')
+      toast.success(t('mcp.serverSaved'))
       onSaved()
     } catch {
-      toast.error('Couldn’t save server')
+      toast.error(t('mcp.saveFailed'))
     }
   }
 
   const test = async (): Promise<void> => {
     if (!initial) {
       setTestState('fail')
-      setTestMsg('Save the server first, then test the connection.')
+      setTestMsg(t('mcp.testFirst'))
       return
     }
     setTestState('testing')
@@ -260,17 +263,17 @@ export function McpDialog({
       const r = await window.api.mcp.test(initial.id)
       if (r.ok) {
         setTestState('ok')
-        setTestMsg(`${r.toolCount ?? 0} tools`)
-        toast.success('Connection successful')
+        setTestMsg(t('mcp.toolCount', { count: r.toolCount ?? 0 }))
+        toast.success(t('mcp.connectionSuccessful'))
       } else {
         setTestState('fail')
-        setTestMsg(r.error ?? 'Connection failed')
-        toast.error('Connection failed')
+        setTestMsg(r.error ?? t('mcp.connectionFailed'))
+        toast.error(t('mcp.connectionFailed'))
       }
     } catch {
       setTestState('fail')
-      setTestMsg('Connection failed')
-      toast.error('Connection failed')
+      setTestMsg(t('mcp.connectionFailed'))
+      toast.error(t('mcp.connectionFailed'))
     }
   }
 
@@ -283,11 +286,11 @@ export function McpDialog({
     try {
       parsed = JSON.parse(jsonText)
     } catch {
-      setJsonErr('Not valid JSON')
+      setJsonErr(t('mcp.notValidJson'))
       return
     }
     if (!parsed || typeof parsed !== 'object') {
-      setJsonErr('Expected a JSON object')
+      setJsonErr(t('mcp.expectedObject'))
       return
     }
     let serverName = ''
@@ -296,7 +299,7 @@ export function McpDialog({
     if (wrapped && typeof wrapped === 'object') {
       const entries = Object.entries(wrapped as Record<string, unknown>)
       if (!entries.length) {
-        setJsonErr('No server found under "mcpServers"')
+        setJsonErr(t('mcp.noServerFound'))
         return
       }
       serverName = entries[0][0]
@@ -305,7 +308,7 @@ export function McpDialog({
     const cmd = typeof cfg.command === 'string' ? cfg.command.trim() : ''
     const url = typeof cfg.url === 'string' ? cfg.url.trim() : ''
     if (!cmd && !url) {
-      setJsonErr('Config needs "command" (stdio) or "url" (http)')
+      setJsonErr(t('mcp.needsCommandOrUrl'))
       return
     }
     const kvLines = (obj: unknown): string =>
@@ -337,7 +340,7 @@ export function McpDialog({
     <div className="overlay" onMouseDown={onClose}>
       <div className="dialog" onMouseDown={(e) => e.stopPropagation()}>
         <div className="dialog-head">
-          <span className="dh-title">{editing ? 'Edit MCP server' : 'Add MCP server'}</span>
+          <span className="dh-title">{editing ? t('mcp.editTitle') : t('mcp.addTitle')}</span>
           <button className="icon-btn" onClick={onClose}>
             <Icons.x size={16} />
           </button>
@@ -345,7 +348,7 @@ export function McpDialog({
         <div className="dialog-body">
           <div className="mcp-json">
             <button type="button" className="mcp-json-toggle" onClick={() => setJsonOpen((o) => !o)}>
-              {jsonOpen ? '−' : '+'} Paste config JSON
+              {jsonOpen ? '−' : '+'} {t('mcp.pasteConfig')}
             </button>
             {jsonOpen ? (
               <div className="mcp-json-body">
@@ -365,42 +368,42 @@ export function McpDialog({
                       <Icons.alert size={12} /> {jsonErr}
                     </span>
                   ) : (
-                    <span className="mcp-json-hint">Standard mcpServers format — fills the fields below</span>
+                    <span className="mcp-json-hint">{t('mcp.configHint')}</span>
                   )}
                   <button className="btn secondary sm" onClick={applyJson} disabled={!jsonText.trim()}>
-                    Fill fields
+                    {t('mcp.fillFields')}
                   </button>
                 </div>
               </div>
             ) : null}
           </div>
           <div>
-            <label className="field-label">Name</label>
+            <label className="field-label">{t('mcp.name')}</label>
             <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="filesystem" />
           </div>
           <div>
-            <label className="field-label">Transport</label>
+            <label className="field-label">{t('mcp.transport')}</label>
             <div className="segmented">
-              {(['stdio', 'http'] as const).map((t) => (
-                <button key={t} className={transport === t ? 'active' : ''} onClick={() => setTransport(t)}>
-                  {t === 'stdio' ? 'stdio (local)' : 'HTTP'}
+              {(['stdio', 'http'] as const).map((tr) => (
+                <button key={tr} className={transport === tr ? 'active' : ''} onClick={() => setTransport(tr)}>
+                  {tr === 'stdio' ? t('mcp.stdioLocal') : t('mcp.http')}
                 </button>
               ))}
             </div>
           </div>
           <div>
-            <label className="field-label">{transport === 'stdio' ? 'Command' : 'URL'}</label>
+            <label className="field-label">{transport === 'stdio' ? t('mcp.command') : t('mcp.url')}</label>
             <input
               className="input mono"
               value={endpointOrCmd}
               onChange={(e) => setEndpointOrCmd(e.target.value)}
-              placeholder={transport === 'stdio' ? 'npx' : 'https://mcp.example.com'}
+              placeholder={transport === 'stdio' ? t('mcp.commandPlaceholder') : t('mcp.urlPlaceholder')}
             />
           </div>
           {transport === 'stdio' ? (
             <div>
               <label className="field-label">
-                Arguments <span style={{ color: 'var(--text-4)', fontWeight: 400 }}>· space-separated</span>
+                {t('mcp.arguments')} <span style={{ color: 'var(--text-4)', fontWeight: 400 }}>· {t('mcp.argsHint')}</span>
               </label>
               <input
                 className="input mono"
@@ -412,8 +415,8 @@ export function McpDialog({
           ) : null}
           <div>
             <label className="field-label">
-              {transport === 'stdio' ? 'Environment' : 'Headers'}{' '}
-              <span style={{ color: 'var(--text-4)', fontWeight: 400 }}>· KEY=value per line · kept in keychain</span>
+              {transport === 'stdio' ? t('mcp.environment') : t('mcp.headers')}{' '}
+              <span style={{ color: 'var(--text-4)', fontWeight: 400 }}>· {t('mcp.secretsHint')}</span>
             </label>
             <textarea
               className="input mono"
@@ -421,18 +424,18 @@ export function McpDialog({
               value={secretsText}
               onChange={(e) => setSecretsText(e.target.value)}
               placeholder={
-                editing ? '•••••• (leave blank to keep)' : transport === 'stdio' ? 'API_TOKEN=…' : 'Authorization=Bearer …'
+                editing ? t('mcp.secretsUnchanged') : transport === 'stdio' ? 'API_TOKEN=…' : 'Authorization=Bearer …'
               }
             />
           </div>
           <div>
-            <label className="field-label">Scope</label>
+            <label className="field-label">{t('mcp.scope')}</label>
             <div className="segmented">
               <button className={scopeAll ? 'active' : ''} onClick={() => setScopeAll(true)}>
-                All experts
+                {t('mcp.allExperts')}
               </button>
               <button className={!scopeAll ? 'active' : ''} onClick={() => setScopeAll(false)}>
-                Specific
+                {t('mcp.specific')}
               </button>
             </div>
             {!scopeAll ? (
@@ -444,20 +447,20 @@ export function McpDialog({
                       key={e.id}
                       className={'scope-pick' + (scopeRoles.includes(e.id) ? ' on' : '')}
                       onClick={() => toggleRole(e.id)}
-                      title={noAgent ? AGENT_SCOPE_NOTE : undefined}
+                      title={noAgent ? t('mcp.agentScopeNote') : undefined}
                     >
                       <Avatar expert={e} size={16} /> {e.name}
-                      {noAgent ? <span className="scope-noagent">no agent</span> : null}
+                      {noAgent ? <span className="scope-noagent">{t('mcp.noAgent')}</span> : null}
                     </button>
                   )
                 })}
               </div>
             ) : null}
-            <div className="scope-note">{AGENT_SCOPE_NOTE}</div>
+            <div className="scope-note">{t('mcp.agentScopeNote')}</div>
           </div>
           {testState === 'ok' && (
             <div className="test-success">
-              <Icons.check size={15} /> Connected · {testMsg}
+              <Icons.check size={15} /> {t('mcp.connected')} · {testMsg}
             </div>
           )}
           {testState === 'fail' && (
@@ -468,14 +471,14 @@ export function McpDialog({
         </div>
         <div className="dialog-foot">
           <button className="btn secondary sm" onClick={() => void test()} disabled={testState === 'testing'}>
-            {testState === 'testing' ? 'Testing…' : 'Test connection'}
+            {testState === 'testing' ? t('mcp.testing') : t('mcp.testConnection')}
           </button>
           <div className="df-spacer" />
           <button className="btn ghost sm" onClick={onClose}>
-            Cancel
+            {t('mcp.cancel')}
           </button>
           <button className="btn primary sm" onClick={() => void save()}>
-            Save
+            {t('mcp.save')}
           </button>
         </div>
       </div>
@@ -494,6 +497,7 @@ export function SkillDialog({
   onSaved: () => void
 }): ReactElement {
   const { EXPERTS } = STUDIO_DATA
+  const t = useT()
   const editing = !!initial
   const [source, setSource] = useState<SkillSource>(initial?.source ?? 'imported')
   const [dirPath, setDirPath] = useState(initial?.dirPath ?? '')
@@ -529,14 +533,14 @@ export function SkillDialog({
     try {
       if (initial) await window.api.skills.update(initial.id, buildInput())
       else await window.api.skills.add(buildInput())
-      toast.success('Skill saved')
+      toast.success(t('skill.saved'))
       onSaved()
     } catch (e) {
       // Surface the service's reason (imported: no SKILL.md / empty body; builtin: missing name/body),
       // stripping the layered "Error: … invoking remote method … Error:" IPC wrapper.
       const msg = e instanceof Error ? e.message : String(e)
       setErr(msg.split(/Error:\s*/).filter(Boolean).pop() ?? msg)
-      toast.error('Couldn’t save skill')
+      toast.error(t('skill.saveFailed'))
     }
   }
 
@@ -544,71 +548,71 @@ export function SkillDialog({
     <div className="overlay" onMouseDown={onClose}>
       <div className="dialog" onMouseDown={(e) => e.stopPropagation()}>
         <div className="dialog-head">
-          <span className="dh-title">{editing ? 'Edit skill' : 'Add skill'}</span>
+          <span className="dh-title">{editing ? t('skill.editTitle') : t('skill.addTitle')}</span>
           <button className="icon-btn" onClick={onClose}>
             <Icons.x size={16} />
           </button>
         </div>
         <div className="dialog-body">
           <div>
-            <label className="field-label">Source</label>
+            <label className="field-label">{t('skill.source')}</label>
             <div className="segmented">
               <button className={source === 'imported' ? 'active' : ''} disabled={editing} onClick={() => setSource('imported')}>
-                Import folder
+                {t('skill.importFolder')}
               </button>
               <button className={source === 'builtin' ? 'active' : ''} disabled={editing} onClick={() => setSource('builtin')}>
-                Write in studio
+                {t('skill.writeInStudio')}
               </button>
             </div>
           </div>
           {source === 'imported' ? (
             <div>
               <label className="field-label">
-                Skill folder <span style={{ color: 'var(--text-4)', fontWeight: 400 }}>· must contain SKILL.md</span>
+                {t('skill.skillFolder')} <span style={{ color: 'var(--text-4)', fontWeight: 400 }}>· {t('skill.folderHint')}</span>
               </label>
               <div className="skill-pickrow">
-                <input className="input mono" value={dirPath} onChange={(e) => setDirPath(e.target.value)} placeholder="/path/to/skill" />
+                <input className="input mono" value={dirPath} onChange={(e) => setDirPath(e.target.value)} placeholder={t('skill.folderPlaceholder')} />
                 <button className="btn secondary sm" onClick={() => void pickDir()}>
-                  Browse…
+                  {t('skill.browse')}
                 </button>
               </div>
             </div>
           ) : (
             <>
               <div>
-                <label className="field-label">Name</label>
-                <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="code-review" />
+                <label className="field-label">{t('skill.name')}</label>
+                <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('skill.namePlaceholder')} />
               </div>
               <div>
-                <label className="field-label">Description</label>
-                <input className="input" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Structured PR review" />
+                <label className="field-label">{t('skill.description')}</label>
+                <input className="input" value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t('skill.descPlaceholder')} />
               </div>
               <div>
                 <label className="field-label">
-                  When to use <span style={{ color: 'var(--text-4)', fontWeight: 400 }}>· helps the model pick it</span>
+                  {t('skill.whenToUse')} <span style={{ color: 'var(--text-4)', fontWeight: 400 }}>· {t('skill.whenHint')}</span>
                 </label>
-                <input className="input" value={whenToUse} onChange={(e) => setWhenToUse(e.target.value)} placeholder="When the user asks to review a diff" />
+                <input className="input" value={whenToUse} onChange={(e) => setWhenToUse(e.target.value)} placeholder={t('skill.whenPlaceholder')} />
               </div>
               <div>
-                <label className="field-label">Instructions</label>
+                <label className="field-label">{t('skill.instructions')}</label>
                 <textarea
                   className="input"
                   rows={5}
                   value={body}
                   onChange={(e) => setBody(e.target.value)}
-                  placeholder="Step-by-step instructions the model follows when this skill is invoked…"
+                  placeholder={t('skill.instructionsPlaceholder')}
                 />
               </div>
             </>
           )}
           <div>
-            <label className="field-label">Scope</label>
+            <label className="field-label">{t('skill.scope')}</label>
             <div className="segmented">
               <button className={scopeAll ? 'active' : ''} onClick={() => setScopeAll(true)}>
-                All experts
+                {t('skill.allExperts')}
               </button>
               <button className={!scopeAll ? 'active' : ''} onClick={() => setScopeAll(false)}>
-                Specific
+                {t('skill.specific')}
               </button>
             </div>
             {!scopeAll ? (
@@ -620,16 +624,16 @@ export function SkillDialog({
                       key={e.id}
                       className={'scope-pick' + (scopeRoles.includes(e.id) ? ' on' : '')}
                       onClick={() => toggleRole(e.id)}
-                      title={noAgent ? AGENT_SCOPE_NOTE : undefined}
+                      title={noAgent ? t('skill.agentScopeNote') : undefined}
                     >
                       <Avatar expert={e} size={16} /> {e.name}
-                      {noAgent ? <span className="scope-noagent">no agent</span> : null}
+                      {noAgent ? <span className="scope-noagent">{t('skill.noAgent')}</span> : null}
                     </button>
                   )
                 })}
               </div>
             ) : null}
-            <div className="scope-note">{AGENT_SCOPE_NOTE}</div>
+            <div className="scope-note">{t('skill.agentScopeNote')}</div>
           </div>
           {err ? (
             <div className="dialog-err">
@@ -640,10 +644,10 @@ export function SkillDialog({
         <div className="dialog-foot">
           <div className="df-spacer" />
           <button className="btn ghost sm" onClick={onClose}>
-            Cancel
+            {t('skill.cancel')}
           </button>
           <button className="btn primary sm" onClick={() => void save()}>
-            Save
+            {t('skill.save')}
           </button>
         </div>
       </div>
@@ -659,6 +663,7 @@ export function PluginDialog({
   onClose: () => void
   onInstalled: () => void
 }): ReactElement {
+  const t = useT()
   const [dirPath, setDirPath] = useState('')
   const [installing, setInstalling] = useState(false)
   const [err, setErr] = useState('')
@@ -689,7 +694,7 @@ export function PluginDialog({
     <div className="overlay" onMouseDown={onClose}>
       <div className="dialog" onMouseDown={(e) => e.stopPropagation()}>
         <div className="dialog-head">
-          <span className="dh-title">Install plugin</span>
+          <span className="dh-title">{t('plugin.title')}</span>
           <button className="icon-btn" onClick={onClose}>
             <Icons.x size={16} />
           </button>
@@ -697,19 +702,16 @@ export function PluginDialog({
         <div className="dialog-body">
           <div>
             <label className="field-label">
-              Plugin folder <span style={{ color: 'var(--text-4)', fontWeight: 400 }}>· must contain plugin.json</span>
+              {t('plugin.folder')} <span style={{ color: 'var(--text-4)', fontWeight: 400 }}>· {t('plugin.folderHint')}</span>
             </label>
             <div className="skill-pickrow">
-              <input className="input mono" value={dirPath} onChange={(e) => setDirPath(e.target.value)} placeholder="/path/to/plugin" />
+              <input className="input mono" value={dirPath} onChange={(e) => setDirPath(e.target.value)} placeholder={t('plugin.folderPlaceholder')} />
               <button className="btn secondary sm" onClick={() => void pickDir()}>
-                Browse…
+                {t('plugin.browse')}
               </button>
             </div>
           </div>
-          <div className="scope-note">
-            Installs the plugin&apos;s skills, MCP servers and roles. Skills + MCP are scoped to all experts (active for
-            those that have an agent); the roles are added to your sidebar.
-          </div>
+          <div className="scope-note">{t('plugin.note')}</div>
           {err ? (
             <div className="dialog-err">
               <Icons.alert size={14} /> {err}
@@ -719,10 +721,10 @@ export function PluginDialog({
         <div className="dialog-foot">
           <div className="df-spacer" />
           <button className="btn ghost sm" onClick={onClose}>
-            Cancel
+            {t('plugin.cancel')}
           </button>
           <button className="btn primary sm" onClick={() => void install()} disabled={!dirPath.trim() || installing}>
-            {installing ? 'Installing…' : 'Install'}
+            {installing ? t('plugin.installing') : t('plugin.install')}
           </button>
         </div>
       </div>
@@ -749,7 +751,14 @@ export function RoleEditorDialog({
   onClose: () => void
   initialRole?: { id: string; name: string; color: string | null; systemPrompt: string | null; greeting: string | null; tools: string[] }
 }): ReactElement {
+  const tr = useT()
   const isEdit = !!initialRole
+  const toolLabels: Record<string, string> = {
+    'Web search': tr('roleEditor.toolWebSearch'),
+    'Code execution': tr('roleEditor.toolCodeExecution'),
+    'Image generation': tr('roleEditor.toolImageGeneration'),
+    'File reading': tr('roleEditor.toolFileReading')
+  }
   const [name, setName] = useState(initialRole?.name ?? '')
   const [color, setColor] = useState(initialRole?.color || 'var(--exp-generalist)')
   const [systemPrompt, setSystemPrompt] = useState(initialRole?.systemPrompt ?? '')
@@ -820,11 +829,11 @@ export function RoleEditorDialog({
       }
       // Always (re)set the binding — covers both fresh creates and edit-time endpoint/model changes.
       await window.api.roles.setBinding(roleId!, { endpointId, model })
-      toast.success(isEdit ? 'Role updated' : 'Role created')
+      toast.success(isEdit ? tr('roleEditor.roleUpdated') : tr('roleEditor.roleCreated'))
       onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
-      toast.error('Couldn’t save')
+      toast.error(tr('roleEditor.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -834,24 +843,24 @@ export function RoleEditorDialog({
     <div className="overlay" onMouseDown={onClose}>
       <div className="dialog wide" onMouseDown={(e) => e.stopPropagation()}>
         <div className="dialog-head">
-          <span className="dh-title">{isEdit ? 'Edit role' : 'New role'}</span>
+          <span className="dh-title">{isEdit ? tr('roleEditor.editTitle') : tr('roleEditor.newTitle')}</span>
           <button className="icon-btn" onClick={onClose}><Icons.x size={16} /></button>
         </div>
         <div className="dialog-body">
           <div className="preview-box">
             <Avatar expert={previewExpert} size={36} />
             <div>
-              <span className="name-chip" style={{ "--chip-color": color } as CSSProperties}>{name || "Unnamed"}</span>
-              <div style={{ fontSize: 11.5, color: "var(--text-4)", marginTop: 4 }}>Live preview · avatar &amp; name chip</div>
+              <span className="name-chip" style={{ "--chip-color": color } as CSSProperties}>{name || tr('roleEditor.unnamed')}</span>
+              <div style={{ fontSize: 11.5, color: "var(--text-4)", marginTop: 4 }}>{tr('roleEditor.livePreview')}</div>
             </div>
           </div>
           <div style={{ display: "flex", gap: 14 }}>
             <div style={{ flex: 1 }}>
-              <label className="field-label">Name</label>
-              <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Pixel" />
+              <label className="field-label">{tr('roleEditor.name')}</label>
+              <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder={tr('roleEditor.namePlaceholder')} />
             </div>
             <div style={{ flex: 1 }}>
-              <label className="field-label">Color</label>
+              <label className="field-label">{tr('roleEditor.color')}</label>
               <div className="swatch-row" style={{ paddingTop: 4 }}>
                 {ROLE_SWATCHES.map((c) => (
                   <span key={c} className={"swatch" + (color === c ? " selected" : "")}
@@ -861,30 +870,30 @@ export function RoleEditorDialog({
             </div>
           </div>
           <div>
-            <label className="field-label">System prompt</label>
+            <label className="field-label">{tr('roleEditor.systemPrompt')}</label>
             <textarea className="input" style={{ height: 90, paddingTop: 8, resize: "vertical" }}
               value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)}
-              placeholder="What does this expert do? Tone? Constraints? Be specific." />
+              placeholder={tr('roleEditor.systemPromptPlaceholder')} />
           </div>
           <div style={{ display: "flex", gap: 14 }}>
             <div style={{ flex: 1 }}>
-              <label className="field-label">Endpoint</label>
+              <label className="field-label">{tr('roleEditor.endpoint')}</label>
               <select
                 className="input"
                 style={{ appearance: 'none', WebkitAppearance: 'none', paddingRight: 24 }}
                 value={endpointId}
                 onChange={(e) => setEndpointId(e.target.value)}
               >
-                {endpoints.length === 0 ? <option value="">No endpoints configured</option> : null}
+                {endpoints.length === 0 ? <option value="">{tr('roleEditor.noEndpoints')}</option> : null}
                 {endpoints.map((e) => (
                   <option key={e.id} value={e.id} disabled={!e.enabled || !e.hasKey}>
-                    {e.name} · {e.protocol}{!e.hasKey ? ' · no key' : !e.enabled ? ' · disabled' : ''}
+                    {e.name} · {e.protocol}{!e.hasKey ? tr('roleEditor.noKeySuffix') : !e.enabled ? tr('roleEditor.disabledSuffix') : ''}
                   </option>
                 ))}
               </select>
             </div>
             <div style={{ flex: 1 }}>
-              <label className="field-label">Model</label>
+              <label className="field-label">{tr('roleEditor.model')}</label>
               <select
                 className="input"
                 style={{ appearance: 'none', WebkitAppearance: 'none', paddingRight: 24, fontFamily: 'var(--mono)', fontSize: 12 }}
@@ -902,28 +911,28 @@ export function RoleEditorDialog({
             </div>
           </div>
           <div>
-            <label className="field-label">Tools</label>
+            <label className="field-label">{tr('roleEditor.tools')}</label>
             <div className="tools-list">
-              {ROLE_TOOLS.map((t) => (
-                <div className="tool-check" key={t} onClick={() => toggleTool(t)}>
-                  <span className={"checkbox" + (tools[t] ? " on" : "")}>{tools[t] && <Icons.check size={12} />}</span>
-                  <span className="tc-label">{t}</span>
+              {ROLE_TOOLS.map((tool) => (
+                <div className="tool-check" key={tool} onClick={() => toggleTool(tool)}>
+                  <span className={"checkbox" + (tools[tool] ? " on" : "")}>{tools[tool] && <Icons.check size={12} />}</span>
+                  <span className="tc-label">{toolLabels[tool] ?? tool}</span>
                 </div>
               ))}
             </div>
           </div>
           <div>
-            <label className="field-label">Greeting <span style={{ color: "var(--text-4)", fontWeight: 400 }}>· optional</span></label>
+            <label className="field-label">{tr('roleEditor.greeting')} <span style={{ color: "var(--text-4)", fontWeight: 400 }}>· {tr('roleEditor.optional')}</span></label>
             <input className="input" value={greeting} onChange={(e) => setGreeting(e.target.value)}
-              placeholder="First line the expert shows on a new conversation" />
+              placeholder={tr('roleEditor.greetingPlaceholder')} />
           </div>
           {error ? <div style={{ color: 'var(--danger, #d44)', fontSize: 12 }}>{error}</div> : null}
         </div>
         <div className="dialog-foot">
           <div className="df-spacer" />
-          <button className="btn ghost sm" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="btn ghost sm" onClick={onClose} disabled={saving}>{tr('roleEditor.cancel')}</button>
           <button className="btn primary sm" onClick={() => { void onSave() }} disabled={!valid || saving}>
-            {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create role'}
+            {saving ? tr('roleEditor.saving') : isEdit ? tr('roleEditor.saveChanges') : tr('roleEditor.createRole')}
           </button>
         </div>
       </div>
@@ -965,6 +974,7 @@ export function CommandPalette({
   onNewRole: () => void
 }): ReactElement {
   const { EXPERTS, EXPERT_BY_ID } = STUDIO_DATA
+  const t = useT()
   const chat = useChat()
   const roles = useRoles()
   const [q, setQ] = useState("")
@@ -975,18 +985,18 @@ export function CommandPalette({
   const recents = chat.conversations.slice(0, 4)
   const activeExperts = EXPERTS.filter((e) => !roles.isDeleted(e.id) && !roles.isDisabled(e.id))
   const rows: CmdkRow[] = []
-  rows.push({ group: "Recent conversations" })
-  recents.forEach((c) => rows.push({ type: "conv", id: c.id, label: c.title ?? 'Untitled', expert: c.primaryRoleId ?? 'generalist' }))
-  rows.push({ group: "Roles" })
+  rows.push({ group: t('cmdk.recentConversations') })
+  recents.forEach((c) => rows.push({ type: "conv", id: c.id, label: c.title ?? t('cmdk.untitled'), expert: c.primaryRoleId ?? 'generalist' }))
+  rows.push({ group: t('cmdk.roles') })
   activeExperts.forEach((e) => rows.push({ type: "expert", id: e.id, label: e.name, hint: e.specialty, avatar: e }))
-  rows.push({ group: "Settings" })
-  ;([["endpoints", "Endpoints", "plug"], ["roles", "Roles", "users"], ["memory", "Memory", "box"], ["profile", "Profile", "user"]] as const)
+  rows.push({ group: t('cmdk.settings') })
+  ;([["endpoints", t('cmdk.navEndpoints'), "plug"], ["roles", t('cmdk.navRoles'), "users"], ["memory", t('cmdk.navMemory'), "box"], ["profile", t('cmdk.navProfile'), "user"]] as const)
     .forEach(([tab, label, icon]) => rows.push({ type: "settings", id: tab, label, icon }))
-  rows.push({ group: "Actions" })
-  rows.push({ type: "action", id: "studio", label: "Go to Overview", icon: "layoutGrid" })
-  rows.push({ type: "action", id: "new", label: "New conversation", icon: "plusCircle" })
-  rows.push({ type: "action", id: "export", label: "Export conversation", icon: "download" })
-  rows.push({ type: "action", id: "newrole", label: "New role", icon: "plus" })
+  rows.push({ group: t('cmdk.actions') })
+  rows.push({ type: "action", id: "studio", label: t('cmdk.goOverview'), icon: "layoutGrid" })
+  rows.push({ type: "action", id: "new", label: t('cmdk.newConversation'), icon: "plusCircle" })
+  rows.push({ type: "action", id: "export", label: t('cmdk.exportConversation'), icon: "download" })
+  rows.push({ type: "action", id: "newrole", label: t('cmdk.newRole'), icon: "plus" })
 
   const selectable = rows.filter((r) => !r.group)
   const filtered = q
@@ -1036,19 +1046,19 @@ export function CommandPalette({
       <div className="cmdk" onMouseDown={(e) => e.stopPropagation()}>
         <div className="cmdk-search">
           <Icons.search size={17} style={{ color: "var(--text-3)" }} />
-          <input ref={inputRef} placeholder="Search conversations, roles, actions…"
+          <input ref={inputRef} placeholder={t('cmdk.searchPlaceholder')}
             value={q} onChange={(e) => { setQ(e.target.value); setActive(0); }} onKeyDown={onKey} />
           <kbd style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-4)", background: "var(--bg-3)", borderRadius: 4, padding: "2px 6px" }}>ESC</kbd>
         </div>
         <div className="cmdk-results">
           {filtered
-            ? (filtered.length ? filtered.map((r, i) => renderRow(r, i)) : <div className="cmdk-group-label">No results</div>)
+            ? (filtered.length ? filtered.map((r, i) => renderRow(r, i)) : <div className="cmdk-group-label">{t('cmdk.noResults')}</div>)
             : rows.map((r, i) => renderRow(r, i))}
         </div>
         <div className="cmdk-foot">
-          <span><kbd>↑</kbd> <kbd>↓</kbd> navigate</span>
-          <span><kbd>↵</kbd> open</span>
-          <span><kbd>esc</kbd> close</span>
+          <span><kbd>↑</kbd> <kbd>↓</kbd> {t('cmdk.navigate')}</span>
+          <span><kbd>↵</kbd> {t('cmdk.open')}</span>
+          <span><kbd>esc</kbd> {t('cmdk.close')}</span>
         </div>
       </div>
     </div>

@@ -19,32 +19,52 @@ import { THINKING_OPTIONS } from '@/lib/thinking'
 import { useRoleBinding, FAMILY_LABEL } from '@/lib/use-role-binding'
 import { toast } from '@/stores/toast'
 import { useTheme, type ThemePref } from '@/stores/theme'
+import { useT, useLocale, LOCALE_OPTIONS, type LocalePref } from '@/stores/locale'
 
-const SETTINGS_NAV: { id: string; label: string; icon: string }[] = [
-  { id: "profile",   label: "Profile",   icon: "user" },
-  { id: "memory",    label: "Memory",    icon: "box" },
-  { id: "endpoints", label: "Endpoints", icon: "plug" },
-  { id: "roles",     label: "Roles",     icon: "users" },
-  { id: "general",   label: "General",   icon: "sliders" },
-  { id: "privacy",   label: "Privacy",   icon: "shield" },
-  { id: "about",     label: "About",     icon: "info" },
+const SETTINGS_NAV: { id: string; icon: string }[] = [
+  { id: "profile",   icon: "user" },
+  { id: "memory",    icon: "box" },
+  { id: "endpoints", icon: "plug" },
+  { id: "roles",     icon: "users" },
+  { id: "general",   icon: "sliders" },
+  { id: "privacy",   icon: "shield" },
+  { id: "about",     icon: "info" },
 ];
 
 // Theme selector row (General page). Its own component so the theme hook isn't called conditionally.
 function ThemeRow(): ReactElement {
   const { pref, setPref } = useTheme();
+  const t = useT();
   return (
     <div className="set-row">
-      <span className="set-row-label">Theme</span>
+      <span className="set-row-label">{t("settings.theme.label")}</span>
       <div style={{ width: 168, marginLeft: "auto" }}>
         <Dropdown
           options={[
-            { v: "auto", l: "Auto (system)" },
-            { v: "light", l: "Light" },
-            { v: "dark", l: "Dark" }
+            { v: "auto", l: t("settings.theme.auto") },
+            { v: "light", l: t("settings.theme.light") },
+            { v: "dark", l: t("settings.theme.dark") }
           ]}
           value={pref}
           onChange={(v) => setPref(v as ThemePref)}
+        />
+      </div>
+    </div>
+  );
+}
+
+// Language selector row (General page). Mirrors ThemeRow — switches instantly, no restart.
+function LanguageRow(): ReactElement {
+  const { pref, setPref } = useLocale();
+  const t = useT();
+  return (
+    <div className="set-row">
+      <span className="set-row-label">{t("settings.language.label")}</span>
+      <div style={{ width: 168, marginLeft: "auto" }}>
+        <Dropdown
+          options={LOCALE_OPTIONS.map((o) => ({ v: o.value, l: t(o.labelKey) }))}
+          value={pref}
+          onChange={(v) => setPref(v as LocalePref)}
         />
       </div>
     </div>
@@ -60,17 +80,18 @@ function SettingsNav({
   onSelect: (id: string) => void
   onBack: () => void
 }): ReactElement {
+  const t = useT();
   return (
     <div className="settings-nav">
       <div className="sn-back" onClick={onBack}>
-        <Icons.chevronLeft size={15} /> Back to studio
+        <Icons.chevronLeft size={15} /> {t("settings.back")}
       </div>
       {SETTINGS_NAV.map((item) => {
         const I = Icons[item.icon];
         return (
           <div key={item.id} className={"sn-item" + (active === item.id ? " active" : "")} onClick={() => onSelect(item.id)}>
             <span className="sn-icon"><I size={16} /></span>
-            {item.label}
+            {t("settings.nav." + item.id)}
           </div>
         );
       })}
@@ -111,10 +132,11 @@ function EndpointsPage({
   onEdit: (ep: EndpointDto) => void
   onDelete: (id: string) => void
 }): ReactElement {
+  const t = useT()
   return (
     <div className="sc-wrap">
-      <div className="settings-title">Endpoints</div>
-      <div className="settings-desc">Connect AI providers. Each endpoint exposes one or more models that your experts run on.</div>
+      <div className="settings-title">{t('epPage.title')}</div>
+      <div className="settings-desc">{t('epPage.desc')}</div>
       <div className="endpoint-list">
         {endpoints.map((ep) => {
           const health = ep.enabled ? 'healthy' : 'idle'
@@ -123,19 +145,19 @@ function EndpointsPage({
               <span className="er-health"><HealthDot status={health} /></span>
               <span className="er-name">{ep.name}</span>
               <span className="er-proto">{ep.protocol}</span>
-              <span className={"er-status " + health}>{ep.enabled ? 'enabled' : 'disabled'}</span>
-              <span className="er-models">{ep.availableModels.length} models</span>
-              <span className="er-key">{ep.hasKey ? 'key set' : 'no key'}</span>
+              <span className={"er-status " + health}>{ep.enabled ? t('epPage.enabled') : t('epPage.disabled')}</span>
+              <span className="er-models">{t('epPage.models', { count: ep.availableModels.length })}</span>
+              <span className="er-key">{ep.hasKey ? t('epPage.keySet') : t('epPage.noKey')}</span>
               <span className="er-actions">
-                <button className="btn sm ghost" onClick={() => onEdit(ep)}>Edit</button>
+                <button className="btn sm ghost" onClick={() => onEdit(ep)}>{t('epPage.edit')}</button>
                 <EndpointRowMenu onEdit={() => onEdit(ep)} onDelete={() => onDelete(ep.id)} />
               </span>
             </div>
           )
         })}
-        {endpoints.length === 0 && <div className="endpoint-row" style={{ color: "var(--text-4)", fontSize: 13 }}>No endpoints configured yet.</div>}
+        {endpoints.length === 0 && <div className="endpoint-row" style={{ color: "var(--text-4)", fontSize: 13 }}>{t('epPage.empty')}</div>}
         <div className="add-endpoint-row" onClick={onAdd}>
-          <Icons.plus size={15} /> Add endpoint
+          <Icons.plus size={15} /> {t('epPage.add')}
         </div>
       </div>
     </div>
@@ -144,6 +166,7 @@ function EndpointsPage({
 
 /* — Roles binding table (interactive, persisted) — */
 function RoleBindRow({ expert }: { expert: Expert }): ReactElement {
+  const tr = useT()
   const b = useRoleBinding(expert);
   return (
     <div className="role-bind-row">
@@ -154,8 +177,8 @@ function RoleBindRow({ expert }: { expert: Expert }): ReactElement {
           {/* Recommended (best-fit) model family for this expert — guidance for binding. Custom roles
               without a declared family don't get a recommendation. */}
           {expert.family && (
-            <span className="rb-fit" title={`${expert.name} works best on the ${FAMILY_LABEL[expert.family]} family`}>
-              <span className={'rb-fit-dot ' + expert.family} /> Best fit · {FAMILY_LABEL[expert.family]}
+            <span className="rb-fit" title={tr('rolesPage.bestFitTitle', { name: expert.name, family: FAMILY_LABEL[expert.family] })}>
+              <span className={'rb-fit-dot ' + expert.family} /> {tr('rolesPage.bestFit', { family: FAMILY_LABEL[expert.family] })}
             </span>
           )}
         </div>
@@ -165,9 +188,9 @@ function RoleBindRow({ expert }: { expert: Expert }): ReactElement {
             stays empty if no endpoint exists), so render the binding controls only once loaded and
             non-empty — otherwise the endpoint Dropdown gets empty options and the row crashes. */}
         {!b.loaded ? (
-          <span className="rb-needs" style={{ opacity: 0.6 }}>Loading…</span>
+          <span className="rb-needs" style={{ opacity: 0.6 }}>{tr('rolesPage.loading')}</span>
         ) : b.endpoints.length === 0 ? (
-          <span className="rb-needs"><Icons.alert size={14} /> No endpoint configured</span>
+          <span className="rb-needs"><Icons.alert size={14} /> {tr('rolesPage.noEndpointConfigured')}</span>
         ) : (
           <>
             <span className={"proto-chip " + (b.family ?? 'openai')}><span className="pc-dot" /> {FAMILY_LABEL[b.family ?? 'openai']}</span>
@@ -179,7 +202,7 @@ function RoleBindRow({ expert }: { expert: Expert }): ReactElement {
                   dialog). Switching endpoint repopulates them and resets to its first model. */}
               <div className="rb-ctl rb-ctl-model">
                 <Dropdown
-                  options={(b.models.length ? b.models : ['']).map((m) => ({ v: m, l: m || '— no models —' }))}
+                  options={(b.models.length ? b.models : ['']).map((m) => ({ v: m, l: m || tr('rolesPage.noModels') }))}
                   value={b.model}
                   onChange={b.onModel}
                 />
@@ -188,8 +211,8 @@ function RoleBindRow({ expert }: { expert: Expert }): ReactElement {
                 <div className="rb-ctl rb-ctl-think">
                   <Dropdown
                     options={[
-                      { v: '', l: 'Default thinking' },
-                      ...THINKING_OPTIONS.filter((t) => b.depths.includes(t.value)).map((t) => ({ v: t.value, l: t.label }))
+                      { v: '', l: tr('rolesPage.defaultThinking') },
+                      ...THINKING_OPTIONS.filter((o) => b.depths.includes(o.value)).map((o) => ({ v: o.value, l: o.label }))
                     ]}
                     value={b.depth}
                     onChange={b.onDepth}
@@ -205,6 +228,7 @@ function RoleBindRow({ expert }: { expert: Expert }): ReactElement {
 }
 
 function RolesPage({ onAddEndpoint }: { onAddEndpoint: () => void }): ReactElement {
+  const tr = useT()
   const { EXPERTS } = STUDIO_DATA;
   const roles = useRoles();
   const bindable = EXPERTS.filter((e) => !e.unconfigured && !roles.isDeleted(e.id));
@@ -212,17 +236,17 @@ function RolesPage({ onAddEndpoint }: { onAddEndpoint: () => void }): ReactEleme
 
   return (
     <div className="sc-wrap sc-wide">
-      <div className="settings-title">Roles</div>
-      <div className="settings-desc">Bind each expert to the endpoint and model best suited to its job. The recommended model family is shown under each name — a starting point you can always override.</div>
+      <div className="settings-title">{tr('rolesPage.title')}</div>
+      <div className="settings-desc">{tr('rolesPage.desc')}</div>
       <div className="family-legend">
-        <div className="fl-item"><span className="proto-chip anthropic"><span className="pc-dot" /> Anthropic</span> reasoning &amp; code</div>
-        <div className="fl-item"><span className="proto-chip openai"><span className="pc-dot" /> OpenAI</span> general &amp; analysis</div>
-        <div className="fl-item"><span className="proto-chip gemini"><span className="pc-dot" /> Gemini</span> translation &amp; images</div>
+        <div className="fl-item"><span className="proto-chip anthropic"><span className="pc-dot" /> Anthropic</span> {tr('rolesPage.legendAnthropic')}</div>
+        <div className="fl-item"><span className="proto-chip openai"><span className="pc-dot" /> OpenAI</span> {tr('rolesPage.legendOpenai')}</div>
+        <div className="fl-item"><span className="proto-chip gemini"><span className="pc-dot" /> Gemini</span> {tr('rolesPage.legendGemini')}</div>
       </div>
       <div className="roles-table">
         <div className="roles-thead">
-          <span className="th-role">Expert</span>
-          <span className="th-binding">Endpoint &amp; model</span>
+          <span className="th-role">{tr('rolesPage.thExpert')}</span>
+          <span className="th-binding">{tr('rolesPage.thBinding')}</span>
         </div>
         {bindable.map((e) => (
           <RoleBindRow key={e.id} expert={e} />
@@ -235,9 +259,9 @@ function RolesPage({ onAddEndpoint }: { onAddEndpoint: () => void }): ReactEleme
               <span className="rb-name">{ci.name}</span>
             </div>
             <div className="rb-binding">
-              <span className="rb-needs"><Icons.alert size={14} /> Needs an endpoint</span>
+              <span className="rb-needs"><Icons.alert size={14} /> {tr('rolesPage.needsEndpoint')}</span>
               <div className="rb-controls">
-                <button className="mini-select" onClick={onAddEndpoint}>Add endpoint <Icons.arrowRight size={12} /></button>
+                <button className="mini-select" onClick={onAddEndpoint}>{tr('rolesPage.addEndpoint')} <Icons.arrowRight size={12} /></button>
               </div>
             </div>
           </div>
@@ -248,6 +272,7 @@ function RolesPage({ onAddEndpoint }: { onAddEndpoint: () => void }): ReactEleme
 }
 
 function GenericSettingsPage({ id }: { id: string }): ReactElement {
+  const t = useT()
   const [info, setInfo] = useState<AppInfo | null>(null)
   useEffect(() => {
     void window.api.app.info().then(setInfo)
@@ -256,12 +281,8 @@ function GenericSettingsPage({ id }: { id: string }): ReactElement {
   if (id === "privacy") {
     return (
       <div className="sc-wrap">
-        <div className="settings-title">Privacy</div>
-        <div className="settings-desc">
-          NicoSoft AI Studio is local-first. Your conversations, memory, projects, and settings live only on
-          this device — there is no NicoSoft account, no server, and no cloud sync. We collect no usage
-          analytics or telemetry; nothing about how you use the app is sent anywhere.
-        </div>
+        <div className="settings-title">{t("settings.privacy.title")}</div>
+        <div className="settings-desc">{t("settings.privacy.desc")}</div>
         <ul className="set-points">
           <li><strong>API keys are encrypted in the OS keychain</strong> — never written in plain text, and only ever sent to the provider they belong to.</li>
           <li><strong>Conversations &amp; memory stay local</strong> — stored in a SQLite database in your home folder, never uploaded to NicoSoft.</li>
@@ -271,12 +292,12 @@ function GenericSettingsPage({ id }: { id: string }): ReactElement {
         </ul>
         <div className="set-list">
           <div className="set-row">
-            <span className="set-row-label">On this device</span>
-            <span className="set-row-val">{info ? `${info.conversations} conversations · ${info.memories} memories` : "—"}</span>
+            <span className="set-row-label">{t("settings.privacy.onDevice")}</span>
+            <span className="set-row-val">{info ? t("settings.privacy.stats", { conversations: info.conversations, memories: info.memories }) : "—"}</span>
           </div>
           {info && (
-            <div className="set-row clickable" onClick={() => void window.api.revealFile(info.dataDir)} title="Reveal in Finder">
-              <span className="set-row-label">Data folder</span>
+            <div className="set-row clickable" onClick={() => void window.api.revealFile(info.dataDir)} title={t("settings.privacy.revealTitle")}>
+              <span className="set-row-label">{t("settings.privacy.dataFolder")}</span>
               <span className="set-row-val mono">{info.dataDir}</span>
               <span className="set-row-ic"><Icons.folder size={14} /></span>
             </div>
@@ -289,12 +310,12 @@ function GenericSettingsPage({ id }: { id: string }): ReactElement {
   if (id === "about") {
     return (
       <div className="sc-wrap">
-        <div className="settings-title">About</div>
+        <div className="settings-title">{t("settings.about.title")}</div>
         <div className="about-hero">
           <div className="about-name">NicoSoft AI Studio</div>
-          <div className="about-ver">v{info?.version ?? "…"} · Apache-2.0 · open source</div>
+          <div className="about-ver">{t("settings.about.tagline", { version: "v" + (info?.version ?? "…") })}</div>
         </div>
-        <div className="settings-desc">A desktop workspace where a team of named AI experts — engineers, a designer, a translator, an editor, an analyst, a scheduler, and a coordinator — works for you, running on the model providers you choose.</div>
+        <div className="settings-desc">{t("settings.about.desc")}</div>
         <ul className="set-points">
           <li><b>A team, not a chatbot</b> — each expert has its own role, tools, and starter prompts; the coordinator can route a task across several of them.</li>
           <li><b>Bring your own models</b> — point each role at any OpenAI-, Anthropic-, or Gemini-compatible endpoint; no NicoSoft account or proxy in between.</li>
@@ -303,12 +324,12 @@ function GenericSettingsPage({ id }: { id: string }): ReactElement {
           <li><b>Yours, on this device</b> — conversations, memory, and projects live in a local SQLite database; API keys sit in the OS keychain.</li>
         </ul>
         <div className="set-list">
-          <div className="set-row"><span className="set-row-label">Version</span><span className="set-row-val">{info?.version ?? "…"}</span></div>
-          <div className="set-row"><span className="set-row-label">License</span><span className="set-row-val">Apache-2.0 · open source</span></div>
-          <div className="set-row"><span className="set-row-label">Engine</span><span className="set-row-val">Electron · React</span></div>
-          <div className="set-row"><span className="set-row-label">Author</span><span className="set-row-val">NicoSoft</span></div>
+          <div className="set-row"><span className="set-row-label">{t("settings.about.version")}</span><span className="set-row-val">{info?.version ?? "…"}</span></div>
+          <div className="set-row"><span className="set-row-label">{t("settings.about.license")}</span><span className="set-row-val">{t("settings.about.licenseVal")}</span></div>
+          <div className="set-row"><span className="set-row-label">{t("settings.about.engine")}</span><span className="set-row-val">{t("settings.about.engineVal")}</span></div>
+          <div className="set-row"><span className="set-row-label">{t("settings.about.author")}</span><span className="set-row-val">NicoSoft</span></div>
         </div>
-        <div className="settings-note">Built to run on your machine and your model providers — nothing about how you use it is sent anywhere else.</div>
+        <div className="settings-note">{t("settings.about.note")}</div>
       </div>
     )
   }
@@ -316,13 +337,12 @@ function GenericSettingsPage({ id }: { id: string }): ReactElement {
   // general
   return (
     <div className="sc-wrap">
-      <div className="settings-title">General</div>
-      <div className="settings-desc">Appearance and language.</div>
+      <div className="settings-title">{t("settings.general.title")}</div>
+      <div className="settings-desc">{t("settings.general.desc")}</div>
       <div className="set-list">
         <ThemeRow />
-        <div className="set-row"><span className="set-row-label">Language</span><span className="set-row-val">English</span></div>
+        <LanguageRow />
       </div>
-      <div className="settings-note">Additional languages are planned for a future release.</div>
     </div>
   )
 }
@@ -336,6 +356,7 @@ export function SettingsView({
   onTab: (tab: string) => void
   onBack: () => void
 }): ReactElement {
+  const t = useT()
   const [endpoints, setEndpoints] = useState<EndpointDto[]>([]);
   const [dialog, setDialog] = useState<{ editing: EndpointDto | null } | null>(null);
 
@@ -347,14 +368,14 @@ export function SettingsView({
   const del = (id: string): void => {
     void window.api.endpoints
       .remove(id)
-      .then(() => { reload(); toast.success('Endpoint removed'); })
-      .catch(() => toast.error('Couldn’t remove endpoint'));
+      .then(() => { reload(); toast.success(t('epPage.removed')); })
+      .catch(() => toast.error(t('epPage.removeFailed')));
   };
   const save = (input: EndpointInput, id: string | null): void => {
     const p = id ? window.api.endpoints.update(id, input) : window.api.endpoints.add(input);
     void p
-      .then(() => { reload(); setDialog(null); toast.success(id ? 'Endpoint saved' : 'Endpoint added'); })
-      .catch(() => toast.error(id ? 'Couldn’t save endpoint' : 'Couldn’t add endpoint'));
+      .then(() => { reload(); setDialog(null); toast.success(id ? t('epPage.saved') : t('epPage.added')); })
+      .catch(() => toast.error(id ? t('epPage.saveFailed') : t('epPage.addFailed')));
   };
 
   return (

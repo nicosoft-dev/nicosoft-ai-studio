@@ -11,6 +11,7 @@ import { Dropdown } from '@/views/profile'
 import { Pagination } from '@/components/pagination'
 import { useMemory } from '@/stores/memory'
 import { toast } from '@/stores/toast'
+import { useT } from '@/stores/locale'
 import type { MemoryItem as MemoryItemData } from '@/types'
 
 const MEM_PAGE_SIZE = 10
@@ -49,6 +50,7 @@ export function MemoryItem({
   onEdit?: (text: string) => void
   onDelete?: () => void
 }): ReactElement {
+  const t = useT()
   const [editing, setEditing] = useState(false)
   const [text, setText] = useState(item.text)
   return (
@@ -75,10 +77,10 @@ export function MemoryItem({
         <span className="mem-text">{text}</span>
       )}
       <div className="mem-actions">
-        <button className="icon-btn sm" title="Edit" onClick={() => setEditing(true)}>
+        <button className="icon-btn sm" title={t('mem.edit')} onClick={() => setEditing(true)}>
           <Icons.edit size={13} />
         </button>
-        <button className="icon-btn sm" title="Delete" onClick={onDelete}>
+        <button className="icon-btn sm" title={t('mem.delete')} onClick={onDelete}>
           <Icons.trash size={13} />
         </button>
       </div>
@@ -153,6 +155,7 @@ function GlobalMemRow({
   onDelete: () => void
 }): ReactElement {
   const { EXPERT_BY_ID } = STUDIO_DATA
+  const t = useT()
   const [editing, setEditing] = useState(false)
   const [text, setText] = useState(entry.text)
   const e = entry.scope === 'shared' ? null : EXPERT_BY_ID[entry.scope]
@@ -166,7 +169,7 @@ function GlobalMemRow({
           </>
         ) : (
           <>
-            <Icons.users size={13} /> Shared
+            <Icons.users size={13} /> {t('mem.shared')}
           </>
         )}
       </span>
@@ -191,10 +194,10 @@ function GlobalMemRow({
         <span className="mem-text">{text}</span>
       )}
       <div className="mem-actions">
-        <button className="icon-btn sm" title="Edit" onClick={() => setEditing(true)}>
+        <button className="icon-btn sm" title={t('mem.edit')} onClick={() => setEditing(true)}>
           <Icons.edit size={13} />
         </button>
-        <button className="icon-btn sm" title="Delete" onClick={onDelete}>
+        <button className="icon-btn sm" title={t('mem.delete')} onClick={onDelete}>
           <Icons.trash size={13} />
         </button>
       </div>
@@ -204,6 +207,7 @@ function GlobalMemRow({
 
 export function MemorySettings(): ReactElement {
   const { EXPERTS } = STUDIO_DATA
+  const t = useT()
   const mem = useMemory()
   useEffect(() => {
     void mem.load()
@@ -224,11 +228,11 @@ export function MemorySettings(): ReactElement {
     // Flip every expert at once; surface a single failure toast if any write rejects (the optimistic
     // switch flip is the success feedback).
     void Promise.all(EXPERTS.map((e) => mem.setSelfLearning(e.id, next))).catch(() =>
-      toast.error('Couldn’t update setting')
+      toast.error(t('mem.updateSettingFailed'))
     )
   }
 
-  const expertOpts = [{ v: 'all', l: 'All experts' }, ...EXPERTS.map((e) => ({ v: e.id, l: e.name }))]
+  const expertOpts = [{ v: 'all', l: t('mem.allExperts') }, ...EXPERTS.map((e) => ({ v: e.id, l: e.name }))]
   const layers = ['all', 'SHARED', 'ROLE', 'COLLAB']
 
   const filtered = entries.filter((e) => {
@@ -242,19 +246,19 @@ export function MemorySettings(): ReactElement {
 
   return (
     <div className="sc-wrap">
-      <div className="settings-title">Memory</div>
+      <div className="settings-title">{t('mem.title')}</div>
       <div className="settings-desc">
-        What your experts remember about you, across three layers — <strong>Shared</strong> (about you),
-        <strong> Role</strong> (per-expert), and <strong>Collab</strong> (learned across hand-offs).
-        Everything here is stored locally and never leaves this device.
+        {t('mem.descBefore')}<strong>{t('mem.shared')}</strong>{t('mem.descShared')}
+        <strong>{t('mem.role')}</strong>{t('mem.descRole')}<strong>{t('mem.collab')}</strong>
+        {t('mem.descCollab')}
       </div>
 
       {/* self-learning controls */}
       <div className="mem-self">
         <div className="mem-self-master">
           <div>
-            <div className="mss-title">Self-learning</div>
-            <div className="mss-sub">Let experts remember useful context from your conversations.</div>
+            <div className="mss-title">{t('mem.selfLearning')}</div>
+            <div className="mss-sub">{t('mem.selfLearningSub')}</div>
           </div>
           <MemToggle on={master} onClick={toggleMaster} />
         </div>
@@ -265,7 +269,7 @@ export function MemorySettings(): ReactElement {
               <span className="mse-name">{e.name}</span>
               <MemToggle
                 on={perExpert[e.id] !== false}
-                onClick={() => void mem.setSelfLearning(e.id, perExpert[e.id] === false).catch(() => toast.error('Couldn’t update setting'))}
+                onClick={() => void mem.setSelfLearning(e.id, perExpert[e.id] === false).catch(() => toast.error(t('mem.updateSettingFailed')))}
               />
             </div>
           ))}
@@ -275,35 +279,35 @@ export function MemorySettings(): ReactElement {
       {/* filters */}
       <div className="mem-filters">
         <div className="mf-group">
-          <span className="mf-label">Expert</span>
+          <span className="mf-label">{t('mem.expert')}</span>
           <div style={{ width: 170 }}>
             <Dropdown options={expertOpts} value={fExpert} onChange={setFExpert} />
           </div>
         </div>
         <div className="mf-group">
-          <span className="mf-label">Layer</span>
+          <span className="mf-label">{t('mem.layer')}</span>
           <div className="segmented">
             {layers.map((l) => (
               <button key={l} className={fLayer === l ? 'active' : ''} onClick={() => setFLayer(l)}>
-                {l === 'all' ? 'All' : LAYER_META[l as LayerKey].label}
+                {l === 'all' ? t('mem.all') : t('mem.' + l.toLowerCase())}
               </button>
             ))}
           </div>
         </div>
-        <span className="mf-count">{filtered.length} memories</span>
+        <span className="mf-count">{t('mem.count', { n: filtered.length })}</span>
       </div>
 
       {/* list — 10 per page */}
       <div className="mem-global-list">
         {filtered.length === 0 ? (
-          <div className="mem-empty">No memories yet — they form as you chat.</div>
+          <div className="mem-empty">{t('mem.empty')}</div>
         ) : (
           paged.map((e) => (
             <GlobalMemRow
               key={e.uid}
               entry={e}
-              onEdit={(t) => void mem.update(e.uid, t).then(() => toast.success('Memory updated')).catch(() => toast.error('Couldn’t update memory'))}
-              onDelete={() => void mem.remove(e.uid).then(() => toast.success('Memory removed')).catch(() => toast.error('Couldn’t remove memory'))}
+              onEdit={(txt) => void mem.update(e.uid, txt).then(() => toast.success(t('mem.updated'))).catch(() => toast.error(t('mem.updateFailed')))}
+              onDelete={() => void mem.remove(e.uid).then(() => toast.success(t('mem.removed'))).catch(() => toast.error(t('mem.removeFailed')))}
             />
           ))
         )}

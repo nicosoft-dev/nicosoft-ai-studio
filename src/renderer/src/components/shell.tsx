@@ -13,6 +13,7 @@ import { useRoles } from '@/stores/roles'
 import { useAllExperts } from '@/lib/all-experts'
 import { useChat } from '@/stores/chat'
 import { toast } from '@/stores/toast'
+import { useT } from '@/stores/locale'
 import type { Expert } from '@/types'
 import type { ConversationDto } from '@/lib/api'
 
@@ -35,6 +36,7 @@ export function Topbar({
   const [confirmDel, setConfirmDel] = useState(false)
   const btnRef = useRef<HTMLButtonElement>(null)
   const { menuRef, style } = useAnchoredMenu(menu, btnRef, 'right')
+  const t = useT()
   const doExport = (fmt: 'md' | 'json'): void => {
     setMenu(false)
     // export opens a native save dialog: a truthy path = exported, a falsy value = the user cancelled
@@ -42,8 +44,8 @@ export function Topbar({
     if (cid)
       void window.api.conversations
         .export(cid, fmt)
-        .then((path) => { if (path) toast.success('Conversation exported') })
-        .catch(() => toast.error('Export failed'))
+        .then((path) => { if (path) toast.success(t('topbar.exported')) })
+        .catch(() => toast.error(t('topbar.exportFailed')))
   }
   return (
     <div className="topbar">
@@ -53,23 +55,23 @@ export function Topbar({
           <>
             <button
               className={'icon-btn' + (workspace.open ? ' on' : '')}
-              title="Workspace"
+              title={t('topbar.workspace')}
               onClick={workspace.onToggle}
             >
               <Icons.panelRight size={17} />
             </button>
             <div className="conv-menu-wrap">
-              <button ref={btnRef} className="icon-btn" title="Actions" onClick={() => setMenu((s) => !s)}>
+              <button ref={btnRef} className="icon-btn" title={t('topbar.actions')} onClick={() => setMenu((s) => !s)}>
                 <Icons.more size={17} />
               </button>
               {menu && createPortal(
                 <>
                   <div className="menu-backdrop" onClick={() => setMenu(false)} />
                   <div ref={menuRef} className="row-menu right" style={style}>
-                    <div className="rm-item" onClick={() => { setMenu(false); setRenaming(true) }}><Icons.edit size={14} /> Rename</div>
-                    <div className="rm-item" onClick={() => doExport('md')}><Icons.download size={14} /> Export Markdown</div>
-                    <div className="rm-item" onClick={() => doExport('json')}><Icons.download size={14} /> Export JSON</div>
-                    <div className="rm-item danger" onClick={() => { setMenu(false); setConfirmDel(true) }}><Icons.trash size={14} /> Delete</div>
+                    <div className="rm-item" onClick={() => { setMenu(false); setRenaming(true) }}><Icons.edit size={14} /> {t('topbar.rename')}</div>
+                    <div className="rm-item" onClick={() => doExport('md')}><Icons.download size={14} /> {t('topbar.exportMarkdown')}</div>
+                    <div className="rm-item" onClick={() => doExport('json')}><Icons.download size={14} /> {t('topbar.exportJson')}</div>
+                    <div className="rm-item danger" onClick={() => { setMenu(false); setConfirmDel(true) }}><Icons.trash size={14} /> {t('topbar.delete')}</div>
                   </div>
                 </>,
                 document.body
@@ -81,30 +83,30 @@ export function Topbar({
           <Icons.search size={14} />
           <kbd>⌘K</kbd>
         </button>
-        <button className="icon-btn" onClick={onSettings} title="Settings">
+        <button className="icon-btn" onClick={onSettings} title={t('topbar.settings')}>
           <Icons.settings size={17} />
         </button>
       </div>
       {renaming && cid && (
         <PromptDialog
-          title="Rename conversation"
+          title={t('topbar.renameConversation')}
           initial={curTitle}
-          confirmLabel="Rename"
-          onConfirm={(v) => void chat.rename(cid, v).catch(() => toast.error('Couldn’t rename'))}
+          confirmLabel={t('topbar.renameAction')}
+          onConfirm={(v) => void chat.rename(cid, v).catch(() => toast.error(t('topbar.renameFailed')))}
           onClose={() => setRenaming(false)}
         />
       )}
       {confirmDel && cid && (
         <ConfirmDialog
-          title="Delete conversation"
-          body="This permanently deletes this conversation and its messages. This can't be undone."
-          confirmLabel="Delete"
+          title={t('topbar.deleteConversation')}
+          body={t('topbar.deleteBody')}
+          confirmLabel={t('topbar.deleteAction')}
           danger
           onConfirm={() =>
             void chat
               .removeConversation(cid)
-              .then(() => toast.success('Conversation deleted'))
-              .catch(() => toast.error('Couldn’t delete conversation'))
+              .then(() => toast.success(t('topbar.conversationDeleted')))
+              .catch(() => toast.error(t('topbar.deleteFailed')))
           }
           onClose={() => setConfirmDel(false)}
         />
@@ -125,6 +127,7 @@ export function RoleRow({
   onProfile: () => void
 }): ReactElement {
   const roles = useRoles()
+  const t = useT()
   const [menu, setMenu] = useState(false)
   const [confirm, setConfirm] = useState(false)
   const canToggle = !expert.coordinator
@@ -135,9 +138,9 @@ export function RoleRow({
       {expert.coordinator
         ? <span className="lead-caret"><Icons.chevronRight size={13} /></span>
         : <span className="lead-caret" />}
-      <span className="role-av" onClick={onProfile} title="Open profile"><Avatar expert={expert} size={26} /></span>
-      <div className="role-meta" onClick={onChat} title="Start a conversation">
-        <span className="role-name">{expert.name}{expert.coordinator && <span className="primary-tag">primary</span>}</span>
+      <span className="role-av" onClick={onProfile} title={t('sidebar.openProfileTitle')}><Avatar expert={expert} size={26} /></span>
+      <div className="role-meta" onClick={onChat} title={t('sidebar.startConversationTitle')}>
+        <span className="role-name">{expert.name}{expert.coordinator && <span className="primary-tag">{t('sidebar.primary')}</span>}</span>
         <span className="role-sub">{expert.specialty}</span>
       </div>
       {active && <span className="active-dot" />}
@@ -148,20 +151,20 @@ export function RoleRow({
         <>
           <div className="menu-backdrop" onClick={(e) => { e.stopPropagation(); setMenu(false); }} />
           <div ref={menuRef} className="row-menu" style={style} onClick={(e) => e.stopPropagation()}>
-            <div className="rm-item" onClick={() => { setMenu(false); onProfile(); }}><Icons.user size={14} /> Open profile</div>
-            <div className="rm-item" onClick={() => { setMenu(false); onChat(); }}><Icons.message size={14} /> Start a conversation</div>
+            <div className="rm-item" onClick={() => { setMenu(false); onProfile(); }}><Icons.user size={14} /> {t('sidebar.openProfile')}</div>
+            <div className="rm-item" onClick={() => { setMenu(false); onChat(); }}><Icons.message size={14} /> {t('sidebar.startConversation')}</div>
             {canToggle
-              ? <div className="rm-item" onClick={() => { setMenu(false); roles.disable(expert.id); }}><Icons.eyeOff size={14} /> Disable role</div>
-              : <div className="rm-note">Primary role · always on</div>}
-            {expert.custom && <div className="rm-item danger" onClick={() => { setMenu(false); setConfirm(true); }}><Icons.trash size={14} /> Delete role</div>}
+              ? <div className="rm-item" onClick={() => { setMenu(false); roles.disable(expert.id); }}><Icons.eyeOff size={14} /> {t('sidebar.disableRole')}</div>
+              : <div className="rm-note">{t('sidebar.primaryAlwaysOn')}</div>}
+            {expert.custom && <div className="rm-item danger" onClick={() => { setMenu(false); setConfirm(true); }}><Icons.trash size={14} /> {t('sidebar.deleteRole')}</div>}
           </div>
         </>,
         document.body
       )}
       {confirm && (
-        <ConfirmDialog title={`Delete ${expert.name}?`}
-          body={`This removes ${expert.name}, its conversations, and what it learned about you. Shared memory is kept. This can't be undone.`}
-          confirmLabel="Delete role" danger
+        <ConfirmDialog title={t('role.deleteTitle', { name: expert.name })}
+          body={t('role.deleteBody', { name: expert.name })}
+          confirmLabel={t('sidebar.deleteRole')} danger
           onConfirm={() => roles.remove(expert.id)} onClose={() => setConfirm(false)} />
       )}
     </div>
@@ -170,14 +173,15 @@ export function RoleRow({
 
 function DisabledRow({ expert, onProfile }: { expert: Expert; onProfile: () => void }): ReactElement {
   const roles = useRoles()
+  const t = useT()
   return (
     <div className="role-row disabled-role">
       <span className="lead-caret" />
-      <span className="role-av" onClick={onProfile} title="Open profile"><Avatar expert={expert} size={26} /></span>
+      <span className="role-av" onClick={onProfile} title={t('sidebar.openProfileTitle')}><Avatar expert={expert} size={26} /></span>
       <div className="role-meta" onClick={onProfile}>
         <span className="role-name">{expert.name}</span>
       </div>
-      <button className="role-enable" onClick={() => roles.enable(expert.id)}>Enable</button>
+      <button className="role-enable" onClick={() => roles.enable(expert.id)}>{t('sidebar.enable')}</button>
     </div>
   )
 }
@@ -195,6 +199,7 @@ function HistRow({
   onSelect: (id: string) => void
 }): ReactElement {
   const chat = useChat()
+  const t = useT()
   const [menu, setMenu] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
@@ -203,25 +208,25 @@ function HistRow({
   return (
     <div className={'hist-row' + (active ? ' active' : '')} onClick={() => onSelect(conv.id)}>
       <span className="hist-dot" style={{ background: expert?.color ?? 'var(--text-4)' }} />
-      <span className="hist-title">{conv.title || 'Untitled'}</span>
-      <button ref={moreRef} className="hist-more" title="Actions" onClick={(e) => { e.stopPropagation(); setMenu((s) => !s) }}>
+      <span className="hist-title">{conv.title || t('sidebar.untitled')}</span>
+      <button ref={moreRef} className="hist-more" title={t('topbar.actions')} onClick={(e) => { e.stopPropagation(); setMenu((s) => !s) }}>
         <Icons.more size={14} />
       </button>
       {menu && createPortal(
         <>
           <div className="menu-backdrop" onClick={(e) => { e.stopPropagation(); setMenu(false) }} />
           <div ref={menuRef} className="row-menu right" style={style} onClick={(e) => e.stopPropagation()}>
-            <div className="rm-item" onClick={() => { setMenu(false); void chat.setPinned(conv.id, !conv.pinned).catch(() => toast.error('Couldn’t update')) }}>
-              <Icons.pin size={14} /> {conv.pinned ? 'Unpin' : 'Pin'}
+            <div className="rm-item" onClick={() => { setMenu(false); void chat.setPinned(conv.id, !conv.pinned).catch(() => toast.error(t('topbar.updateFailed'))) }}>
+              <Icons.pin size={14} /> {conv.pinned ? t('sidebar.unpin') : t('sidebar.pin')}
             </div>
             <div className="rm-item" onClick={() => { setMenu(false); setRenaming(true) }}>
-              <Icons.edit size={14} /> Rename
+              <Icons.edit size={14} /> {t('sidebar.rename')}
             </div>
-            <div className="rm-item" onClick={() => { setMenu(false); void chat.setArchived(conv.id, !conv.archived).catch(() => toast.error('Couldn’t archive')) }}>
-              <Icons.archive size={14} /> {conv.archived ? 'Unarchive' : 'Archive'}
+            <div className="rm-item" onClick={() => { setMenu(false); void chat.setArchived(conv.id, !conv.archived).catch(() => toast.error(t('topbar.archiveFailed'))) }}>
+              <Icons.archive size={14} /> {conv.archived ? t('sidebar.unarchive') : t('sidebar.archive')}
             </div>
             <div className="rm-item danger" onClick={() => { setMenu(false); setConfirmDel(true) }}>
-              <Icons.trash size={14} /> Delete
+              <Icons.trash size={14} /> {t('sidebar.delete')}
             </div>
           </div>
         </>,
@@ -229,24 +234,24 @@ function HistRow({
       )}
       {renaming && (
         <PromptDialog
-          title="Rename conversation"
+          title={t('topbar.renameConversation')}
           initial={conv.title || ''}
-          confirmLabel="Rename"
-          onConfirm={(v) => void chat.rename(conv.id, v).catch(() => toast.error('Couldn’t rename'))}
+          confirmLabel={t('topbar.renameAction')}
+          onConfirm={(v) => void chat.rename(conv.id, v).catch(() => toast.error(t('topbar.renameFailed')))}
           onClose={() => setRenaming(false)}
         />
       )}
       {confirmDel && (
         <ConfirmDialog
-          title="Delete conversation"
-          body="This permanently deletes this conversation and its messages. This can't be undone."
-          confirmLabel="Delete"
+          title={t('topbar.deleteConversation')}
+          body={t('topbar.deleteBody')}
+          confirmLabel={t('topbar.deleteAction')}
           danger
           onConfirm={() =>
             void chat
               .removeConversation(conv.id)
-              .then(() => toast.success('Conversation deleted'))
-              .catch(() => toast.error('Couldn’t delete conversation'))
+              .then(() => toast.success(t('topbar.conversationDeleted')))
+              .catch(() => toast.error(t('topbar.deleteFailed')))
           }
           onClose={() => setConfirmDel(false)}
         />
@@ -324,6 +329,12 @@ export function Sidebar({
 }): ReactElement {
   const { experts: EXPERTS, byId: EXPERT_BY_ID } = useAllExperts()
   const roles = useRoles()
+  const t = useT()
+  const histGroupKey: Record<'Today' | 'Yesterday' | 'Earlier', string> = {
+    Today: 'sidebar.today',
+    Yesterday: 'sidebar.yesterday',
+    Earlier: 'sidebar.earlier'
+  }
   const coordinator = EXPERTS.find((e) => e.coordinator)
   const rest = EXPERTS.filter((e) => !e.coordinator && !roles.isDeleted(e.id))
   // Until useRoles.load() finishes, treat every role as enabled so we don't paint a disabled row that
@@ -349,29 +360,29 @@ export function Sidebar({
   return (
     <div className="sidebar">
       <div className="sidebar-header">
-        <button className="sidebar-new" title="New conversation" onClick={onNewConversation}>
+        <button className="sidebar-new" title={t('sidebar.newConversation')} onClick={onNewConversation}>
           <Icons.edit size={17} />
         </button>
       </div>
       <div className="sidebar-scroll">
         <div className={"studio-nav-row" + (studioActive ? " active" : "")} onClick={onStudio}>
           <span className="sn-grid"><Icons.layoutGrid size={16} /></span>
-          Overview
+          {t('sidebar.overview')}
         </div>
         <div className={"studio-nav-row" + (projectsActive ? " active" : "")} onClick={onProjects}>
           <span className="sn-grid"><Icons.kanban size={16} /></span>
-          Projects
+          {t('sidebar.projects')}
         </div>
         <div className={"studio-nav-row" + (scheduledActive ? " active" : "")} onClick={onScheduled}>
           <span className="sn-grid"><Icons.calendarClock size={16} /></span>
-          Scheduled
+          {t('sidebar.scheduled')}
         </div>
         <div className={"studio-nav-row" + (extensionsActive ? " active" : "")} onClick={onExtensions}>
           <span className="sn-grid"><Icons.puzzle size={16} /></span>
-          Extensions
+          {t('sidebar.extensions')}
         </div>
 
-        <SideSectionHead label="Roles" count={1 + enabledRest.length} collapsed={!rolesOpen} onToggle={() => setRolesOpen((s) => !s)} />
+        <SideSectionHead label={t('sidebar.roles')} count={1 + enabledRest.length} collapsed={!rolesOpen} onToggle={() => setRolesOpen((s) => !s)} />
         {rolesOpen && (
           <>
             {coordinator && <RoleRow expert={coordinator} active={activeExpert === "coordinator"} onChat={() => onSelectExpert("coordinator")} onProfile={() => onOpenProfile("coordinator")} />}
@@ -381,13 +392,13 @@ export function Sidebar({
             ))}
             <div className="new-role-row" onClick={onNewRole}>
               <span className="nr-icon"><Icons.plus size={15} /></span>
-              New role
+              {t('sidebar.newRole')}
             </div>
             {disabledList.length > 0 && (
               <>
                 <div className="disabled-head" onClick={() => setDisabledOpen((s) => !s)}>
                   <span className={"ssh-chev" + (disabledOpen ? "" : " collapsed")}><Icons.chevronDown size={12} /></span>
-                  Disabled <span className="count">({disabledList.length})</span>
+                  {t('sidebar.disabled')} <span className="count">({disabledList.length})</span>
                 </div>
                 {disabledOpen && disabledList.map((e) => (
                   <DisabledRow key={e.id} expert={e} onProfile={() => onOpenProfile(e.id)} />
@@ -399,15 +410,15 @@ export function Sidebar({
 
         <div className="side-divider" />
 
-        <SideSectionHead label="History" collapsed={!histOpen} onToggle={() => setHistOpen((s) => !s)} />
+        <SideSectionHead label={t('sidebar.history')} collapsed={!histOpen} onToggle={() => setHistOpen((s) => !s)} />
         {histOpen &&
           (conversations.length === 0 ? (
-            <div className="empty-history">No conversations yet. Pick an expert above to start one.</div>
+            <div className="empty-history">{t('sidebar.emptyHistory')}</div>
           ) : (
             <>
               {pinnedConvs.length > 0 && (
                 <>
-                  <div className="hist-group-head"><Icons.pin size={11} /> Pinned</div>
+                  <div className="hist-group-head"><Icons.pin size={11} /> {t('sidebar.pinned')}</div>
                   {pinnedConvs.map((c) => (
                     <HistRow key={c.id} conv={c} active={activeConv === c.id} expert={histExpert(c)} onSelect={onSelectConv} />
                   ))}
@@ -415,7 +426,7 @@ export function Sidebar({
               )}
               {dateGroups.map((g) => (
                 <Fragment key={g.label}>
-                  <div className="hist-group-head">{g.label}</div>
+                  <div className="hist-group-head">{t(histGroupKey[g.label])}</div>
                   {g.items.map((c) => (
                     <HistRow key={c.id} conv={c} active={activeConv === c.id} expert={histExpert(c)} onSelect={onSelectConv} />
                   ))}
@@ -425,7 +436,7 @@ export function Sidebar({
                 <>
                   <div className="hist-group-head clickable" onClick={() => setArchivedOpen((s) => !s)}>
                     <span className={'ssh-chev' + (archivedOpen ? '' : ' collapsed')}><Icons.chevronDown size={11} /></span>
-                    Archived <span className="count">{archivedConvs.length}</span>
+                    {t('sidebar.archived')} <span className="count">{archivedConvs.length}</span>
                   </div>
                   {archivedOpen &&
                     archivedConvs.map((c) => (

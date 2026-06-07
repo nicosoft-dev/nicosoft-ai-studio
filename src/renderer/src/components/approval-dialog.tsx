@@ -7,6 +7,7 @@ import { useEffect } from 'react'
 import type { ReactElement } from 'react'
 import type { PermissionPrompt } from '@/stores/chat'
 import { STUDIO_DATA } from '@/data/studio-data'
+import { useT } from '@/stores/locale'
 
 // Render the tool input as a readable command / path block (full JSON only as a fallback).
 function formatInput(toolName: string, input: unknown): string {
@@ -42,6 +43,7 @@ export function ApprovalDialog({
   onAllow: () => void
   onDeny: () => void
 }): ReactElement {
+  const t = useT()
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Enter') {
@@ -68,7 +70,7 @@ export function ApprovalDialog({
             <span className="ap-icon">
               <PlanIcon />
             </span>
-            <span className="ap-title">Plan ready for review</span>
+            <span className="ap-title">{t('ap.planTitle')}</span>
           </div>
           <pre className="ap-plan-body">{plan.plan ?? ''}</pre>
           {steps.length ? (
@@ -80,10 +82,10 @@ export function ApprovalDialog({
           ) : null}
           <div className="ap-actions">
             <button className="ap-deny" onClick={onDeny}>
-              Revise <kbd>Esc</kbd>
+              {t('ap.revise')} <kbd>Esc</kbd>
             </button>
             <button className="ap-allow" onClick={onAllow}>
-              Approve &amp; run <kbd>↵</kbd>
+              {t('ap.approveRun')} <kbd>↵</kbd>
             </button>
           </div>
         </div>
@@ -99,17 +101,17 @@ export function ApprovalDialog({
             <TerminalIcon />
           </span>
           <span className="ap-title">
-            {STUDIO_DATA.EXPERT_BY_ID[prompt.roleId ?? 'engineer']?.name ?? 'Flynn'} wants to run <span className="ap-tool">{prompt.toolName}</span>
+            {STUDIO_DATA.EXPERT_BY_ID[prompt.roleId ?? 'engineer']?.name ?? 'Flynn'} {t('ap.wantsToRun')} <span className="ap-tool">{prompt.toolName}</span>
           </span>
         </div>
         {prompt.reason ? <div className="ap-reason">{prompt.reason}</div> : null}
         <pre className="ap-input">{formatInput(prompt.toolName, prompt.input)}</pre>
         <div className="ap-actions">
           <button className="ap-deny" onClick={onDeny}>
-            Deny <kbd>Esc</kbd>
+            {t('ap.deny')} <kbd>Esc</kbd>
           </button>
           <button className="ap-allow" onClick={onAllow}>
-            Allow <kbd>↵</kbd>
+            {t('ap.allow')} <kbd>↵</kbd>
           </button>
         </div>
       </div>

@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react'
 import type { ReactElement } from 'react'
 import type { QuestionPrompt } from '@/stores/chat'
 import { STUDIO_DATA } from '@/data/studio-data'
+import { useT } from '@/stores/locale'
 
 export function QuestionDialog({
   prompt,
@@ -15,8 +16,9 @@ export function QuestionDialog({
   prompt: QuestionPrompt
   onAnswer: (answer: string) => void
 }): ReactElement {
+  const t = useT()
   const [other, setOther] = useState('')
-  const name = (prompt.roleId && STUDIO_DATA.EXPERT_BY_ID[prompt.roleId]?.name) || 'The agent'
+  const name = (prompt.roleId && STUDIO_DATA.EXPERT_BY_ID[prompt.roleId]?.name) || t('q.theAgent')
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const n = parseInt(e.key, 10)
@@ -33,7 +35,7 @@ export function QuestionDialog({
       <div className="approval-card">
         <div className="q-head">
           {prompt.header ? <span className="q-tag">{prompt.header}</span> : null}
-          <span className="ap-title">{name} is asking</span>
+          <span className="ap-title">{t('q.isAsking', { name })}</span>
         </div>
         <div className="q-question">{prompt.question}</div>
         <div className="q-options">
@@ -46,7 +48,7 @@ export function QuestionDialog({
         </div>
         <input
           className="q-other"
-          placeholder="Or type another answer…"
+          placeholder={t('q.otherPlaceholder')}
           value={other}
           onChange={(e) => setOther(e.target.value)}
           onKeyDown={(e) => {

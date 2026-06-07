@@ -16,8 +16,10 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import { initTheme } from './stores/theme'
+import { initLocale } from './stores/locale'
 
 initTheme() // resolve theme + start tracking OS changes (FOUC guard in index.html already set the first frame)
+initLocale() // resolve locale + start tracking OS language changes
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
