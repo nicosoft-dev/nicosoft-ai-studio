@@ -178,6 +178,9 @@ prebuilds/
 *.db-shm
 *.db-wal
 
+# E2E / verification scripts (run locally on-demand, not committed)
+e2e/
+
 # OS files
 .DS_Store
 .DS_Store?
