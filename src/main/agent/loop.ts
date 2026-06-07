@@ -17,6 +17,7 @@ import {
 import type { AgentContext, PermissionMode, SpawnSubAgent } from './context'
 import { AsyncSubAgentPool, type RunChild } from './sub-agent-pool'
 import { StreamingToolExecutor } from './execution'
+import { abortableDelay, isRetryableLlmError, retryBackoffMs } from './retry'
 import { callWithTools, type AgentLlmEvent } from './llm'
 import type { Tool } from './tool'
 import { isContentBlock } from './types'
@@ -50,6 +51,7 @@ export interface RunAgentParams {
   searchModel?: string // model for WebSearch's server web_search call; defaults to the main model
   imageModel?: string // image backend slug for ns_generate_image (designer); Gemini only
   onStream?: (e: AgentLlmEvent) => void // forwarded straight from the LLM call (text + tool deltas)
+  onRetry?: (info: { attempt: number; max: number; code: string; waitMs: number }) => void // transient failure → retrying
 }
 
 export type AgentEvent =
@@ -141,11 +143,12 @@ export async function* runAgent(
   const compactConfig: CompactConfig = { protocol: params.protocol, baseUrl, apiKey, model, signal: ctx.signal }
   const threshold = autocompactThreshold(contextWindow)
   let reactiveCompacted = false // bounce guard: if a send overflows right after a reactive compact, fail
-  // Transient-failure retry budget for the whole run: a network drop or an idle-timeout abort on a hung
-  // upstream (both surface as code 'network'; a user/run abort additionally sets ctx.signal, which we
-  // exclude) retries the turn instead of failing the run — capped so a persistently-dead upstream still ends.
-  let transientRetries = 0
-  const MAX_TRANSIENT_RETRIES = 3
+  // Transient-failure retry budget, PER request (reset after each successful send). A recoverable failure
+  // — network drop / idle-timeout abort on a hung upstream (code 'network'), rate limit (429), or a 5xx /
+  // overloaded (529) upstream — is retried with exponential backoff instead of failing the run; a user/run
+  // abort (ctx.signal) is excluded. Capped so a persistently-dead upstream still ends after 10 attempts.
+  let requestRetries = 0
+  const MAX_REQUEST_RETRIES = 10
 
   // Sub-agent spawner factory for the Task tool. Builds an isolated inner loop with the same LLM
   // config but no Task tool (recursion bounded to one level) and a fresh readFileState/todos,
@@ -272,16 +275,25 @@ export async function* runAgent(
         streamExec.add(step.value)
       }
       reactiveCompacted = false // a successful send clears the bounce guard
+      requestRetries = 0 // …and gives the next request a fresh retry budget
     } catch (err) {
       // Stop this turn's in-flight tools (bash gets SIGTERM, queued tools see aborted and no-op)
       // before retrying or propagating — otherwise they run detached and, on a reactive-compaction
       // retry, get re-issued and executed twice.
       turnAbort.abort()
-      // Transient upstream failure → retry the turn a few times instead of failing the whole run. A network
-      // drop and an idle-timeout abort on a hung upstream both surface as code 'network'; a user/run abort
-      // additionally sets ctx.signal (excluded). This turns a hung LLM call into a recoverable blip.
-      if (err instanceof LlmError && err.code === 'network' && !ctx.signal.aborted && transientRetries < MAX_TRANSIENT_RETRIES) {
-        transientRetries++
+      // Transient upstream failure → back off and retry the request instead of failing the whole run.
+      // Recoverable = network drop / idle-timeout abort (code 'network'), rate limit (429), or 5xx /
+      // overloaded (529). A user/run abort (ctx.signal) is excluded. onRetry surfaces a "retrying (N/M)"
+      // status to the UI; the backoff is abortable so a user cancel mid-wait stops at once.
+      if (isRetryableLlmError(err) && !ctx.signal.aborted && requestRetries < MAX_REQUEST_RETRIES) {
+        requestRetries++
+        const waitMs = retryBackoffMs(requestRetries, err.retryAfterMs)
+        params.onRetry?.({ attempt: requestRetries, max: MAX_REQUEST_RETRIES, code: err.code, waitMs })
+        try {
+          await abortableDelay(waitMs, ctx.signal)
+        } catch {
+          throw err // aborted during backoff → give up
+        }
         continue
       }
       // Reactive compaction: an overflow status (400/413) that slipped past the proactive check →

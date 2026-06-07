@@ -76,6 +76,27 @@ function ThinkingReadout({ chars, inputTokens, outputTokens }: { chars: number; 
   )
 }
 
+// Shown between turns when an upstream request failed and the run is backing off before retrying. The live
+// elapsed counts the TOTAL time spent retrying (the store keeps `since` from the first attempt), so a long
+// outage reads e.g. "Request failed · retrying (3/10) · 3m 27s" instead of silently hanging.
+function RetryReadout({ attempt, max, since }: { attempt: number; max: number; since: number }): ReactElement {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const clock = setInterval(() => setNow(Date.now()), 500)
+    return () => clearInterval(clock)
+  }, [])
+  const elapsed = now - since
+  return (
+    <div className="retry-readout" role="status">
+      <span className="rr-dot" />
+      <span>
+        Request failed · retrying ({attempt}/{max})
+        {elapsed >= 1000 ? ` · ${fmtElapsed(elapsed)}` : ''}
+      </span>
+    </div>
+  )
+}
+
 // Persistent token summary under a FINISHED assistant turn: the real ↑ input + ↓ output (upstream usage),
 // kept visible after the live readout's dot clears. The live ↓ was a chars/4 estimate; these are the
 // corrected upstream numbers from the done event. All four paths (chat/agent/coordinator/image) converge
@@ -452,6 +473,7 @@ export function ChatView({ expert, onOpenSettings, onBackToProject }: { expert: 
   const baseTokens = activeConv ? (chat.contextTokens[activeConv] ?? 0) : 0
   const baseOut = activeConv ? (chat.liveOutput[activeConv] ?? 0) : 0
   const convStreaming = activeConv ? (chat.streaming[activeConv] ?? false) : false
+  const retry = activeConv ? chat.retry[activeConv] : null
   const error = activeConv ? chat.error[activeConv] : null
   const permission = activeConv ? chat.permission[activeConv] : null
   const question = activeConv ? chat.question[activeConv] : null
@@ -569,6 +591,7 @@ export function ChatView({ expert, onOpenSettings, onBackToProject }: { expert: 
           !messages[messages.length - 1].tools?.some((t) => t.status === 'running') ? (
             <PendingReadout expert={expert} inputTokens={baseTokens} outputTokens={baseOut} />
           ) : null}
+          {retry ? <RetryReadout attempt={retry.attempt} max={retry.max} since={retry.since} /> : null}
           {error ? (
             <div className="inline-notice">
               <span className="n-icon">

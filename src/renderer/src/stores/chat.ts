@@ -119,6 +119,7 @@ interface ChatState {
   contextTokens: Record<string, number> // per-conversation exact prompt tokens of the last sent turn
   liveOutput: Record<string, number> // per-conversation REAL output tokens, streamed live during a turn (↓ readout)
   streamStartedAt: Record<string, number> // per-conversation epoch ms when the current turn started; read only while streaming (Overview "In progress" elapsed). Overwritten each send, left stale after (never read when not streaming)
+  retry: Record<string, { attempt: number; max: number; since: number } | null> // per-conversation transient-failure retry status ("retrying (N/M)"); null/absent when not retrying
   loadConversations: () => Promise<void>
   openConversation: (convId: string) => Promise<void>
   newConversation: () => void
@@ -240,9 +241,14 @@ export const useChat = create<ChatState>((set, get) => {
     // The backend persists the user + final assistant turn itself; here we only accumulate the live UI
     // (text + tool cards) and the permission prompt. We never re-append the assistant message.
     const ag = window.api.agent
+    // Clear a conversation's "retrying" banner once the run makes progress again (or ends).
+    const clearRetry = (convId: string): void =>
+      set((s) => (s.retry[convId] ? { retry: { ...s.retry, [convId]: null } } : s))
     ag.onDelta((d) => {
       const meta = agentMeta.get(d.streamId)
-      if (meta) appendDelta(meta.convId, d.text)
+      if (!meta) return
+      appendDelta(meta.convId, d.text)
+      clearRetry(meta.convId)
     })
     // A tool just started (streamed before the turn finishes) — show a running card immediately so the
     // user sees the call in flight instead of silence until onAssistant. The full input (and the card's
@@ -267,6 +273,7 @@ export const useChat = create<ChatState>((set, get) => {
     ag.onAssistant((d) => {
       const meta = agentMeta.get(d.streamId)
       if (!meta) return
+      clearRetry(meta.convId) // a turn arrived → no longer retrying
       set((s) => {
         const msgs = (s.byConversation[meta.convId] ?? []).map((m) => ({ ...m }))
         let cur = msgs[msgs.length - 1]
@@ -356,6 +363,7 @@ export const useChat = create<ChatState>((set, get) => {
           byConversation: { ...s.byConversation, [meta.convId]: msgs },
           streaming: { ...s.streaming, [meta.convId]: false },
           permission: { ...s.permission, [meta.convId]: null },
+          retry: { ...s.retry, [meta.convId]: null },
           contextTokens:
             typeof d.inputTokens === 'number'
               ? { ...s.contextTokens, [meta.convId]: d.inputTokens }
@@ -367,7 +375,21 @@ export const useChat = create<ChatState>((set, get) => {
     ag.onError((d) => {
       const meta = agentMeta.get(d.streamId)
       agentMeta.delete(d.streamId)
-      if (meta) finishWithError(meta.convId, d.message)
+      if (meta) {
+        clearRetry(meta.convId)
+        finishWithError(meta.convId, d.message)
+      }
+    })
+    ag.onRetry((d) => {
+      const meta = agentMeta.get(d.streamId)
+      if (!meta) return
+      // Keep `since` from the first retry so the readout shows total time spent retrying, not per-attempt.
+      set((s) => ({
+        retry: {
+          ...s.retry,
+          [meta.convId]: { attempt: d.attempt, max: d.max, since: s.retry[meta.convId]?.since ?? Date.now() }
+        }
+      }))
     })
     // Unified live ↑ readout for EVERY path (chat / agent / coordinator / image): each path broadcasts its
     // real prompt size up front and as the turn grows, keyed by convId, so the working indicator shows ↑
@@ -607,6 +629,7 @@ export const useChat = create<ChatState>((set, get) => {
     contextTokens: {},
     liveOutput: {},
     streamStartedAt: {},
+    retry: {},
 
     loadConversations: async () => {
       set({ conversations: await window.api.conversations.list() })

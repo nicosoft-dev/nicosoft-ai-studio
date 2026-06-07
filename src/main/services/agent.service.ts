@@ -113,6 +113,7 @@ function toolsForAgentRole(roleId: string): Tool[] {
 export interface AgentCallbacks {
   onStream: (e: AgentLlmEvent) => void // fine-grained deltas (text + tool_use input) for streaming UI
   onEvent: (e: AgentEvent) => void // completed assistant turns + tool_results
+  onRetry?: (info: { attempt: number; max: number; code: string; waitMs: number }) => void // transient failure → retrying status
   onUsage?: (inputTokens: number) => void // live ↑ input-token readout: initial count up front, then per turn
   onToolImage?: (attachment: MessageAttachmentDto) => void // a tool produced an image (persisted nsai-media:// ref) → surface it live
   requestPermission: RequestPermission // bridged to the renderer (req, optional cancel signal)
@@ -371,6 +372,7 @@ export async function runAgentLoop(
     thinking: loop.thinking,
     imageModel: loop.imageModel,
     onStream: cb.onStream,
+    onRetry: cb.onRetry,
   })
 
   let result!: AgentResult

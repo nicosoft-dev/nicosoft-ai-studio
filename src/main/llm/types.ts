@@ -17,11 +17,13 @@ export type LlmErrorCode =
 export class LlmError extends Error {
   code: LlmErrorCode
   status?: number
-  constructor(code: LlmErrorCode, message: string, status?: number) {
+  retryAfterMs?: number // honored by the retry backoff when the upstream sent a Retry-After header
+  constructor(code: LlmErrorCode, message: string, status?: number, retryAfterMs?: number) {
     super(message)
     this.name = 'LlmError'
     this.code = code
     this.status = status
+    this.retryAfterMs = retryAfterMs
   }
 }
 

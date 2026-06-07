@@ -157,6 +157,9 @@ const api = {
     onQuestionCancel: (cb: (d: AgentQuestionCancel) => void): (() => void) => agentListen('agent:question:cancel', cb),
     onDone: (cb: (d: AgentDone) => void): (() => void) => agentListen('agent:done', cb),
     onError: (cb: (d: AgentErrorDto) => void): (() => void) => agentListen('agent:error', cb),
+    onRetry: (
+      cb: (d: { streamId: string; attempt: number; max: number; code: string; waitMs: number }) => void
+    ): (() => void) => agentListen('agent:retry', cb),
     transcript: (convId: string): Promise<Record<string, RunTranscript>> =>
       ipcRenderer.invoke('agent:transcript', convId)
   },

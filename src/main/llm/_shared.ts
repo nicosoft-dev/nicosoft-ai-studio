@@ -26,7 +26,18 @@ export async function throwHttpError(provider: string, res: Response): Promise<n
   const msg = detail
     ? `${provider} request failed (HTTP ${res.status}): ${detail}`
     : `${provider} request failed (HTTP ${res.status})`
-  throw new LlmError(codeForStatus(res.status), msg, res.status)
+  throw new LlmError(codeForStatus(res.status), msg, res.status, parseRetryAfter(res.headers.get('retry-after')))
+}
+
+// Parse a Retry-After header into milliseconds. Accepts either delta-seconds (`"30"`) or an HTTP-date;
+// returns undefined when absent/unparseable so the backoff falls back to exponential.
+function parseRetryAfter(header: string | null): number | undefined {
+  if (!header) return undefined
+  const secs = Number(header)
+  if (Number.isFinite(secs)) return Math.max(0, secs * 1000)
+  const when = Date.parse(header)
+  if (Number.isNaN(when)) return undefined
+  return Math.max(0, when - Date.now())
 }
 
 // Normalize any thrown value from fetch / stream reading into an LlmError. AbortError and generic

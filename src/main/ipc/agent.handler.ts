@@ -68,6 +68,7 @@ export function registerAgentHandlers(): void {
             else if (ev.type === 'tool_use_start') send('agent:tool:start', { streamId, id: ev.id, name: ev.name })
             else if (ev.type === 'usage') broadcastUsage(sender, input.convId, ev.inputTokens, ev.outputTokens)
           },
+          onRetry: (info) => send('agent:retry', { streamId, ...info }),
           onEvent: (ev) => {
             if (ev.type === 'assistant') {
               const blocks: AgentBlockDto[] = []
