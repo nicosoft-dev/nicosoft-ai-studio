@@ -19,13 +19,34 @@ import { Markdown } from '@/components/markdown'
 import { ApprovalDialog } from '@/components/approval-dialog'
 import { QuestionDialog } from '@/components/question-dialog'
 import { ApprovalCards } from '@/components/approval-cards'
-import { useRoleBinding } from '@/lib/use-role-binding'
+import { useRoleBinding, type RoleBindingControls } from '@/lib/use-role-binding'
+import type { EndpointDto } from '@/lib/api'
 import { fileToImage, imagesFromClipboard, type ImageAttachment } from '@/lib/image'
 import { getThinkingCapability, resolveThinking, type ThinkingDepth } from '@/lib/thinking'
 import { useAllExperts } from '@/lib/all-experts'
 import { toast } from '@/stores/toast'
-import { useT } from '@/stores/locale'
+import { useT, type TFunction } from '@/stores/locale'
 import type { Expert } from '@/types'
+
+// The composer's empty-state banner covers FOUR distinct setup gaps — not one. Collapsing them into a
+// single "bind an endpoint with a key and a model" sentence is misleading (a user who added an endpoint
+// but left the key blank gets told to bind one). Resolve the exact missing item and return an actionable
+// line so they know precisely what to fix. Order mirrors the `noEndpoint` OR-chain in the component, with
+// the agent-protocol gate kept first.
+function bindBannerMessage(
+  t: TFunction,
+  name: string,
+  selectedEp: EndpointDto | undefined,
+  b: RoleBindingControls,
+  needAgentProto: boolean
+): string {
+  if (needAgentProto) return t('conv.needAgentProto', { name })
+  if (b.endpoints.length === 0 || !selectedEp) return t('conv.noEndpointYet', { name })
+  if (!selectedEp.enabled) return t('conv.endpointDisabled', { name, endpoint: selectedEp.name })
+  if (!selectedEp.hasKey) return t('conv.endpointNoKey', { endpoint: selectedEp.name })
+  if (!b.model) return t('conv.endpointNoModel', { name })
+  return t('conv.bindEndpoint', { name }) // unreachable given noEndpoint already true — defensive
+}
 
 // Compact token readout: K below 1M, M at/above it (1M, 1.05M, 1.5M — trailing zeros trimmed).
 function fmtTokens(n: number): string {
@@ -395,11 +416,7 @@ function Composer({
         {noEndpoint ? (
           <div className="dock-banner">
             <Icons.plug size={15} style={{ color: 'var(--text-3)' }} />
-            <span>
-              {needAgentProto
-                ? t('conv.needAgentProto', { name: expert.name })
-                : t('conv.bindEndpoint', { name: expert.name })}
-            </span>
+            <span>{bindBannerMessage(t, expert.name, selectedEp, b, needAgentProto)}</span>
             <span className="db-arrow" onClick={onOpenSettings}>
               {t('conv.openSettings')} <Icons.arrowRight size={13} />
             </span>
