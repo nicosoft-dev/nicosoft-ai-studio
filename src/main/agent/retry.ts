@@ -5,12 +5,16 @@
 // and surfaces a "retrying (N/M)" status to the UI.
 import { LlmError } from '../llm/types'
 
-// Codes worth retrying. `network` also covers an idle-timeout abort on a hung upstream (mapped in
-// _shared.toLlmError). bad_key / forbidden / bad_request are caller/auth errors — retrying is pointless.
+// Default code-based retryability, used when an error carries no explicit decision. `network` also covers
+// an idle-timeout abort on a hung upstream (mapped in _shared.toLlmError). bad_key / forbidden /
+// bad_request are caller/auth errors — retrying is pointless.
 const RETRYABLE = new Set(['network', 'rate_limited', 'upstream'])
 
+// An explicit `retryable` (set by throwHttpError from the HTTP status + `x-should-retry` header) wins;
+// it covers 408/409 and server-directed retry hints that the coarse code taxonomy can't express. When
+// absent (e.g. a thrown network error), fall back to the code set.
 export function isRetryableLlmError(err: unknown): err is LlmError {
-  return err instanceof LlmError && RETRYABLE.has(err.code)
+  return err instanceof LlmError && (err.retryable ?? RETRYABLE.has(err.code))
 }
 
 const BASE_MS = 1_000

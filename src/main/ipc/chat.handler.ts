@@ -26,7 +26,10 @@ export function registerChatHandlers(): void {
           onDelta: (text) => {
             if (!sender.isDestroyed()) sender.send('chat:delta', { streamId, text })
           },
-          onUsage: (inputTokens, outputTokens) => broadcastUsage(sender, input.convId, inputTokens, outputTokens)
+          onUsage: (inputTokens, outputTokens) => broadcastUsage(sender, input.convId, inputTokens, outputTokens),
+          onRetry: (info) => {
+            if (!sender.isDestroyed()) sender.send('chat:retry', { streamId, ...info })
+          }
         },
         controller.signal
       )

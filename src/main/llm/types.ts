@@ -18,6 +18,10 @@ export class LlmError extends Error {
   code: LlmErrorCode
   status?: number
   retryAfterMs?: number // honored by the retry backoff when the upstream sent a Retry-After header
+  // Explicit retry decision set at throw time: a server `x-should-retry` hint, or the HTTP-status policy
+  // (408/409/429/5xx). When set it overrides the code-based default in isRetryableLlmError; undefined
+  // falls back to that default (e.g. network errors).
+  retryable?: boolean
   constructor(code: LlmErrorCode, message: string, status?: number, retryAfterMs?: number) {
     super(message)
     this.name = 'LlmError'

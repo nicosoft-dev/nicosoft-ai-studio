@@ -198,11 +198,28 @@ export const useChat = create<ChatState>((set, get) => {
     if (listening) return
     listening = true
 
-    // ---- chat (plain text) path: chat:delta / chat:done / chat:error ----
+    // Clear a conversation's "retrying" banner once a run makes progress again (or ends). Shared by the
+    // chat and agent paths — both set the same store.retry[convId].
+    const clearRetry = (convId: string): void =>
+      set((s) => (s.retry[convId] ? { retry: { ...s.retry, [convId]: null } } : s))
+
+    // ---- chat (plain text) path: chat:delta / chat:done / chat:error / chat:retry ----
     const api = window.api.chat
     api.onDelta((d) => {
       const meta = streamMeta.get(d.streamId)
-      if (meta) appendDelta(meta.convId, d.text)
+      if (!meta) return
+      appendDelta(meta.convId, d.text)
+      clearRetry(meta.convId)
+    })
+    api.onRetry((d) => {
+      const meta = streamMeta.get(d.streamId)
+      if (!meta) return
+      set((s) => ({
+        retry: {
+          ...s.retry,
+          [meta.convId]: { attempt: d.attempt, max: d.max, since: s.retry[meta.convId]?.since ?? Date.now() }
+        }
+      }))
     })
     api.onDone((d) => {
       const meta = streamMeta.get(d.streamId)
@@ -219,7 +236,8 @@ export const useChat = create<ChatState>((set, get) => {
         }
         return {
           byConversation: { ...s.byConversation, [meta.convId]: msgs },
-          streaming: { ...s.streaming, [meta.convId]: false }
+          streaming: { ...s.streaming, [meta.convId]: false },
+          retry: { ...s.retry, [meta.convId]: null }
         }
       })
       const ctxTok = d.inputTokens
@@ -234,16 +252,16 @@ export const useChat = create<ChatState>((set, get) => {
     api.onError((d) => {
       const meta = streamMeta.get(d.streamId)
       streamMeta.delete(d.streamId)
-      if (meta) finishWithError(meta.convId, d.message)
+      if (meta) {
+        clearRetry(meta.convId)
+        finishWithError(meta.convId, d.message)
+      }
     })
 
     // ---- agent (tool use) path: agent:delta / assistant / results / permission / done / error ----
     // The backend persists the user + final assistant turn itself; here we only accumulate the live UI
     // (text + tool cards) and the permission prompt. We never re-append the assistant message.
     const ag = window.api.agent
-    // Clear a conversation's "retrying" banner once the run makes progress again (or ends).
-    const clearRetry = (convId: string): void =>
-      set((s) => (s.retry[convId] ? { retry: { ...s.retry, [convId]: null } } : s))
     ag.onDelta((d) => {
       const meta = agentMeta.get(d.streamId)
       if (!meta) return

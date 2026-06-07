@@ -26,16 +26,33 @@ export async function throwHttpError(provider: string, res: Response): Promise<n
   const msg = detail
     ? `${provider} request failed (HTTP ${res.status}): ${detail}`
     : `${provider} request failed (HTTP ${res.status})`
-  throw new LlmError(codeForStatus(res.status), msg, res.status, parseRetryAfter(res.headers.get('retry-after')))
+  const err = new LlmError(codeForStatus(res.status), msg, res.status, retryAfterMs(res.headers))
+  err.retryable = shouldRetryStatus(res)
+  throw err
 }
 
-// Parse a Retry-After header into milliseconds. Accepts either delta-seconds (`"30"`) or an HTTP-date;
-// returns undefined when absent/unparseable so the backoff falls back to exponential.
-function parseRetryAfter(header: string | null): number | undefined {
-  if (!header) return undefined
-  const secs = Number(header)
+// Retry decision for an HTTP failure: an explicit `x-should-retry` header wins; otherwise the standard
+// transient statuses — 408 (request timeout), 409 (conflict), 429 (rate limit), and any 5xx (incl 529
+// overloaded). 4xx auth/validation errors (401/403/400) are not retried.
+function shouldRetryStatus(res: Response): boolean {
+  const hint = res.headers.get('x-should-retry')
+  if (hint === 'true') return true
+  if (hint === 'false') return false
+  const s = res.status
+  return s === 408 || s === 409 || s === 429 || s >= 500
+}
+
+// Retry-After as milliseconds: prefer `retry-after-ms` (float ms, what Anthropic sends), then the
+// standard `retry-after` (delta-seconds or an HTTP-date). Undefined when absent/unparseable so the
+// backoff falls back to exponential.
+function retryAfterMs(headers: Headers): number | undefined {
+  const ms = Number(headers.get('retry-after-ms'))
+  if (Number.isFinite(ms) && ms >= 0 && headers.get('retry-after-ms')) return ms
+  const ra = headers.get('retry-after')
+  if (!ra) return undefined
+  const secs = Number(ra)
   if (Number.isFinite(secs)) return Math.max(0, secs * 1000)
-  const when = Date.parse(header)
+  const when = Date.parse(ra)
   if (Number.isNaN(when)) return undefined
   return Math.max(0, when - Date.now())
 }

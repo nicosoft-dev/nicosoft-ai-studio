@@ -136,6 +136,13 @@ const api = {
       const h = (_e: IpcRendererEvent, d: ChatErrorDto): void => cb(d)
       ipcRenderer.on('chat:error', h)
       return () => ipcRenderer.off('chat:error', h)
+    },
+    onRetry: (
+      cb: (d: { streamId: string; attempt: number; max: number; code: string; waitMs: number }) => void
+    ): (() => void) => {
+      const h = (_e: IpcRendererEvent, d: { streamId: string; attempt: number; max: number; code: string; waitMs: number }): void => cb(d)
+      ipcRenderer.on('chat:retry', h)
+      return () => ipcRenderer.off('chat:retry', h)
     }
   },
 

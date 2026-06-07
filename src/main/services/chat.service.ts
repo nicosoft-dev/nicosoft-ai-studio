@@ -8,6 +8,7 @@ import { chat as llmChat } from '../llm/client'
 import { countContext } from './token-count.service'
 import { pickSmallModel } from './model-select'
 import { LlmError } from '../llm/types'
+import { abortableDelay, isRetryableLlmError, retryBackoffMs } from '../agent/retry'
 import type { ChatAttachment, ChatMessage, ChatResult } from '../llm/types'
 import type { ChatSendInput } from '../ipc/contracts'
 import { resolveToDataUrl } from '../media/storage'
@@ -18,7 +19,11 @@ import { resolveToDataUrl } from '../media/storage'
 // persisted, so it's simply the last message read back from the DB. Streams + records usage.
 export async function send(
   input: ChatSendInput,
-  cb: { onDelta: (text: string) => void; onUsage?: (inputTokens: number, outputTokens?: number) => void },
+  cb: {
+    onDelta: (text: string) => void
+    onUsage?: (inputTokens: number, outputTokens?: number) => void
+    onRetry?: (info: { attempt: number; max: number; code: string; waitMs: number }) => void
+  },
   signal?: AbortSignal
 ): Promise<ChatResult & { promptTokens: number }> {
   const ep = endpointRepo.getById(input.endpointId)
@@ -43,32 +48,55 @@ export async function send(
   // Live ↑ readout before the stream starts — the prompt size is known now (count_tokens above).
   cb.onUsage?.(promptTokens)
 
-  const result = await llmChat(
-    {
-      protocol: ep.protocol,
-      baseUrl: ep.baseUrl,
-      apiKey: key,
-      model: input.model,
-      messages,
-      thinking: input.thinking,
-      signal
-    },
-    (d) => {
-      if (d.text) cb.onDelta(d.text)
-      if (d.usage) cb.onUsage?.(d.usage.inTokens, d.usage.outTokens)
+  // Transient-failure retry with exponential backoff (same policy as the agent loop), up to 10 attempts.
+  // Critical guard: only retry while NOTHING has streamed yet — re-issuing after partial text would
+  // duplicate it in the UI. A user/run abort is excluded; the backoff is abortable.
+  const MAX_REQUEST_RETRIES = 10
+  for (let attempt = 0; ; ) {
+    let emittedAny = false
+    try {
+      const result = await llmChat(
+        {
+          protocol: ep.protocol,
+          baseUrl: ep.baseUrl,
+          apiKey: key,
+          model: input.model,
+          messages,
+          thinking: input.thinking,
+          signal
+        },
+        (d) => {
+          if (d.text) {
+            emittedAny = true
+            cb.onDelta(d.text)
+          }
+          if (d.usage) cb.onUsage?.(d.usage.inTokens, d.usage.outTokens)
+        }
+      )
+      usageRepo.record({
+        conversationId: input.convId,
+        expertId: input.roleId,
+        model: input.model,
+        provider: ep.protocol,
+        inTokens: result.usage.inTokens,
+        outTokens: result.usage.outTokens
+      })
+      return { ...result, promptTokens }
+    } catch (err) {
+      if (isRetryableLlmError(err) && !emittedAny && !signal?.aborted && attempt < MAX_REQUEST_RETRIES) {
+        attempt++
+        const waitMs = retryBackoffMs(attempt, err.retryAfterMs)
+        cb.onRetry?.({ attempt, max: MAX_REQUEST_RETRIES, code: err.code, waitMs })
+        try {
+          await abortableDelay(waitMs, signal ?? new AbortController().signal)
+        } catch {
+          throw err // aborted during backoff → give up
+        }
+        continue
+      }
+      throw err
     }
-  )
-
-  usageRepo.record({
-    conversationId: input.convId,
-    expertId: input.roleId,
-    model: input.model,
-    provider: ep.protocol,
-    inTokens: result.usage.inTokens,
-    outTokens: result.usage.outTokens
-  })
-
-  return { ...result, promptTokens }
+  }
 }
 
 // 5-layer context: a system message (role prompt + recalled memories + summary) followed by the recent
