@@ -141,12 +141,12 @@ function RoleBindRow({ expert }: { expert: Expert }): ReactElement {
           <>
             <span className={"proto-chip " + (b.family ?? 'openai')}><span className="pc-dot" /> {FAMILY_LABEL[b.family ?? 'openai']}</span>
             <div className="rb-controls">
-              <div style={{ width: 150 }}>
+              <div className="rb-ctl rb-ctl-endpoint">
                 <Dropdown options={b.endpoints.map((e) => ({ v: e.id, l: e.name }))} value={b.endpointId} onChange={b.onEndpoint} />
               </div>
               {/* Model options are the selected endpoint's configured slug list (set in the endpoint
                   dialog). Switching endpoint repopulates them and resets to its first model. */}
-              <div style={{ width: 168 }}>
+              <div className="rb-ctl rb-ctl-model">
                 <Dropdown
                   options={(b.models.length ? b.models : ['']).map((m) => ({ v: m, l: m || '— no models —' }))}
                   value={b.model}
@@ -154,7 +154,7 @@ function RoleBindRow({ expert }: { expert: Expert }): ReactElement {
                 />
               </div>
               {b.depths.length > 0 && (
-                <div style={{ width: 150 }}>
+                <div className="rb-ctl rb-ctl-think">
                   <Dropdown
                     options={[
                       { v: '', l: 'Default thinking' },
@@ -180,7 +180,7 @@ function RolesPage({ onAddEndpoint }: { onAddEndpoint: () => void }): ReactEleme
   const ci = EXPERTS.find((e) => e.unconfigured && !roles.isDeleted(e.id));
 
   return (
-    <div className="sc-wrap">
+    <div className="sc-wrap sc-wide">
       <div className="settings-title">Roles</div>
       <div className="settings-desc">Bind each expert to the endpoint and model best suited to its job. Three protocol families, each doing what it's best at.</div>
       <div className="family-legend">
