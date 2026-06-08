@@ -48,6 +48,7 @@ import {
   COORDINATOR_ROUTER_PROMPT,
   COORDINATOR_SYNTHESIS_PROMPT,
   COORDINATOR_PLAN_REVIEW_PROMPT,
+  COORDINATOR_VERIFIER_PROMPT,
   DISPATCHABLE_ROLE_IDS,
   buildRolePrompt,
   displayName,
@@ -533,6 +534,13 @@ interface RunStepOptions {
   // isCouncilSynthesis=true → Coordinator closes a multi-round debate (B2): use COORDINATOR_COUNCIL_SYNTHESIS_PROMPT,
   // skip memory recall.
   isCouncilSynthesis?: boolean
+  // Explicit tool whitelist (by tool name) overriding the role's default kit. Gate B's verifier uses this
+  // to run with a read-only Read/Grep/Glob/Bash kit regardless of role, so it can actually run the project
+  // checks (most non-dev roles lack Bash) without the implementer's write tools.
+  toolNames?: readonly string[]
+  // Full system-prompt override (verbatim, instead of buildAgentSystem). Gate B's verifier passes its own
+  // adversarial verifier persona here so it isn't bound by a borrowed role's "don't touch code" persona.
+  systemPromptOverride?: string
 }
 
 // Coordinator's system = a base prompt section (direct / synthesis) + his recalled memories + the running
@@ -618,10 +626,12 @@ async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputT
         memories,
         summary: summaryContent,
         permissionMode: opts.permissionMode,
+        toolNames: opts.toolNames,
         imageModel: binding.imageModel ?? undefined,
         // DIRECT: run the loop with Danny's front-door persona + his recalled context, not the
-        // dispatched-expert coding system. Undefined for real dispatches → buildAgentSystem as before.
-        systemPromptOverride: isDirect ? withCoordinatorContext(COORDINATOR_DIRECT_PROMPT, memories, summaryContent) : undefined
+        // dispatched-expert coding system. Gate B's verifier passes its own persona via opts.systemPromptOverride.
+        // Undefined for real dispatches → buildAgentSystem as before.
+        systemPromptOverride: opts.systemPromptOverride ?? (isDirect ? withCoordinatorContext(COORDINATOR_DIRECT_PROMPT, memories, summaryContent) : undefined)
       },
       agentCb,
       signal
@@ -752,8 +762,14 @@ async function runGatedRoleStep(roleId: string, prompt: string, opts: RunStepOpt
 }
 
 function chooseVerifierRole(implementerRoleId: string): string {
-  const candidates = ['analyst', 'engineer', 'generalist', 'coordinator'].filter((r) => r !== implementerRoleId)
-  return candidates.find((r) => rolesService.getBinding(r)?.endpointId) ?? candidates[0] ?? 'generalist'
+  // The verifier runs the agent loop with an overridden read-only kit (Read/Grep/Glob/Bash) + the Gate B
+  // verifier persona, so we only need an independent, BOUND agent role for its model/endpoint. It must be an
+  // AGENT_ROLE (the coordinator has no agent-loop path — picking it would throw) and never the implementer.
+  const order = ['analyst', 'engineer', 'shuri', 'generalist', 'scheduler', 'translator', 'editor', 'designer']
+  return (
+    order.find((r) => r !== implementerRoleId && agentService.AGENT_ROLE_IDS.has(r) && Boolean(rolesService.getBinding(r)?.endpointId)) ??
+    'generalist'
+  )
 }
 
 async function runVerifierStep(implementerRoleId: string, opts: RunStepOptions, gate: { originalPrompt: string; approvedPlan?: string }, implementationText: string, attempt: number, signal?: AbortSignal): Promise<{ passed: boolean; feedback: string }> {
@@ -761,15 +777,14 @@ async function runVerifierStep(implementerRoleId: string, opts: RunStepOptions, 
   if (verifierRoleId === implementerRoleId) return { passed: false, feedback: 'Gate B rejected self-verification: verifier must be independent from implementer.' }
   const toolId = `gate-b-verifier-${Date.now()}-${attempt}`
   opts.cb.onToolEvent?.(implementerRoleId, { type: 'sub_tool_start', toolUseId: toolId, parentToolId: 'coordinator-gate-b', name: 'IndependentVerifier', input: { verifierRoleId, attempt } })
+  // Persona + how-to-verify live in COORDINATOR_VERIFIER_PROMPT (systemPromptOverride); this user message
+  // carries only the case to judge. The implementer's summary is a CLAIM to check by running the real checks.
   const verifierPrompt = [
-    'You are Gate B: an INDEPENDENT verifier. You are not the implementer and must not self-review.',
-    'Actually run the project checks exactly: npm run typecheck && npm run build.',
-    'Inspect the relevant diff/files as needed. If checks fail, return FAIL with exact failures and fixes needed. If green and the implementation matches the approved plan/task, return PASS.',
-    'Return a concise verdict line starting with PASS or FAIL, followed by evidence.',
+    'Verify the change below as Gate B. Inspect the diff (Bash `git diff`, Read), run `npm run typecheck && npm run build`, then return a verdict line starting with PASS or FAIL plus evidence.',
     `Original task:\n${gate.originalPrompt}`,
-    gate.approvedPlan ? `Approved plan:\n${gate.approvedPlan}` : '',
-    `Implementer role: ${implementerRoleId}`,
-    `Implementation summary:\n${implementationText}`
+    gate.approvedPlan ? `Approved plan the change must match:\n${gate.approvedPlan}` : '',
+    `Implementer role (do NOT defer to them): ${implementerRoleId}`,
+    `Implementer's own summary (a claim to verify, not ground truth):\n${implementationText}`
   ].filter(Boolean).join('\n\n')
   const verifier = await runRoleStep({
     ...opts,
@@ -778,6 +793,10 @@ async function runVerifierStep(implementerRoleId: string, opts: RunStepOptions, 
     dispatch: [...(opts.dispatch ?? []), verifierRoleId],
     permissionMode: 'default',
     includeHistory: false,
+    // Read-only kit + Bash so the verifier can ACTUALLY run the checks (most non-dev roles lack Bash), and
+    // its own adversarial persona instead of the borrowed role's "don't touch code" system prompt.
+    toolNames: ['Read', 'Grep', 'Glob', 'Bash'],
+    systemPromptOverride: COORDINATOR_VERIFIER_PROMPT,
     signal: signal ?? opts.signal
   })
   const text = verifier.text.trim()

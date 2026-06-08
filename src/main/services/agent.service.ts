@@ -490,6 +490,10 @@ export interface DispatchedAgentInput {
   // DIRECT mode passes its own DIRECT prompt (+ memories/summary) here so it runs the agent loop with the
   // read-only kit but Danny's front-door persona — not the dispatched-expert coding system.
   systemPromptOverride?: string
+  // Explicit tool whitelist (by name) overriding the role's default kit. Gate B's verifier uses this to run
+  // a read-only Read/Grep/Glob/Bash kit regardless of role — most non-dev roles lack Bash, so they can't run
+  // the project checks under their default kit.
+  toolNames?: readonly string[]
 }
 
 export async function runDispatchedAgent(
@@ -497,9 +501,18 @@ export async function runDispatchedAgent(
   cb: AgentCallbacks,
   signal: AbortSignal,
 ): Promise<{ text: string; inTokens: number; outTokens: number; attachments: MessageAttachmentDto[] }> {
-  let tools = toolsForAgentRole(d.roleId)
-  if (DEV_ROLES.has(d.roleId)) tools = [...tools, ...SERVICE_TOOLS, ...SUBAGENT_TOOLS, lspTool as unknown as Tool]
-  if (!d.cwd && !DEV_ROLES.has(d.roleId)) tools = tools.filter((t) => t.name !== 'Read' && t.name !== 'Glob')
+  let tools: Tool[]
+  if (d.toolNames) {
+    // Fixed-kit dispatch (Gate B verifier): an explicit whitelist instead of the role's default kit — a
+    // read-only Read/Grep/Glob/Bash verifier that runs the project checks without the implementer's write
+    // tools or a non-dev role's Bash-less kit. No DEV augmentation; cwd is required for these.
+    const allow = new Set(d.toolNames)
+    tools = CORE_TOOLS.filter((t) => allow.has(t.name))
+  } else {
+    tools = toolsForAgentRole(d.roleId)
+    if (DEV_ROLES.has(d.roleId)) tools = [...tools, ...SERVICE_TOOLS, ...SUBAGENT_TOOLS, lspTool as unknown as Tool]
+    if (!d.cwd && !DEV_ROLES.has(d.roleId)) tools = tools.filter((t) => t.name !== 'Read' && t.name !== 'Glob')
+  }
   const serverTools: ServerToolSchema[] = d.protocol === 'openai' ? [{ type: 'web_search', name: 'web_search' }] : []
   const system = d.systemPromptOverride ?? buildAgentSystem(d.roleId, d.memories, d.summary, skillManager.listingForRole(d.roleId), d.cwd)
 
