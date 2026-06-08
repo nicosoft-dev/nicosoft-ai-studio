@@ -28,6 +28,7 @@ import * as rolesService from './roles.service'
 import * as compressionService from './compression.service'
 import { chat as llmChat } from '../llm/client'
 import * as agentService from './agent.service'
+import { backgroundVerifyQueue, type E2ERoundResult, type E2EVerdict } from '../agent/background-verify-queue'
 import { classifyApproval } from '../agent/approval'
 import * as pendingRepo from '../repos/pending-approval.repo'
 import type { AgentEvent } from '../agent/loop'
@@ -49,6 +50,7 @@ import {
   COORDINATOR_SYNTHESIS_PROMPT,
   COORDINATOR_PLAN_REVIEW_PROMPT,
   COORDINATOR_VERIFIER_PROMPT,
+  COORDINATOR_E2E_PROMPT,
   DISPATCHABLE_ROLE_IDS,
   buildRolePrompt,
   displayName,
@@ -64,6 +66,10 @@ export interface RouteDecision {
   // LLM-routed turns — @mention fast-path and config/error fallbacks have none (no LLM call to make it).
   intro?: string
   needsPlan?: boolean
+  // Gate C (Block 2): set true ONLY when the user explicitly asked for e2e verification. Independent of
+  // gateEnabled (Gate B) and of decision.roles — driven solely by detectE2EIntent(). Gates whether run()
+  // submits a background e2e verification task on the way out.
+  needsE2E?: boolean
 }
 
 export interface CoordinatorRunInput {
@@ -117,8 +123,15 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
   const decision = await route(input.prompt, history, signal)
   if (signal.aborted) throw new LlmError('network', 'aborted before dispatch')
 
+  // Gate C (Block 2): the e2e signal is INDEPENDENT — it depends only on what the user explicitly asked
+  // for, never on the routed roles (no decision.roles.includes('shuri')) and never on gateEnabled (Gate B).
+  decision.needsE2E = detectE2EIntent(input.prompt)
+
   const gateEnabled = routeNeedsPlan(input.prompt, decision)
 
+  // The dispatch/synthesis pipeline runs to completion here and yields the turn's token totals. We capture
+  // it so the (non-blocking) Gate C hook below can fire AFTER synthesis is emitted, on every return path.
+  const result = await (async (): Promise<{ inputTokens: number; outputTokens: number }> => {
   if (decision.mode === 'direct') {
     // B0: Coordinator takes the turn himself — simple/general enough that a specialist would be overkill. His
     // own binding + the direct persona, full history for multi-turn continuity. No intro: the reply IS
@@ -335,6 +348,51 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
   })
   fireSideEffects(input.convId, lastRoleId, lastEndpointId || synth.endpointId, lastModel || synth.model, lastTokens || synth.inputTokens)
   return { inputTokens: synth.inputTokens, outputTokens: synth.outputTokens }
+  })()
+
+  // ------- Gate C: non-blocking e2e verification (Block 2) -------
+  // Synthesis is already emitted and `result` holds this turn's token totals. If the user explicitly asked
+  // for e2e, FIRE-AND-FORGET a verification task onto the background queue and return IMMEDIATELY — we never
+  // await the queue (and there is no synchronous `await runE2EGate(...)` anywhere). This lets `run()` return
+  // now so `coordinator:done` fires and Danny ends his turn; the verdict arrives later via onDone.
+  if (decision.needsE2E) {
+    const e2eCwd = input.cwdByRole?.['shuri'] ?? input.cwdByRole?.['engineer'] ?? input.cwdByRole?.['coordinator']
+    const implementerRoleId = decision.roles?.find((r) => r !== 'coordinator') ?? 'engineer'
+    // INDEPENDENT lifecycle (spec §7,§23): Gate C runs AFTER this turn returns, so it must NOT share the
+    // parent run's abort signal — aborting the turn must not kill an in-flight verification. Give the job
+    // its own controller; it lives as long as the background queue needs it.
+    const gateCAbort = new AbortController()
+    // Carries the previous round's FAIL verdict + evidence into the next round so the implementer fix is
+    // grounded in what actually broke (spec §20: "verdict + 证据拼 fixPrompt").
+    let lastFailDetail = ''
+    backgroundVerifyQueue.submit({
+      convId: input.convId,
+      prompt: input.prompt,
+      cwd: e2eCwd,
+      // Injected executor: one verification round. The queue owns the FAIL→retry loop (up to 3 rounds), so
+      // the queue imports nothing from this file — no import cycle. On rounds > 1 (the previous round FAILed)
+      // this first dispatches the implementer to fix, THEN re-verifies.
+      runVerify: async (round): Promise<E2ERoundResult> => {
+        if (round > 1 && lastFailDetail) {
+          await runE2EImplementerFix(input.convId, input.prompt, e2eCwd, implementerRoleId, round, lastFailDetail, gateCAbort.signal)
+        }
+        const r = await runE2EVerify(input.convId, input.prompt, e2eCwd, round, gateCAbort.signal)
+        lastFailDetail = r.kind === 'FAIL' ? r.detail : ''
+        return r
+      },
+      onDone: (verdict: E2EVerdict): void => {
+        // Block 2 stops at this callback (spec §31). We only LOG the verdict here.
+        // BLOCK 3 HOOK POINT: this is where the UI/IPC lives — a PASS injects the verified result as the
+        // next-turn context, a FAIL with needsUser surfaces a notification asking the user to step in. Do
+        // NOT send any `verify:done` IPC from here in Block 2.
+        console.log(
+          `[gate-c] e2e verdict for conv=${input.convId}: ${verdict.kind} (rounds=${verdict.rounds}${verdict.needsUser ? ', needsUser' : ''}) — ${verdict.detail}`
+        )
+      }
+    })
+  }
+
+  return result
 }
 
 // ------- Route -------
@@ -484,6 +542,27 @@ function isNonTrivialTask(prompt: string): boolean {
   return codingSignals.some((s) => lower.includes(s)) && (text.length > 180 || /\b(across|plus|and then|fail loop|verify|gates?)\b/i.test(text))
 }
 
+// Gate C (Block 2) intent detection — an INDEPENDENT signal. Returns true ONLY when the user EXPLICITLY
+// asks for end-to-end verification. Deliberately NOT inferred from the routed roles (no
+// decision.roles.includes('shuri')) and NOT tied to gateEnabled (Gate B): a user can ask for e2e on any
+// task, and a shuri dispatch without the words below does NOT auto-trigger it.
+function detectE2EIntent(prompt: string): boolean {
+  const lower = prompt.toLowerCase()
+  const keywords = [
+    'e2e',
+    'end-to-end',
+    'end to end',
+    '端到端',
+    '跑测试',
+    '跑 e2e',
+    '验证一下',
+    'browser test',
+    'ui run',
+    '要求 e2e'
+  ]
+  return keywords.some((k) => lower.includes(k))
+}
+
 function routeNeedsPlan(prompt: string, route: RouteDecision): boolean {
   if (route.mode === 'direct') return false
   return Boolean(route.needsPlan) || route.mode === 'pipeline' || route.mode === 'collaborate' || route.mode === 'council' || isNonTrivialTask(prompt)
@@ -501,7 +580,7 @@ function routeNeedsPlan(prompt: string, route: RouteDecision): boolean {
 function emitCoordinatorIntro(convId: string, intro: string, cb: CoordinatorCallbacks): void {
   const binding = rolesService.getBinding('coordinator')
   const coordinatorModel = binding?.model ?? ''
-  const ep = binding ? endpointRepo.getById(binding.endpointId) : null
+  const ep = binding?.endpointId ? endpointRepo.getById(binding.endpointId) : null
   const contextWindow = ep?.availableModels.find((m) => m.slug === coordinatorModel)?.contextLength ?? 0
   cb.onStepStart('coordinator', null, coordinatorModel, contextWindow)
   cb.onDelta('coordinator', intro)
@@ -817,6 +896,95 @@ async function runVerifierStep(implementerRoleId: string, opts: RunStepOptions, 
   const passed = /^\s*PASS\b/i.test(text) && !/^\s*FAIL\b/i.test(text)
   opts.cb.onToolEvent?.(implementerRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: 'coordinator-gate-b', name: 'IndependentVerifier', isError: !passed, result: text })
   return { passed, feedback: text || 'Verifier returned no verdict.' }
+}
+
+// Gate C (Block 2) — one e2e verification ROUND. Modeled on the Gate B runVerifierStep dispatch: it runs an
+// independent agent-loop verifier with an e2e tool kit (the Block-1 e2e_browser + e2e_request drivers plus a
+// read/Bash kit to find + launch the product) under the COORDINATOR_E2E_PROMPT persona. The verifier actually
+// drives the app/API and ends with one verdict line, which we classify into EXACTLY one of PASS/FAIL/BLOCKED/
+// SKIP. This is the executor INJECTED into backgroundVerifyQueue — the queue owns the FAIL→retry loop, this
+// owns running one round. It runs AFTER run() returned (the turn is over), so it uses a silent no-op callback
+// set rather than the live renderer callbacks.
+async function runE2EVerify(convId: string, prompt: string, cwd: string | undefined, round: number, signal: AbortSignal): Promise<E2ERoundResult> {
+  const verifierRoleId = chooseVerifierRole('shuri')
+  const silentCb: CoordinatorCallbacks = {
+    onDispatch: () => {},
+    onStepStart: () => {},
+    onDelta: () => {},
+    onStepDone: () => {}
+  }
+  const verifierPrompt = [
+    `Gate C end-to-end verification, round ${round}. Actually run the product and verify the task below — do not trust any written summary.`,
+    'Use e2e_browser (UI/Electron) and/or e2e_request (HTTP API) to launch and drive the app, run the asserted checks, then end with ONE verdict line starting with PASS, FAIL, BLOCKED, or SKIP plus evidence.',
+    `Original task:\n${prompt}`
+  ].join('\n\n')
+  const verifier = await runRoleStep({
+    convId,
+    roleId: verifierRoleId,
+    prompt: verifierPrompt,
+    dispatch: ['coordinator-gate-c', verifierRoleId],
+    cb: silentCb,
+    signal,
+    cwd,
+    permissionMode: 'default',
+    includeHistory: false,
+    // The Block-1 e2e drivers + start_service (launch the product under test, spec §19) + a read/Bash kit so
+    // the verifier can find the surface and bring the product up before driving it.
+    toolNames: ['e2e_browser', 'e2e_request', 'start_service', 'Read', 'Grep', 'Glob', 'Bash'],
+    systemPromptOverride: COORDINATOR_E2E_PROMPT
+  })
+  const text = verifier.text.trim()
+  const detail = text || 'Verifier returned no verdict.'
+  // Classify the verifier's trailing verdict into EXACTLY one of the four values. Order matters: BLOCKED and
+  // SKIP are checked before the generic PASS/FAIL so an explicit "BLOCKED"/"SKIP" line wins. Unrecognized
+  // output is treated as FAIL (fail-closed) so a malformed verdict loops back rather than silently passing.
+  const kind: E2ERoundResult['kind'] = /\bBLOCKED\b/i.test(text)
+    ? 'BLOCKED'
+    : /\bSKIP\b/i.test(text)
+      ? 'SKIP'
+      : /\bPASS\b/i.test(text) && !/\bFAIL\b/i.test(text)
+        ? 'PASS'
+        : 'FAIL'
+  return { kind, detail }
+}
+
+// Gate C (Block 2) — the FAIL→repair leg of the loop (spec §20: "verdict=FAIL → 回打实现者修（verdict + 证据拼
+// fixPrompt）→ 修完重新 submit Gate C"). Before re-verifying on a retry round, dispatch the original implementer
+// (the engineer/frontend role that did the work) as a full tool-using agent loop, handing it the previous
+// round's verdict + evidence so it actually fixes the code. It runs on Gate C's own (independent) signal and a
+// silent callback set, since the parent turn is already over. Verification happens in the next runE2EVerify call.
+async function runE2EImplementerFix(
+  convId: string,
+  prompt: string,
+  cwd: string | undefined,
+  implementerRoleId: string,
+  round: number,
+  failDetail: string,
+  signal: AbortSignal
+): Promise<void> {
+  const silentCb: CoordinatorCallbacks = {
+    onDispatch: () => {},
+    onStepStart: () => {},
+    onDelta: () => {},
+    onStepDone: () => {}
+  }
+  const fixPrompt = [
+    `Gate C end-to-end verification FAILED (round ${round - 1}). Fix the implementation so the task below passes — do not argue with the verdict, fix the code.`,
+    `Verifier verdict + evidence:\n${failDetail}`,
+    `Original task:\n${prompt}`,
+    'Make the smallest change that makes the failing checks pass, then stop. Gate C will re-verify automatically.'
+  ].join('\n\n')
+  await runRoleStep({
+    convId,
+    roleId: implementerRoleId,
+    prompt: fixPrompt,
+    dispatch: ['coordinator-gate-c', implementerRoleId],
+    cb: silentCb,
+    signal,
+    cwd,
+    permissionMode: 'default',
+    includeHistory: false
+  })
 }
 
 // Coordinator's unattended approval (doc 19 §8). Safety policy = the rule classifier (red is a hard floor:
