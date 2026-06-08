@@ -89,8 +89,8 @@ export function registerCoordinatorHandlers(): void {
           // window" indicator) and from streaming live usage — both the tool-less llmChat path and a
           // dispatched expert's cumulative loop usage (input+output → the live ↑/↓ readout). Presence of
           // outputTokens distinguishes the current-context ping from the cumulative live one.
-          onUsage: (inputTokens, outputTokens) =>
-            broadcastUsage(sender, input.convId, outputTokens === undefined ? 'context' : 'live', inputTokens, outputTokens),
+          onUsage: (roleId, inputTokens, outputTokens) =>
+            broadcastUsage(sender, input.convId, outputTokens === undefined ? 'context' : 'live', inputTokens, outputTokens, undefined, undefined, roleId),
           onTurnFinalUsage: (usage) =>
             broadcastUsage(
               sender,

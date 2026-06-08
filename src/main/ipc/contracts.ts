@@ -128,6 +128,11 @@ export interface ConvUsage {
   outputTokens?: number
   cacheReadInputTokens?: number
   cacheCreationInputTokens?: number
+  // Coordinator only: which dispatched step produced this usage. Present → the renderer routes the live ↑/↓
+  // to THAT segment's streaming message (concurrent segments no longer all show the conv-level total — BUG 2),
+  // and a non-'coordinator' roleId is kept OUT of the composer "/ window" indicator (a small-context verifier
+  // step must not shrink it — BUG 1). Absent on chat/agent single paths → conv-level behaviour, unchanged.
+  roleId?: string
 }
 // A generated image surfaced live from an in-flight agent turn, keyed by convId (like ConvUsage). An agent
 // tool (ns_generate_image, code_execution charts, view_image) returned an image; the loop persisted it to

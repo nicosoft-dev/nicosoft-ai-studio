@@ -61,6 +61,8 @@ export interface ChatMessage {
   dispatch?: string[] | null
   inputTokens?: number // measured prompt (sent) tokens for THIS turn — per-message so collab experts each show their own; drives the finalized readout
   outputTokens?: number // real output tokens for THIS turn (upstream usage) — finalized ↓ readout once the turn completes
+  liveInputTokens?: number // coordinator only: live ↑ for THIS segment while it streams (per-message, so concurrent segments don't all read the conv-level overlay — BUG 2). step:done supersedes it with inputTokens.
+  liveOutputTokens?: number // coordinator only: live ↓ for THIS segment while it streams
 }
 // A server-side tool the API executed (e.g. OpenAI web_search) — carried as a server block, shown as a
 // faint status row (no expand / result; the API ran it, not the loop).
@@ -310,6 +312,26 @@ export const useChat = create<ChatState>((set, get) => {
         }
       }
       return s // no matching streaming bubble yet (step:start creates it first) — drop rather than mis-route
+    })
+  }
+
+  // Coordinator: route a dispatched step's live usage to ITS streaming bubble (per-segment), so concurrent
+  // segments each show their own ↑/↓ instead of all reading the shared conv-level overlay (BUG 2). Walks back
+  // to the streaming assistant tagged with this roleId (parallel panels finish out of order).
+  const updateSegmentLive = (convId: string, roleId: string, inputTokens: number, outputTokens?: number): void => {
+    set((s) => {
+      const cur = s.byConversation[convId]
+      if (!cur) return s
+      for (let i = cur.length - 1; i >= 0; i--) {
+        const m = cur[i]
+        if (m.role === 'assistant' && m.streaming && m.expertId === roleId) {
+          const msgs = cur.map((x) => ({ ...x }))
+          msgs[i].liveInputTokens = inputTokens
+          if (outputTokens !== undefined) msgs[i].liveOutputTokens = outputTokens
+          return { byConversation: { ...s.byConversation, [convId]: msgs } }
+        }
+      }
+      return s
     })
   }
 
@@ -578,15 +600,26 @@ export const useChat = create<ChatState>((set, get) => {
     //     feed the current live overlay only. Streaming pings OVERWRITE within-request and must never accumulate.
     //   • 'turn-final' — exactly-once final usage for a single LLM request → session accumulators.
     window.api.onConvUsage((d) => {
+      // Coordinator dispatched sub-step (roleId present, not the coordinator's own line) → this usage belongs
+      // to ONE segment, not the conversation: route it to that segment's streaming bubble (so concurrent
+      // segments don't all show the conv-level total — BUG 2) and keep its context OUT of the composer /window
+      // meter (a small-context verifier step must not shrink it — BUG 1). chat/agent paths and the coordinator's
+      // own steps carry no sub-step roleId → conv-level behaviour below, unchanged.
+      const seg = d.roleId && d.roleId !== 'coordinator' ? d.roleId : null
       if (d.kind === 'context') {
-        set((s) => ({ contextTokens: { ...s.contextTokens, [d.convId]: d.inputTokens } }))
+        if (seg) updateSegmentLive(d.convId, seg, d.inputTokens, undefined)
+        else set((s) => ({ contextTokens: { ...s.contextTokens, [d.convId]: d.inputTokens } }))
       } else if (d.kind === 'live') {
-        set((s) => ({
-          liveInput: { ...s.liveInput, [d.convId]: d.inputTokens },
-          // Real output only rides the streaming pings that carry it; one without output keeps the last value
-          // so ↓ stays visible next to ↑ across the whole turn instead of flickering to an estimate.
-          liveOutput: typeof d.outputTokens === 'number' ? { ...s.liveOutput, [d.convId]: d.outputTokens } : s.liveOutput
-        }))
+        if (seg) {
+          updateSegmentLive(d.convId, seg, d.inputTokens, d.outputTokens)
+        } else {
+          set((s) => ({
+            liveInput: { ...s.liveInput, [d.convId]: d.inputTokens },
+            // Real output only rides the streaming pings that carry it; one without output keeps the last value
+            // so ↓ stays visible next to ↑ across the whole turn instead of flickering to an estimate.
+            liveOutput: typeof d.outputTokens === 'number' ? { ...s.liveOutput, [d.convId]: d.outputTokens } : s.liveOutput
+          }))
+        }
       } else if (d.kind === 'turn-final') {
         const cacheRead = Math.max(0, d.cacheReadInputTokens ?? 0)
         const cacheCreation = Math.max(0, d.cacheCreationInputTokens ?? 0)

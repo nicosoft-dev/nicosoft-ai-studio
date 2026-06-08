@@ -84,7 +84,7 @@ export interface CoordinatorCallbacks {
   onStepStart: (roleId: string, dispatch: string[] | null, model: string) => void
   onDelta: (roleId: string, text: string) => void
   onStepDone: (roleId: string, text: string, inputTokens: number, outputTokens?: number) => void
-  onUsage?: (inputTokens: number, outputTokens?: number) => void // live ↑in + ↓out, streamed per chunk
+  onUsage?: (roleId: string, inputTokens: number, outputTokens?: number) => void // live ↑in + ↓out per chunk; roleId tags the dispatched step so the renderer isolates per-segment (coordinator path)
   onTurnFinalUsage?: (usage: { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number }) => void
   // Agent-dispatched experts (engineer/shuri/generalist/analyst/scheduler/translator/editor/designer) run a
   // full tool-using loop — these surface its tool activity + approval prompts to the coordinator UI. Only the
@@ -601,13 +601,13 @@ async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputT
         } else if (ev.type === 'sub_tool_start' || ev.type === 'sub_tool_done') {
           cb.onToolEvent?.(roleId, ev)
         } else if (ev.type === 'usage') {
-          cb.onUsage?.(ev.inputTokens, ev.outputTokens) // forward the agent loop's live ↑in+↓out to the conv readout
+          cb.onUsage?.(roleId, ev.inputTokens, ev.outputTokens) // forward the agent loop's live ↑in+↓out to this segment's readout
         } else if (ev.type === 'turn-final') {
           cb.onTurnFinalUsage?.(ev.usage)
         }
       },
       onEvent: (ev) => cb.onToolEvent?.(roleId, ev),
-      onUsage: (inputTokens) => cb.onUsage?.(inputTokens), // bridge the agent loop's live ↑ to the conv readout
+      onUsage: (inputTokens) => cb.onUsage?.(roleId, inputTokens), // bridge the agent loop's live ↑ to this segment's readout
       onToolImage: (att) => cb.onToolImage?.(att), // a dispatched Georgia generated an image → surface it live
       // phase 4: coordinator self-approves via the safety classifier instead of popping the user (doc §8) —
       // green/yellow auto-run, red hard-denied + recorded for deferred approval.
@@ -705,7 +705,7 @@ async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputT
     messages: messages.filter((m) => m.role !== 'system').map((m) => ({ role: m.role, content: m.content })),
     smallModel: pickSmallModel(ep.protocol, ep.availableModels, binding.model)
   })
-  cb.onUsage?.(inputTokens) // live ↑ readout before the step's stream starts
+  cb.onUsage?.(roleId, inputTokens) // live ↑ readout before the step's stream starts
 
   let text = ''
   const result = await llmChat(
@@ -715,7 +715,7 @@ async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputT
         text += d.text
         cb.onDelta(roleId, d.text)
       }
-      if (d.usage) cb.onUsage?.(d.usage.inTokens, d.usage.outTokens) // live ↑in+↓out for tool-less steps too
+      if (d.usage) cb.onUsage?.(roleId, d.usage.inTokens, d.usage.outTokens) // live ↑in+↓out for tool-less steps too
       if (d.turnFinalUsage) {
         cb.onTurnFinalUsage?.({
           inputTokens: d.turnFinalUsage.inTokens,
@@ -937,7 +937,7 @@ async function runCollaboration(
     onExpertStream: (roleId, ev) => {
       if (ev.type === 'text') cb.onDelta(roleId, ev.delta)
       else if (ev.type === 'tool_use_start') cb.onToolStart?.(roleId, ev.id, ev.name)
-      else if (ev.type === 'usage') cb.onUsage?.(ev.inputTokens, ev.outputTokens)
+      else if (ev.type === 'usage') cb.onUsage?.(roleId, ev.inputTokens, ev.outputTokens)
       else if (ev.type === 'turn-final') cb.onTurnFinalUsage?.(ev.usage)
     },
     onExpertEvent: (roleId, ev) => {

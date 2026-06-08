@@ -247,7 +247,9 @@ function ChatSegment({
             or any tool still running. The moment the turn finishes / goes idle it disappears: a finished or
             inactive conversation carries no lingering token status. */}
         {msg.streaming || msg.tools?.some((t) => t.status === 'running') ? (
-          <ThinkingReadout chars={msg.text.length} inputTokens={inputTokens} outputTokens={outputTokens} />
+          // Coordinator segments carry their own live ↑/↓ (per-message) so concurrent segments don't all show
+          // the conv-level total; single chat/agent turns have no per-message live → fall back to the conv prop.
+          <ThinkingReadout chars={msg.text.length} inputTokens={msg.liveInputTokens ?? inputTokens} outputTokens={msg.liveOutputTokens ?? outputTokens} />
         ) : !isUser && (msg.inputTokens || msg.outputTokens) ? (
           <TokenSummary inputTokens={msg.inputTokens} outputTokens={msg.outputTokens} />
         ) : null}

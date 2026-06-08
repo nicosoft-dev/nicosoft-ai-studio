@@ -17,15 +17,19 @@ export function broadcastUsage(
   outputTokens?: number,
   cacheReadInputTokens?: number,
   cacheCreationInputTokens?: number,
+  roleId?: string,
 ): void {
   if (sender.isDestroyed()) return
   // outputTokens omitted (input-only ping: the up-front 'context' count, or a 'live' ping that carried no
   // output yet) → the renderer keeps the last real output; provided → it updates both. turn-final carries
   // cache details so the renderer can accumulate a cache-aware session total exactly once per request.
+  // roleId (coordinator only): tags which dispatched step this usage belongs to, so the renderer routes the
+  // live ↑/↓ to that segment instead of the conv-level overlay, and keeps sub-steps out of the /window meter.
   const ev: ConvUsage = { convId, kind, inputTokens }
   if (outputTokens !== undefined) ev.outputTokens = outputTokens
   if (cacheReadInputTokens !== undefined) ev.cacheReadInputTokens = cacheReadInputTokens
   if (cacheCreationInputTokens !== undefined) ev.cacheCreationInputTokens = cacheCreationInputTokens
+  if (roleId !== undefined) ev.roleId = roleId
   sender.send('conv:usage', ev)
 }
 
