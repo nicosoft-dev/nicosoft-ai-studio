@@ -313,6 +313,7 @@ function Composer({
   const taRef = useRef<HTMLTextAreaElement>(null)
   const [attach, setAttach] = useState<ImageAttachment[]>([])
   const [cmdIndex, setCmdIndex] = useState(0)
+  const { byId: expertById } = useAllExperts() // names the active dispatched expert in the context meter
 
   // A Refine action (from the image viewer) bumps focusNonce → pull focus into the composer.
   useEffect(() => {
@@ -330,7 +331,18 @@ function Composer({
     baseTokens > 0
       ? baseTokens + value.length / 4
       : messages.reduce((s, m) => s + m.text.length, 0) / 4 + value.length / 4
-  const tokenAmber = b.contextLength > 0 && usedTokens / b.contextLength > 0.85
+  // The meter must measure against the expert that actually drives compression — NOT Danny. Per
+  // coordinator.service.fireSideEffects, Danny may be a small-window haiku while the dispatched expert is a
+  // large-window sonnet, so using Danny's window would read past 100%. Track the most recent dispatched-expert
+  // segment carrying a per-step window: its live input while it streams, its final context once done — so
+  // "X / window" = "how close THIS expert is to its compaction threshold", letting the user /compact or clear
+  // pre-emptively. Fall back to the conv-level meter only when there's no coordinator expert (plain chat/agent).
+  const coordSeg = [...messages].reverse().find((m) => m.role === 'assistant' && !!m.expertId && m.expertId !== 'coordinator' && !!m.contextWindow)
+  const segCtx = coordSeg ? (coordSeg.streaming ? coordSeg.liveInputTokens : coordSeg.inputTokens) : undefined
+  const meterName = coordSeg?.expertId ? expertById[coordSeg.expertId]?.name : undefined
+  const meterTokens = coordSeg ? (segCtx ?? baseTokens) + value.length / 4 : usedTokens
+  const meterWindow = coordSeg?.contextWindow ?? b.contextLength
+  const meterAmber = meterWindow > 0 && meterTokens / meterWindow > 0.85
   const selectedEp = b.endpoints.find((e) => e.id === b.endpointId)
   const agent = roleHasAgent(expert.id)
   // Engineer (coding agent) needs a project folder; other agent roles run without one (folder = an
@@ -436,9 +448,10 @@ function Composer({
             ) : null}
             <ThinkingPicker family={b.family} model={b.model} depth={effectiveDepth} onChange={b.onDepth} disabled={!ready} />
             {agent ? <ModePicker value={mode} onChange={(m) => setMode(expert.id, m)} disabled={!ready} /> : null}
-            {b.contextLength > 0 ? (
-              <span className={'cmp-tokens' + (tokenAmber ? ' amber' : '')}>
-                {fmtTokens(usedTokens)} / {fmtTokens(b.contextLength)}
+            {meterWindow > 0 ? (
+              <span className={'cmp-tokens' + (meterAmber ? ' amber' : '')}>
+                {meterName ? <span className="cmp-tokens-who">{meterName}</span> : null}
+                {fmtTokens(meterTokens)} / {fmtTokens(meterWindow)}
               </span>
             ) : null}
           </div>

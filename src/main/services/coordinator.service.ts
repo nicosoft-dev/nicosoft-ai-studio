@@ -81,7 +81,7 @@ export interface CoordinatorRunInput {
 
 export interface CoordinatorCallbacks {
   onDispatch: (chain: string[], reason: string) => void
-  onStepStart: (roleId: string, dispatch: string[] | null, model: string) => void
+  onStepStart: (roleId: string, dispatch: string[] | null, model: string, contextWindow: number) => void
   onDelta: (roleId: string, text: string) => void
   onStepDone: (roleId: string, text: string, inputTokens: number, outputTokens?: number) => void
   onUsage?: (roleId: string, inputTokens: number, outputTokens?: number) => void // live ↑in + ↓out per chunk; roleId tags the dispatched step so the renderer isolates per-segment (coordinator path)
@@ -499,8 +499,11 @@ function routeNeedsPlan(prompt: string, route: RouteDecision): boolean {
 // chain would make the renderer's isSynthesis() mis-tag it as the synthesis step (only the trailing
 // Coordinator merge is synthesis). The dispatch badge attaches from the first expert step onward.
 function emitCoordinatorIntro(convId: string, intro: string, cb: CoordinatorCallbacks): void {
-  const coordinatorModel = rolesService.getBinding('coordinator')?.model ?? ''
-  cb.onStepStart('coordinator', null, coordinatorModel)
+  const binding = rolesService.getBinding('coordinator')
+  const coordinatorModel = binding?.model ?? ''
+  const ep = binding ? endpointRepo.getById(binding.endpointId) : null
+  const contextWindow = ep?.availableModels.find((m) => m.slug === coordinatorModel)?.contextLength ?? 0
+  cb.onStepStart('coordinator', null, coordinatorModel, contextWindow)
   cb.onDelta('coordinator', intro)
   convService.append(convId, { author: 'expert', expertId: 'coordinator', model: coordinatorModel, content: intro })
   cb.onStepDone('coordinator', intro, 0)
@@ -577,7 +580,7 @@ async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputT
     summaryContent = summaryRepo.getLatest(convId)?.content ?? null
   }
 
-  cb.onStepStart(roleId, dispatch, binding.model)
+  cb.onStepStart(roleId, dispatch, binding.model, ep.availableModels.find((m) => m.slug === binding.model)?.contextLength ?? 0)
 
   // Agent-dispatched experts (engineer/shuri/generalist/analyst/scheduler) run a FULL tool-using agent
   // loop — the dispatch upgrade (doc 19 §11 phase 2), not a single llmChat turn. runDispatchedAgent owns
@@ -910,7 +913,7 @@ async function runCollaboration(
       ep.protocol === 'anthropic' ? 'anthropic' : ep.protocol === 'openai' || ep.protocol === 'custom' ? 'openai' : null
     if (!protocol) continue
     models.set(roleId, binding.model)
-    cb.onStepStart(roleId, fullChain, binding.model)
+    cb.onStepStart(roleId, fullChain, binding.model, ep.availableModels.find((m) => m.slug === binding.model)?.contextLength ?? 0)
     experts.push({
       roleId,
       initialPrompt: input.prompt,

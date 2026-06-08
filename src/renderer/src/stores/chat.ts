@@ -63,6 +63,7 @@ export interface ChatMessage {
   outputTokens?: number // real output tokens for THIS turn (upstream usage) — finalized ↓ readout once the turn completes
   liveInputTokens?: number // coordinator only: live ↑ for THIS segment while it streams (per-message, so concurrent segments don't all read the conv-level overlay — BUG 2). step:done supersedes it with inputTokens.
   liveOutputTokens?: number // coordinator only: live ↓ for THIS segment while it streams
+  contextWindow?: number // coordinator only: THIS step's model context window. While this segment streams the composer meter shows liveInputTokens/contextWindow + the expert name, so "X / window" = how close THIS expert is to ITS compression threshold (fireSideEffects checks the same per-expert window).
 }
 // A server-side tool the API executed (e.g. OpenAI web_search) — carried as a server block, shown as a
 // faint status row (no expand / result; the API ran it, not the loop).
@@ -671,8 +672,9 @@ export const useChat = create<ChatState>((set, get) => {
         if (cur && cur.role === 'assistant' && cur.streaming && !cur.expertId) {
           cur.expertId = d.roleId
           cur.dispatch = d.dispatch
+          cur.contextWindow = d.contextWindow
         } else {
-          msgs.push({ id: uid(), role: 'assistant', text: '', streaming: true, expertId: d.roleId, dispatch: d.dispatch })
+          msgs.push({ id: uid(), role: 'assistant', text: '', streaming: true, expertId: d.roleId, dispatch: d.dispatch, contextWindow: d.contextWindow })
         }
         return { byConversation: { ...s.byConversation, [meta.convId]: msgs } }
       })
