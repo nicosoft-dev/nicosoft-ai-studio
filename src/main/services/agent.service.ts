@@ -575,6 +575,9 @@ export interface CollabExpertInput {
   // Unset → 'default' (coordinator's safety classifier gates each mutating tool).
   permissionMode?: AgentContext['permissionMode']
   contextWindow?: number
+  // Resolved thinking directive (from the role binding's thinkingDepth). Without it a collab expert thinks
+  // ZERO — same bug as the dispatch path. The coordinator resolves + sets it when building the expert list.
+  thinking?: AgentRunInput['thinking']
 }
 
 // Bridges a CollabSession's per-expert activity out to the coordinator (→ UI + audit). onEvent is the
@@ -690,6 +693,7 @@ export async function runCollabSession(
           serverTools,
           ctx,
           contextWindow: x.contextWindow ?? 200_000,
+          thinking: x.thinking,
           onStream: (ev) => hooks.onExpertStream(x.roleId, ev),
         })
         let result!: AgentResult

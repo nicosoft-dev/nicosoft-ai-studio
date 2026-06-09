@@ -27,6 +27,7 @@ import * as collabProject from './collab-project.service'
 import * as rolesService from './roles.service'
 import * as compressionService from './compression.service'
 import { chat as llmChat } from '../llm/client'
+import { resolveDepth } from '../llm/thinking'
 import * as agentService from './agent.service'
 import { backgroundVerifyQueue, type E2ERoundResult, type E2EVerdict } from '../agent/background-verify-queue'
 import { classifyApproval } from '../agent/approval'
@@ -646,6 +647,12 @@ async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputT
 
   const isCoordinatorSelf = isDirect || isSynthesis || isParallelSynthesis || isCouncilSynthesis
 
+  // Resolve the role's configured thinking depth (binding.thinkingDepth) into the provider directive. The
+  // renderer's thinking engine only runs for user-typed composer turns; a coordinator-dispatched expert
+  // never passes through it, so without this its 'max'/'xhigh' binding is silently dropped and it thinks
+  // ZERO — which is exactly the bug where "all top-tier" bindings produced no extended thinking at all.
+  const thinking = resolveDepth(ep.protocol, binding.model, binding.thinkingDepth)
+
   // Recall memories + summary ONCE — both the agent loop and the llmChat path inject them so dispatched
   // roles see what they've learned about the user. Synthesis turns skip recall (the synthesis prompt
   // merges the experts' outputs faithfully; coordinator's own facts would only blur the merge).
@@ -713,7 +720,8 @@ async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputT
         // DIRECT: run the loop with Danny's front-door persona + his recalled context, not the
         // dispatched-expert coding system. Gate B's verifier passes its own persona via opts.systemPromptOverride.
         // Undefined for real dispatches → buildAgentSystem as before.
-        systemPromptOverride: opts.systemPromptOverride ?? (isDirect ? withCoordinatorContext(COORDINATOR_DIRECT_PROMPT, memories, summaryContent) : undefined)
+        systemPromptOverride: opts.systemPromptOverride ?? (isDirect ? withCoordinatorContext(COORDINATOR_DIRECT_PROMPT, memories, summaryContent) : undefined),
+        thinking
       },
       agentCb,
       signal
@@ -788,7 +796,7 @@ async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputT
 
   let text = ''
   const result = await llmChat(
-    { protocol: ep.protocol, baseUrl: ep.baseUrl, apiKey, model: binding.model, messages, cacheEnabled: ep.cacheEnabled, conversationId: convId, endpointId: binding.endpointId, roleId, signal },
+    { protocol: ep.protocol, baseUrl: ep.baseUrl, apiKey, model: binding.model, messages, cacheEnabled: ep.cacheEnabled, conversationId: convId, endpointId: binding.endpointId, roleId, thinking, signal },
     (d) => {
       if (d.text) {
         text += d.text
@@ -1103,7 +1111,8 @@ async function runCollaboration(
       baseUrl: ep.baseUrl,
       apiKey,
       model: binding.model,
-      permissionMode: input.modeByRole?.[roleId]
+      permissionMode: input.modeByRole?.[roleId],
+      thinking: resolveDepth(ep.protocol, binding.model, binding.thinkingDepth)
     })
   }
   if (experts.length < 2) throw new LlmError('bad_request', 'collaboration needs at least 2 bound agent experts')
