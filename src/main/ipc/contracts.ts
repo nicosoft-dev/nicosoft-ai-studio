@@ -330,7 +330,6 @@ export interface CoordinatorStepStart {
   roleId: string
   dispatch: string[] | null
   model: string
-  contextWindow: number // this step's model context window — the renderer's composer meter uses it (not Danny's) so "X / window" tracks the expert that actually drives compression (fireSideEffects uses the same per-expert window)
 }
 export interface CoordinatorStepDelta {
   streamId: string

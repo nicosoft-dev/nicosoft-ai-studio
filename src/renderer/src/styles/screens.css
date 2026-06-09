@@ -286,7 +286,6 @@
 
 .cmp-tokens { margin-left: auto; font-size: 11.5px; color: var(--text-4); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cmp-tokens.amber { color: var(--warning); }
-.cmp-tokens-who { color: var(--text-3); margin-right: 5px; } /* active dispatched-expert name in front of the meter */
 
 /* attachment strip */
 .cmp-attach-strip { display: flex; flex-wrap: wrap; gap: 8px; padding: 11px 12px 0; }
