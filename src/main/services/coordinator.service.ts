@@ -427,7 +427,7 @@ export async function route(userInput: string, history: convRepo.MessageRow[], s
   const messages = buildRouterMessages(userInput, history, enabled)
   try {
     const result = await llmChat(
-      { protocol: ep.protocol, baseUrl: ep.baseUrl, apiKey, model: binding.model, messages, signal },
+      { protocol: ep.protocol, baseUrl: ep.baseUrl, apiKey, model: binding.model, messages, thinking: resolveDepth(ep.protocol, binding.model, binding.thinkingDepth), signal },
       () => {} // collect, don't stream
     )
     return parseRouteDecision(result.text, enabled)
@@ -1050,6 +1050,7 @@ async function reviewExitPlanMode(convId: string, planAuthorRoleId: string, req:
       baseUrl: ep.baseUrl,
       apiKey,
       model: binding.model,
+      thinking: resolveDepth(ep.protocol, binding.model, binding.thinkingDepth),
       messages: [{ role: 'system', content: COORDINATOR_PLAN_REVIEW_PROMPT }, { role: 'user', content: reviewInput }],
       cacheEnabled: ep.cacheEnabled,
       signal: undefined
@@ -1271,7 +1272,7 @@ async function facilitate(question: string, positions: { role: string; text: str
     { role: 'user', content: buildFacilitateInput(question, positions, panel, available) }
   ]
   try {
-    const result = await llmChat({ protocol: ep.protocol, baseUrl: ep.baseUrl, apiKey, model: binding.model, messages, signal }, () => {})
+    const result = await llmChat({ protocol: ep.protocol, baseUrl: ep.baseUrl, apiKey, model: binding.model, messages, thinking: resolveDepth(ep.protocol, binding.model, binding.thinkingDepth), signal }, () => {})
     const m = result.text.match(/\{[\s\S]*\}/)
     if (m) {
       const obj = JSON.parse(m[0]) as { action?: unknown; role?: unknown }
