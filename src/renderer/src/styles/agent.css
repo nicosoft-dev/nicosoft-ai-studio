@@ -82,6 +82,14 @@
   max-height: 320px;
   overflow: auto;
 }
+/* Agent-authored Markdown result rendered inside the tool card — pad it like .tb-result and cap height
+   so long verdicts scroll instead of stretching the card. */
+.tb-md {
+  padding: 4px 12px;
+  max-height: 420px;
+  overflow: auto;
+}
+.tb-md .md { font-size: 12px; }
 /* Read result rendered as a code block — drop the standalone block's chrome (border/radius/margin) since
    it already sits inside .tb-detail, and cap its height so a large file scrolls instead of stretching. */
 .tb-code { max-height: 420px; overflow: auto; }

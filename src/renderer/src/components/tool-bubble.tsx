@@ -7,11 +7,20 @@
 import { useState } from 'react'
 import type { ReactElement } from 'react'
 import { Icons } from '@/components/icons'
-import { CodeBlock, extToLang } from '@/components/markdown'
+import { CodeBlock, Markdown, extToLang } from '@/components/markdown'
 import { VerifyScreenshot } from '@/components/verify-screenshot'
 import type { ToolCall, ServerNote } from '@/stores/chat'
 
 const DIFF_TOOLS = new Set(['Edit', 'Write', 'MultiEdit'])
+// Tools whose result is Markdown written by an agent (FAIL/PASS verdicts, lists, `code`, **bold**,
+// headings) — render it through <Markdown> instead of a plain <pre> so the formatting survives.
+const MARKDOWN_TOOLS = new Set(['IndependentVerifier', 'DannyPlanReview', 'Task', 'WebFetch'])
+
+// A Bash result that is a git diff — detected by the unified-diff file header or a hunk header. Such a
+// result renders through CodeBlock lang="diff" for added-green / removed-red syntax highlighting.
+function isGitDiff(text: string): boolean {
+  return /^diff --git /m.test(text) || /^@@ -\d+(,\d+)? \+\d+(,\d+)? @@/m.test(text)
+}
 
 // e2e_browser / e2e_request actions (launch/click/screenshot/assert/…) run as sub-tools and their result is
 // a JSON object { sessionId, ok, pass?, screenshotPath?, detail }. Parse it so the ToolCard can render an
@@ -82,6 +91,27 @@ function subToolSummary(tool: ToolCall, fallback: string): string {
   return `${base}${currentLabel} · ${count} ${count === 1 ? 'tool' : 'tools'}`
 }
 
+// Renders a non-diff, non-Read tool result: Markdown for agent-authored results, diff-highlighted code
+// for git-diff Bash output, and plain monospace text otherwise.
+function ResultBody({ tool }: { tool: ToolCall }): ReactElement {
+  const text = tool.result!
+  if (MARKDOWN_TOOLS.has(tool.name)) {
+    return (
+      <div className="tb-md">
+        <Markdown>{text.slice(0, 50000)}</Markdown>
+      </div>
+    )
+  }
+  if (tool.name === 'Bash' && isGitDiff(text)) {
+    return (
+      <div className="tb-code">
+        <CodeBlock lang="diff" code={text.slice(0, 50000)} />
+      </div>
+    )
+  }
+  return <pre className="tb-result">{text.slice(0, 6000)}</pre>
+}
+
 export function ToolBubble({ tool, depth = 0 }: { tool: ToolCall; depth?: number }): ReactElement {
   const [open, setOpen] = useState(false)
   const input = (tool.input ?? {}) as Record<string, unknown>
@@ -141,7 +171,7 @@ export function ToolBubble({ tool, depth = 0 }: { tool: ToolCall; depth?: number
               <CodeBlock lang={extToLang(String(input.file_path ?? ''))} code={stripLineNumbers(tool.result!).slice(0, 50000)} />
             </div>
           ) : hasResult && !isDiff ? (
-            <pre className="tb-result">{tool.result!.slice(0, 6000)}</pre>
+            <ResultBody tool={tool} />
           ) : null}
         </div>
       )}
