@@ -67,10 +67,42 @@ function fmtElapsed(ms: number): string {
   return `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
+const basename = (p: string): string => p.split(/[\\/]/).pop() || p
+// What the agent is doing RIGHT NOW, from its in-flight tool. input is {} at tool-start (the renderer gets
+// only id+name live — the full args land in the DB transcript after the tool finishes), so this leans on the
+// tool NAME; a file_path/pattern fills in when present. Per-SEGMENT: it reads a single message's own tool, so
+// concurrent coordinator segments each show their own agent's activity instead of one shared conv-level state.
+function activityLabel(t: ToolCall): string {
+  const p = (t.input ?? null) as { file_path?: string; pattern?: string; description?: string } | null
+  const file = p?.file_path ? ` ${basename(p.file_path)}` : ''
+  switch (t.name) {
+    case 'Read': return `Reading${file}`
+    case 'Write': return `Writing${file}`
+    case 'Edit':
+    case 'MultiEdit': return `Editing${file}`
+    case 'Bash': return p?.description || 'Running command'
+    case 'Grep': return p?.pattern ? `Searching: ${p.pattern}` : 'Searching'
+    case 'Glob': return 'Finding files'
+    case 'TodoWrite': return 'Updating tasks'
+    case 'WebFetch': return 'Fetching page'
+    case 'WebSearch': return 'Searching the web'
+    case 'Task': return p?.description ? `Sub-agent: ${p.description}` : 'Running sub-agent'
+    default: return t.name
+  }
+}
+// The current activity for a streaming message: its last running tool ("Reading", "Running command"), else
+// "Thinking" while the model generates between tool calls. Reads ONLY this message's tools, so it stays
+// per-segment and never bleeds across concurrent agents.
+function segmentActivity(tools?: ToolCall[]): string {
+  if (tools) for (let i = tools.length - 1; i >= 0; i--) if (tools[i].status === 'running') return activityLabel(tools[i])
+  return 'Thinking'
+}
+
 // The live "thinking" readout shown while a reply streams: a steady role-colored dot (CSS breathes its
-// opacity — no spin) + elapsed · output-token estimate (chars/4, a common heuristic).
-// Tokens/elapsed appear once they're meaningful, so the pure-thinking phase (no text yet) is just the dot.
-function ThinkingReadout({ chars, inputTokens, outputTokens }: { chars: number; inputTokens: number; outputTokens?: number }): ReactElement {
+// opacity — no spin) + elapsed · output-token estimate (chars/4, a common heuristic) · current activity.
+// Tokens/elapsed appear once they're meaningful; the activity (always present) is the trailing part, so the
+// pure-thinking phase (no text yet) shows just the dot + activity.
+function ThinkingReadout({ chars, inputTokens, outputTokens, activity }: { chars: number; inputTokens: number; outputTokens?: number; activity: string }): ReactElement {
   const t = useT()
   const startRef = useRef(Date.now())
   const [now, setNow] = useState(() => Date.now())
@@ -87,6 +119,7 @@ function ThinkingReadout({ chars, inputTokens, outputTokens }: { chars: number; 
   if (elapsed >= 1000) parts.push(<span>{fmtElapsed(elapsed)}</span>)
   if (inputTokens > 0) parts.push(<span>↑ {fmtReadoutTokens(inputTokens)}</span>)
   if (out > 0) parts.push(<span>↓ {fmtReadoutTokens(out)} {t('conv.tokensSuffix')}</span>)
+  parts.push(<span className="tr-activity">{activity}</span>)
   return (
     <span className="thinking-readout" aria-label="thinking">
       <span className="tr-dot" />
@@ -250,7 +283,7 @@ function ChatSegment({
         {msg.streaming || msg.tools?.some((t) => t.status === 'running') ? (
           // Coordinator segments carry their own live ↑/↓ (per-message) so concurrent segments don't all show
           // the conv-level total; single chat/agent turns have no per-message live → fall back to the conv prop.
-          <ThinkingReadout chars={msg.text.length} inputTokens={msg.liveInputTokens ?? inputTokens} outputTokens={msg.liveOutputTokens ?? outputTokens} />
+          <ThinkingReadout chars={msg.text.length} inputTokens={msg.liveInputTokens ?? inputTokens} outputTokens={msg.liveOutputTokens ?? outputTokens} activity={segmentActivity(msg.tools)} />
         ) : !isUser && (msg.inputTokens || msg.outputTokens) ? (
           <TokenSummary inputTokens={msg.inputTokens} outputTokens={msg.outputTokens} />
         ) : null}
@@ -274,7 +307,7 @@ function PendingReadout({ expert, inputTokens, outputTokens }: { expert: Expert;
         </div>
       </div>
       <div className="seg-body">
-        <ThinkingReadout chars={0} inputTokens={inputTokens} outputTokens={outputTokens} />
+        <ThinkingReadout chars={0} inputTokens={inputTokens} outputTokens={outputTokens} activity="Thinking" />
       </div>
     </div>
   )
