@@ -9,12 +9,16 @@ import type { ReactElement } from 'react'
 import { Icons } from '@/components/icons'
 import { CodeBlock, Markdown, extToLang } from '@/components/markdown'
 import { VerifyScreenshot } from '@/components/verify-screenshot'
-import type { ToolCall, ServerNote } from '@/stores/chat'
+import type { ToolCall, ServerNote, MsgBlock } from '@/stores/chat'
 
 const DIFF_TOOLS = new Set(['Edit', 'Write', 'MultiEdit'])
 // Tools whose result is Markdown written by an agent (FAIL/PASS verdicts, lists, `code`, **bold**,
 // headings) — render it through <Markdown> instead of a plain <pre> so the formatting survives.
 const MARKDOWN_TOOLS = new Set(['IndependentVerifier', 'DannyPlanReview', 'Task', 'WebFetch'])
+// Read-only探索 tools — a consecutive run of these folds codex-style into ONE ExploreGroup ("Exploring…" /
+// "Explored N steps") instead of N stacked rows. Side-effecting tools (Write/Edit/Bash/Task/…) are excluded
+// on purpose: the caller keeps each as its own visible card so changes and commands never hide inside a fold.
+export const EXPLORE_TOOL_NAMES = new Set(['Read', 'Grep', 'Glob', 'LS'])
 
 // A Bash result that is a git diff — detected by the unified-diff file header or a hunk header. Such a
 // result renders through CodeBlock lang="diff" for added-green / removed-red syntax highlighting.
@@ -173,6 +177,61 @@ export function ToolBubble({ tool, depth = 0 }: { tool: ToolCall; depth?: number
           ) : hasResult && !isDiff ? (
             <ResultBody tool={tool} />
           ) : null}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// A run of consecutive read-only探索 tools — plus the short progress text the agent emits between them
+// ("Step 1 done." etc.) — folded codex-style into ONE cell instead of N stacked rows. Takes the block
+// SUBSEQUENCE (tools + interleaved text) so that inter-tool narration doesn't break the run; the caller keeps
+// the run's TRAILING text (the real answer after the last探索 tool) outside this cell so it stays visible.
+// While ANY tool is still executing the cell stays open so the list grows live (matching the Thinking readout
+// below it); once done it collapses to "Explored N steps · targets" — click to re-expand. Inner tools render
+// as full ToolBubbles at depth=1, and inner narration as Markdown, so nothing loses its drill-down.
+export function ExploreGroup({ blocks, byId }: { blocks: MsgBlock[]; byId: (id: string) => ToolCall | undefined }): ReactElement {
+  const [open, setOpen] = useState(false)
+  const tools = blocks.flatMap((b) => (b.kind === 'tool' ? [byId(b.id)] : [])).filter((t): t is ToolCall => !!t)
+  const running = tools.some((t) => t.status === 'running')
+  const errored = tools.some((t) => t.status === 'error')
+  const expanded = running || open // running → always open (watch it live); done → folded unless clicked
+  const targets = Array.from(
+    new Set(
+      tools
+        .map((t) => toolSummary(t.name, (t.input ?? {}) as Record<string, unknown>))
+        .map((s) => s.split(/[\\/]/).pop() || s)
+        .filter(Boolean)
+    )
+  )
+  const targetLabel = targets.slice(0, 3).join(', ') + (targets.length > 3 ? '…' : '')
+  return (
+    <div className={'explore-group' + (errored ? ' error' : '') + (expanded ? ' open' : '')}>
+      <button className="eg-head" onClick={() => !running && setOpen((o) => !o)} disabled={running}>
+        <span className="eg-status">{running ? <span className="tb-dot" /> : <Icons.search size={11} />}</span>
+        <span className="eg-verb">{running ? 'Exploring…' : 'Explored'}</span>
+        <span className="eg-count">
+          {tools.length} {tools.length === 1 ? 'step' : 'steps'}
+        </span>
+        {targetLabel ? <span className="eg-targets">· {targetLabel}</span> : null}
+        {!running && (
+          <span className={'eg-chevron' + (open ? ' open' : '')}>
+            <Icons.chevronDown size={13} />
+          </span>
+        )}
+      </button>
+      {expanded && (
+        <div className="eg-tools">
+          {blocks.map((b, i) =>
+            b.kind === 'text' ? (
+              b.text ? <Markdown key={`x${i}`}>{b.text}</Markdown> : null
+            ) : (
+              (() => {
+                const t = byId(b.id)
+                return t ? <ToolBubble key={t.id} tool={t} depth={1} /> : null
+              })()
+            )
+          )}
         </div>
       )}
     </div>

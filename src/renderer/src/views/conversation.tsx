@@ -14,7 +14,7 @@ import { PathBar } from '@/components/path-bar'
 import { useWorkspace } from '@/stores/workspace'
 import { Avatar, DispatchBadge, NameChip } from '@/components/primitives'
 import { useChat, roleHasAgent, roleHasImageGen, type ChatMessage, type MsgBlock, type ToolCall } from '@/stores/chat'
-import { ToolBubble, ServerBubble, Sources } from '@/components/tool-bubble'
+import { ToolBubble, ServerBubble, Sources, ExploreGroup, EXPLORE_TOOL_NAMES } from '@/components/tool-bubble'
 import { Markdown } from '@/components/markdown'
 import { ApprovalDialog } from '@/components/approval-dialog'
 import { QuestionDialog } from '@/components/question-dialog'
@@ -119,7 +119,10 @@ function ThinkingReadout({ chars, inputTokens, outputTokens, activity }: { chars
   if (elapsed >= 1000) parts.push(<span>{fmtElapsed(elapsed)}</span>)
   if (inputTokens > 0) parts.push(<span>↑ {fmtReadoutTokens(inputTokens)}</span>)
   if (out > 0) parts.push(<span>↓ {fmtReadoutTokens(out)} {t('conv.tokensSuffix')}</span>)
-  parts.push(<span className="tr-activity">{activity}</span>)
+  // The activity ("Thinking…" / "Reading …") renders OUTSIDE `parts`, at a fixed trailing position, so its
+  // breathe animation never restarts when parts grow (elapsed crossing 1s, first token landing would shift its
+  // index key and remount it). Sitting outside parts — like the dot — keeps the two in lockstep. Trailing "…"
+  // marks it as in-progress, matching the old Workspace activity line.
   return (
     <span className="thinking-readout" aria-label="thinking">
       <span className="tr-dot" />
@@ -129,6 +132,8 @@ function ThinkingReadout({ chars, inputTokens, outputTokens, activity }: { chars
           {p}
         </Fragment>
       ))}
+      {parts.length > 0 ? <span className="tr-sep">·</span> : null}
+      <span className="tr-activity">{activity}…</span>
     </span>
   )
 }
@@ -179,17 +184,57 @@ function isSynthesis(msg: ChatMessage): boolean {
  *   chronologically — text emitted AFTER a tool call lands below that card, not stacked above it. A text
  *   block that's still empty (a delta hasn't filled it yet) renders nothing; a tool id with no matching card
  *   (defensive) is skipped (the parent then renders it in the trailing fallback). — */
+// Render an ordered text+tool block sequence, folding a run of consecutive read-only探索 tools
+// (Read/Grep/Glob/LS) into one codex-style ExploreGroup instead of N stacked rows. The agent narrates
+// between tools ("Step 1 done."), so a text block does NOT break the run — it's kept inside it; only a
+// side-effecting tool (Write/Edit/Bash/Task/…) or the end of the list flushes. On flush the run is split at
+// its LAST探索 tool: head (tools + inter-tool narration) folds into the cell, tail (the real answer typed
+// after exploring) stays outside and visible. A run with <2 tools isn't worth folding → rendered flat.
+function renderBlocks(blocks: MsgBlock[], byId: (id: string) => ToolCall | undefined): ReactElement[] {
+  const out: ReactElement[] = []
+  let run: MsgBlock[] = []
+  const renderFlat = (b: MsgBlock, key: string): void => {
+    if (b.kind === 'text') {
+      if (b.text) out.push(<Markdown key={key}>{b.text}</Markdown>)
+    } else {
+      const t = byId(b.id)
+      if (t) out.push(<ToolBubble key={t.id} tool={t} />)
+    }
+  }
+  const flush = (key: string): void => {
+    if (run.length === 0) return
+    let lastTool = -1
+    run.forEach((b, idx) => { if (b.kind === 'tool') lastTool = idx })
+    const toolCount = run.filter((b) => b.kind === 'tool').length
+    if (toolCount >= 2) {
+      out.push(<ExploreGroup key={key} blocks={run.slice(0, lastTool + 1)} byId={byId} />)
+      run.slice(lastTool + 1).forEach((b, i) => renderFlat(b, `${key}tl${i}`))
+    } else {
+      run.forEach((b, i) => renderFlat(b, `${key}r${i}`))
+    }
+    run = []
+  }
+  blocks.forEach((b, i) => {
+    if (b.kind === 'text') {
+      if (run.length > 0) run.push(b) // inside a探索 segment → narration, keep with the run
+      else if (b.text) out.push(<Markdown key={`t${i}`}>{b.text}</Markdown>)
+      return
+    }
+    const tool = byId(b.id)
+    if (!tool) return
+    if (EXPLORE_TOOL_NAMES.has(tool.name)) run.push(b)
+    else {
+      flush(`eg${i}`)
+      out.push(<ToolBubble key={tool.id} tool={tool} />)
+    }
+  })
+  flush('egEnd')
+  return out
+}
+
 function AgentBody({ blocks, tools }: { blocks: MsgBlock[]; tools?: ToolCall[] }): ReactElement {
   const byId = (id: string): ToolCall | undefined => tools?.find((t) => t.id === id)
-  return (
-    <>
-      {blocks.map((b, i) => {
-        if (b.kind === 'text') return b.text ? <Markdown key={`t${i}`}>{b.text}</Markdown> : null
-        const tool = byId(b.id)
-        return tool ? <ToolBubble key={tool.id} tool={tool} /> : null
-      })}
-    </>
-  )
+  return <>{renderBlocks(blocks, byId)}</>
 }
 
 /* — One message in the list (user or assistant). For Coordinator-routed conversations the contributing
@@ -271,10 +316,16 @@ function ChatSegment({
           </div>
         ) : null}
         {/* Tool cards NOT covered by the ordered block list (legacy turn, or a defensive gap) render here so
-            none are ever dropped. With a block list, every tool id appears as a block → this renders nothing. */}
-        {msg.tools && msg.tools.length > 0
-          ? msg.tools.filter((t) => !(msg.blocks ?? []).some((b) => b.kind === 'tool' && b.id === t.id)).map((t) => <ToolBubble key={t.id} tool={t} />)
-          : null}
+            none are ever dropped — through the same explore-folding path. With a block list, every tool id
+            appears as a block → orphans is empty → this renders nothing. */}
+        {(() => {
+          const orphans = (msg.tools ?? []).filter((t) => !(msg.blocks ?? []).some((b) => b.kind === 'tool' && b.id === t.id))
+          if (orphans.length === 0) return null
+          return renderBlocks(
+            orphans.map((t) => ({ kind: 'tool' as const, id: t.id })),
+            (id) => orphans.find((t) => t.id === id)
+          )
+        })()}
         {msg.servers && msg.servers.length > 0 ? msg.servers.map((sv, i) => <ServerBubble key={i} note={sv} />) : null}
         {msg.citations && msg.citations.length > 0 ? <Sources items={msg.citations} /> : null}
         {/* Live readout (pulsing dot · elapsed · ↑↓ tokens) shows ONLY while the agent is working — streaming
