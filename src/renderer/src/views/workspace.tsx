@@ -36,6 +36,8 @@ export function WorkspaceDrawer({ onClose, activeConv }: { onClose: () => void; 
   const [images, setImages] = useState<ViewerImage[]>([])
   const [tasks, setTasks] = useState<WsTask[]>([])
   const [viewer, setViewer] = useState<number | null>(null)
+  const [tick, setTick] = useState(0) // streaming-time re-derive trigger (TodoWrite tool calls don't bump msgCount)
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({}) // per-section fold state
   // Re-derive when the conversation grows or a run ends (new files/images/tasks land).
   const msgCount = useChat((s) => (activeConv ? (s.byConversation[activeConv]?.length ?? 0) : 0))
   const streaming = useChat((s) => (activeConv ? !!s.streaming[activeConv] : false))
@@ -50,6 +52,14 @@ export function WorkspaceDrawer({ onClose, activeConv }: { onClose: () => void; 
       .then((path) => { if (path) toast.success('Image saved') })
       .catch(() => toast.error('Couldn’t save image'))
   }
+
+  // TodoWrite updates are tool calls (no new message), so msgCount stays put while a run streams. Poll a
+  // re-derive tick during streaming so Tasks track live progress instead of freezing at the last snapshot.
+  useEffect(() => {
+    if (!streaming) return
+    const id = setInterval(() => setTick((t) => t + 1), 1200)
+    return () => clearInterval(id)
+  }, [streaming])
 
   useEffect(() => {
     if (!activeConv) {
@@ -91,7 +101,7 @@ export function WorkspaceDrawer({ onClose, activeConv }: { onClose: () => void; 
     return () => {
       cancelled = true
     }
-  }, [activeConv, msgCount, streaming])
+  }, [activeConv, msgCount, streaming, tick])
 
   return (
     <div className="workspace-drawer">
@@ -103,8 +113,11 @@ export function WorkspaceDrawer({ onClose, activeConv }: { onClose: () => void; 
       </div>
       <div className="ws-scroll">
         <div className="ws-section">
-          <div className="ws-section-head">Files</div>
-          {files.length === 0 ? (
+          <button className="ws-section-head" onClick={() => setCollapsed((c) => ({ ...c, files: !c.files }))}>
+            <span className={'ws-chev' + (collapsed.files ? ' collapsed' : '')}><Icons.chevronDown size={11} /></span>
+            Files{files.length > 0 ? ` · ${files.length}` : ''}
+          </button>
+          {collapsed.files ? null : files.length === 0 ? (
             <div className="ws-empty">No files created in this chat yet.</div>
           ) : (
             <div className="ws-files">
@@ -122,8 +135,11 @@ export function WorkspaceDrawer({ onClose, activeConv }: { onClose: () => void; 
         </div>
 
         <div className="ws-section">
-          <div className="ws-section-head">Recent images</div>
-          {images.length === 0 ? (
+          <button className="ws-section-head" onClick={() => setCollapsed((c) => ({ ...c, images: !c.images }))}>
+            <span className={'ws-chev' + (collapsed.images ? ' collapsed' : '')}><Icons.chevronDown size={11} /></span>
+            Recent images{images.length > 0 ? ` · ${images.length}` : ''}
+          </button>
+          {collapsed.images ? null : images.length === 0 ? (
             <div className="ws-empty">No images generated yet.</div>
           ) : (
             <div className="ws-images">
@@ -135,8 +151,11 @@ export function WorkspaceDrawer({ onClose, activeConv }: { onClose: () => void; 
         </div>
 
         <div className="ws-section">
-          <div className="ws-section-head">Tasks</div>
-          {tasks.length === 0 ? (
+          <button className="ws-section-head" onClick={() => setCollapsed((c) => ({ ...c, tasks: !c.tasks }))}>
+            <span className={'ws-chev' + (collapsed.tasks ? ' collapsed' : '')}><Icons.chevronDown size={11} /></span>
+            Tasks{tasks.length > 0 ? ` · ${tasks.length}` : ''}
+          </button>
+          {collapsed.tasks ? null : tasks.length === 0 ? (
             <div className="ws-empty">No task list for this chat.</div>
           ) : (
             <div className="ws-tasks">
