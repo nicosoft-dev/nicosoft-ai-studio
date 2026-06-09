@@ -243,7 +243,7 @@ export async function run(
       content: loopRes.text,
       attachments: loopRes.attachments,
       runId,
-      inputTokens: promptTokens,
+      inputTokens: loopRes.freshInTokens, // DISPLAY: real sent (non-cached, accumulated). promptTokens stays the live context-size readout (onUsage/compression above).
       outputTokens: loopRes.outTokens,
     })
   }
@@ -334,7 +334,7 @@ export async function runAgentLoop(
   loop: AgentLoopInput,
   cb: AgentCallbacks,
   signal: AbortSignal,
-): Promise<{ text: string; inTokens: number; outTokens: number; reason: string; turns: number; attachments: MessageAttachmentDto[] }> {
+): Promise<{ text: string; inTokens: number; freshInTokens: number; outTokens: number; reason: string; turns: number; attachments: MessageAttachmentDto[] }> {
   const sessionDir = join(homedir(), '.nsai', 'sessions', loop.convId)
   await mkdir(join(sessionDir, 'tool-results'), { recursive: true })
   const transcript = createWriteStream(join(sessionDir, 'transcript.jsonl'), { flags: 'a' })
@@ -390,7 +390,8 @@ export async function runAgentLoop(
   })
 
   let result!: AgentResult
-  let inTokens = 0
+  let inTokens = 0 // TOTAL prompt tokens incl. cache, accumulated across turns → billing (usage_events)
+  let freshIn = 0 // NON-CACHED input only, accumulated → display "↑ sent" (codex/ccb: real sent amount, not cache-inflated N×)
   let outTokens = 0
   const toolImages: MessageAttachmentDto[] = [] // images any tool produced this run → assistant-message attachments
   const toolNames = new Map<string, string>() // tool_use id → name, to pair tool:post with its tool
@@ -406,9 +407,10 @@ export async function runAgentLoop(
       }
       let emitted: AgentEvent = value
       if (value.type === 'assistant') {
-        inTokens += promptTokensFromUsage(value.usage) // include cache read/creation — see compact.ts
+        inTokens += promptTokensFromUsage(value.usage) // total incl. cache → billing
+        freshIn += value.usage.inTokens + (value.usage.cacheCreationTokens ?? 0) // REAL SENT = fresh + first-time cache creation; excludes cache_read (repeat hits) → not inflated N×, but cache-invariant (reflects what was actually sent, unlike message_start delta alone). = codex non_cached_input.
         outTokens += value.usage.outTokens
-        cb.onUsage?.(promptTokensFromUsage(value.usage)) // live ↑ readout: this turn's prompt size
+        cb.onUsage?.(promptTokensFromUsage(value.usage)) // live ↑ readout: this turn's prompt size (current context, last)
         for (const b of value.message.content) {
           if (isContentBlock(b) && b.type === 'tool_use') {
             toolNames.set(b.id, b.name)
@@ -448,6 +450,7 @@ export async function runAgentLoop(
   return {
     text: finalAssistantText(result.messages),
     inTokens,
+    freshInTokens: freshIn,
     outTokens,
     reason: result.reason,
     turns: result.turns,
@@ -503,7 +506,7 @@ export async function runDispatchedAgent(
   d: DispatchedAgentInput,
   cb: AgentCallbacks,
   signal: AbortSignal,
-): Promise<{ text: string; inTokens: number; outTokens: number; attachments: MessageAttachmentDto[] }> {
+): Promise<{ text: string; inTokens: number; freshInTokens: number; outTokens: number; attachments: MessageAttachmentDto[] }> {
   let tools: Tool[]
   if (d.toolNames) {
     // Fixed-kit dispatch (Gate B verifier): an explicit whitelist instead of the role's default kit — a
@@ -556,7 +559,7 @@ export async function runDispatchedAgent(
     cb,
     signal,
   )
-  return { text: res.text, inTokens: res.inTokens, outTokens: res.outTokens, attachments: res.attachments }
+  return { text: res.text, inTokens: res.inTokens, freshInTokens: res.freshInTokens, outTokens: res.outTokens, attachments: res.attachments }
 }
 
 // ---- Multi-expert collaboration (consult — doc 19 §5 / §11 phase 3) ----
@@ -627,11 +630,12 @@ export async function runCollabSession(
   hooks: CollabHooks,
   signal: AbortSignal,
   nowMs: () => number,
-): Promise<Map<string, { text: string; inTokens: number; outTokens: number }>> {
+): Promise<Map<string, { text: string; inTokens: number; freshInTokens: number; outTokens: number }>> {
   // One service registry per collaboration, shared by all its experts (Flynn starts a backend, Shuri
   // lists + connects). Tree-killed in the finally below when the session ends — no zombie ports survive.
   const registry = new ServiceRegistry()
-  const inTokensByRole = new Map<string, number>() // accumulated prompt tokens per expert → its per-message ↑ readout
+  const inTokensByRole = new Map<string, number>() // accumulated TOTAL prompt tokens (incl. cache) per expert → billing
+  const freshInByRole = new Map<string, number>() // accumulated NON-CACHED input per expert → per-message ↑ display (not cache-inflated)
   const outTokensByRole = new Map<string, number>() // accumulated output tokens per expert → its per-message ↓ readout
   const roster = experts.map((x) => ({ id: x.roleId, name: displayName(x.roleId) ?? x.roleId }))
   const lspByExpert: LSPManager[] = [] // one per dev expert; tree-killed in the finally
@@ -697,7 +701,8 @@ export async function runCollabSession(
           onStream: (ev) => hooks.onExpertStream(x.roleId, ev),
         })
         let result!: AgentResult
-        let turnIn = 0
+        let turnIn = 0 // total incl. cache → billing
+        let turnFresh = 0 // non-cached → display
         let turnOut = 0
         for (;;) {
           const { value, done } = await gen.next()
@@ -708,7 +713,8 @@ export async function runCollabSession(
           // Emit the same tool:pre/post audit trail as runAgentLoop, so a collaboration's tool usage is
           // observable too (previously a gap — collab experts don't go through runAgentLoop).
           if (value.type === 'assistant') {
-            turnIn += promptTokensFromUsage(value.usage) // incl. cache read/creation
+            turnIn += promptTokensFromUsage(value.usage) // total incl. cache → billing
+            turnFresh += value.usage.inTokens + (value.usage.cacheCreationTokens ?? 0) // real sent = fresh + first-time creation (excludes repeat cache_read) — cache-invariant
             turnOut += value.usage.outTokens
             for (const b of value.message.content) {
               if (isContentBlock(b) && b.type === 'tool_use') {
@@ -726,6 +732,7 @@ export async function runCollabSession(
           hooks.onExpertEvent(x.roleId, value)
         }
         inTokensByRole.set(x.roleId, (inTokensByRole.get(x.roleId) ?? 0) + turnIn)
+        freshInByRole.set(x.roleId, (freshInByRole.get(x.roleId) ?? 0) + turnFresh)
         outTokensByRole.set(x.roleId, (outTokensByRole.get(x.roleId) ?? 0) + turnOut)
         return result.messages
       },
@@ -740,7 +747,7 @@ export async function runCollabSession(
   try {
     const texts = await new CollabSession(specs, onEvent, nowMs).run(signal)
     return new Map(
-      [...texts].map(([roleId, text]): [string, { text: string; inTokens: number; outTokens: number }] => [roleId, { text, inTokens: inTokensByRole.get(roleId) ?? 0, outTokens: outTokensByRole.get(roleId) ?? 0 }])
+      [...texts].map(([roleId, text]): [string, { text: string; inTokens: number; freshInTokens: number; outTokens: number }] => [roleId, { text, inTokens: inTokensByRole.get(roleId) ?? 0, freshInTokens: freshInByRole.get(roleId) ?? 0, outTokens: outTokensByRole.get(roleId) ?? 0 }])
     )
   } finally {
     hooks.onServices?.([])

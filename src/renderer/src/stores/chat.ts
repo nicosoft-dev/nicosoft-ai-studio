@@ -622,13 +622,13 @@ export const useChat = create<ChatState>((set, get) => {
         }
       } else if (d.kind === 'turn-final') {
         const cacheRead = Math.max(0, d.cacheReadInputTokens ?? 0)
-        const cacheCreation = Math.max(0, d.cacheCreationInputTokens ?? 0)
-        const cached = cacheRead + cacheCreation
-        const fresh = Math.max(0, d.inputTokens - cached)
+        // REAL SENT = total input minus cache_read repeat hits (= fresh delta + first-time cache_creation). cache_read is
+        // the repeat-hit portion the cache saved us from re-sending → booked as "cached", not "sent". Cache-invariant.
+        const fresh = Math.max(0, d.inputTokens - cacheRead)
         set((s) => ({
           sessionOutput: { ...s.sessionOutput, [d.convId]: (s.sessionOutput[d.convId] ?? 0) + (d.outputTokens ?? 0) },
           sessionInputFresh: { ...s.sessionInputFresh, [d.convId]: (s.sessionInputFresh[d.convId] ?? 0) + fresh },
-          sessionCached: { ...s.sessionCached, [d.convId]: (s.sessionCached[d.convId] ?? 0) + cached },
+          sessionCached: { ...s.sessionCached, [d.convId]: (s.sessionCached[d.convId] ?? 0) + cacheRead },
           // This request is now booked into the session totals. Clear the live overlay so the readout does not
           // show session + the same request's last streamed cumulative ping until the next request starts.
           liveInput: { ...s.liveInput, [d.convId]: 0 },

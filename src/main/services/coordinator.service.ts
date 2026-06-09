@@ -737,12 +737,12 @@ async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputT
         content: text,
         attachments: res.attachments,
         dispatch: dispatch ?? undefined,
-        inputTokens: res.inTokens,
+        inputTokens: res.freshInTokens, // DISPLAY: non-cached real sent (not cache-inflated). Billing below uses total.
         outputTokens: res.outTokens
       })
     }
     usageRepo.record({ conversationId: convId, expertId: roleId, model: binding.model, provider: ep.protocol, inTokens: res.inTokens, outTokens: res.outTokens })
-    cb.onStepDone(roleId, text, res.inTokens, res.outTokens)
+    cb.onStepDone(roleId, text, res.freshInTokens, res.outTokens)
     return { text, inputTokens: res.inTokens, outputTokens: res.outTokens, endpointId: binding.endpointId, model: binding.model }
   }
 
@@ -1155,20 +1155,20 @@ async function runCollaboration(
   const results = await agentService.runCollabSession(input.convId, experts, hooks, signal, () => Date.now())
 
   const outputs: { role: string; text: string }[] = []
-  for (const [roleId, { text, inTokens, outTokens }] of results) {
+  for (const [roleId, { text, freshInTokens, outTokens }] of results) {
     if (text) {
       convService.append(input.convId, {
         author: 'expert',
         expertId: roleId,
         model: models.get(roleId) ?? '',
         content: text,
-        inputTokens: inTokens,
+        inputTokens: freshInTokens, // DISPLAY: non-cached real sent (collab path is not instrumented for billing)
         outputTokens: outTokens,
         dispatch: fullChain
       })
       outputs.push({ role: roleId, text })
     }
-    cb.onStepDone(roleId, text, inTokens, outTokens)
+    cb.onStepDone(roleId, text, freshInTokens, outTokens)
   }
   return outputs
 }
