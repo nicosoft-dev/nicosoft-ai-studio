@@ -95,6 +95,9 @@ function agentListen<T>(channel: string, cb: (d: T) => void): () => void {
 }
 
 const api = {
+  // Static platform tag so the renderer can draw its own window controls on Windows/Linux (macOS keeps
+  // the native traffic lights).
+  platform: process.platform,
   minimizeWindow: (): void => ipcRenderer.send('app:minimize'),
   maximizeWindow: (): void => ipcRenderer.send('app:maximize'),
   closeWindow: (): void => ipcRenderer.send('app:close'),

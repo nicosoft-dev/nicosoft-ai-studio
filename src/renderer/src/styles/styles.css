@@ -178,6 +178,30 @@ input, textarea, select { font-family: inherit; color: inherit; }
 /* Row under the topbar: active view + (optional) workspace drawer, tops aligned */
 .main-row { flex: 1; display: flex; min-width: 0; min-height: 0; }
 
+/* Custom window controls (Windows/Linux only — components/window-controls.tsx): drawn at the macOS
+   traffic-light position inside the 78px strip .sidebar-header reserves. No backdrop of their own —
+   they sit directly on whatever surface is underneath; hover gets a soft pill, close turns red. */
+.win-controls {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 500;
+  display: flex;
+  gap: 4px;
+  -webkit-app-region: no-drag;
+}
+.wc-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  color: var(--text-3);
+  transition: background 0.12s, color 0.12s;
+}
+.wc-btn:hover { background: var(--bg-3); color: var(--text-1); }
+.wc-btn.wc-close:hover { background: #e5484d; color: #fff; }
+
 /* Sidebar header strip — native macOS traffic lights sit at its top-left; whole strip drags */
 /* Sidebar header — native traffic lights live at the left (CSS leaves padding); the
    new-conversation button is pinned to the right edge. No border (top blends into content). */
@@ -202,9 +226,6 @@ input, textarea, select { font-family: inherit; color: inherit; }
   background: var(--bg-1);
   display: flex; align-items: center;
   padding: 0 14px; gap: 8px;
-  /* Windows/Linux window-controls overlay sits over the topbar's right end — reserve exactly its width.
-     env(titlebar-area-*) only exists in overlay mode; the fallbacks make this 14px (= no-op) on macOS. */
-  padding-right: max(14px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)));
   user-select: none;
   -webkit-app-region: drag;
 }

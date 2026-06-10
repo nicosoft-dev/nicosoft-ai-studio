@@ -58,12 +58,10 @@ function createWindow(): void {
     // are declared there and in .topbar via -webkit-app-region.
     titleBarStyle: 'hidden',
     trafficLightPosition: { x: 18, y: 19 },
-    // Windows/Linux: 'hidden' alone means NO window controls at all — paint the native overlay
-    // (minimize/maximize/close; Win11 also gets Snap Layouts on hover). Height matches the 52px
-    // topbar so the controls sit inside it; colors follow the theme (kept in sync by applyThemePref).
-    // .topbar reserves the overlapped width via env(titlebar-area-*) in styles.css. macOS is left
-    // untouched on purpose (the option would shift the traffic-light geometry).
-    ...(process.platform !== 'darwin' ? { titleBarOverlay: overlayTheme() } : {}),
+    // Windows/Linux: 'hidden' alone means NO native window controls — the renderer draws its own
+    // minimize/maximize/close at the macOS traffic-light position (components/window-controls.tsx,
+    // win32-only), wired to the app:minimize/maximize/close IPC below. The native titleBarOverlay was
+    // tried and rejected: it pins the controls top-RIGHT and paints its own background strip.
     roundedCorners: true,
     // Themed so the first frame doesn't flash the wrong color (nativeTheme is set from the persisted
     // preference before this window is created). --desktop in each theme.
@@ -110,17 +108,9 @@ ipcMain.on('app:maximize', (e) => {
 })
 
 // Theme: map the renderer's preference onto nativeTheme so native chrome (menus, dialogs, scrollbars,
-// window background) follows. 'auto' → 'system'. On Windows/Linux the window-controls overlay is
-// repainted to match (its colors don't track nativeTheme by themselves).
-function overlayTheme(): Electron.TitleBarOverlay {
-  const dark = nativeTheme.shouldUseDarkColors
-  return { color: dark ? '#050507' : '#dcdfe4', symbolColor: dark ? '#9ba0aa' : '#5a5f6a', height: 52 }
-}
+// window background) follows. 'auto' → 'system'.
 function applyThemePref(pref: string | null): void {
   nativeTheme.themeSource = pref === 'light' || pref === 'dark' ? pref : 'system'
-  if (process.platform !== 'darwin') {
-    for (const w of BrowserWindow.getAllWindows()) w.setTitleBarOverlay(overlayTheme())
-  }
 }
 ipcMain.handle('theme:set', (_e, pref: string) => applyThemePref(pref))
 

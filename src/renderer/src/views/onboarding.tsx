@@ -32,7 +32,7 @@ const PROTO_DEFAULT_MODEL: Record<Proto, { slug: string; contextLength: number }
 // Context lengths for the seeded slugs (existing entries keep whatever they already have).
 const SEED_CTX: Record<string, number> = {
   'nicosoft/claude-opus-4-8': 200000,
-  'nicosoft/claude-haiku-4-5': 200000,
+  'nicosoft/claude-haiku-4-5-20251001': 200000,
   'nicosoft/gpt-5.5': 128000,
   'nicosoft/gpt-5.4-mini': 128000,
   'gemini-pro-latest': 1048576,
@@ -43,7 +43,7 @@ const SEED_CTX: Record<string, number> = {
 // memory / search pick haiku|mini|flash WITHIN the endpoint) have something to pick, and the image
 // backend for Georgia on Gemini. OpenAI needs none — Joan's gpt-5.4-mini already satisfies /mini/.
 const SEED_EXTRA: Record<Proto, string[]> = {
-  anthropic: ['nicosoft/claude-haiku-4-5'],
+  anthropic: ['nicosoft/claude-haiku-4-5-20251001'],
   openai: [],
   gemini: ['gemini-2.5-flash', DEFAULT_IMAGE_MODEL],
   custom: []

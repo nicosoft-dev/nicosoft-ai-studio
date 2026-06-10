@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import type { ReactElement } from 'react'
 import { STUDIO_DATA } from '@/data/studio-data'
 import { Topbar, Sidebar } from '@/components/shell'
+import { WindowControls } from '@/components/window-controls'
 import { CommandPalette } from '@/components/dialogs/command-palette'
 import { RoleEditorDialog } from '@/components/dialogs/role-editor-dialog'
 import { RolePickerDialog } from '@/components/dialogs/role-picker-dialog'
@@ -190,6 +191,7 @@ export default function App(): ReactElement {
   if (view === 'onboarding') {
     return (
       <div className="window">
+        <WindowControls />
         <Onboarding
           onFinish={() => {
             setView('studio')
@@ -204,6 +206,7 @@ export default function App(): ReactElement {
 
   return (
     <div className="window">
+      <WindowControls />
       {view === 'settings' ? (
         <SettingsView tab={settingsTab} onTab={setSettingsTab} onBack={() => setView('app')} />
       ) : (
