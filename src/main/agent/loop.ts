@@ -197,6 +197,8 @@ export async function* runAgent(
   const compactConfig: CompactConfig = { protocol: params.protocol, baseUrl, apiKey, model, signal: ctx.signal }
   const threshold = autocompactThreshold(contextWindow)
   const compactions = { micro: 0, auto: 0 } // → AgentResult, for run-stats
+  let prevAutoTurn = -2 // turn index of the last proactive autocompact (thrash guard below)
+  let autoFloorHit = false // a compact couldn't get the estimate back under the threshold — stop trying
   let reactiveCompacted = false // bounce guard: if a send overflows right after a reactive compact, fail
   // Transient-failure retry budget, PER request (reset after each successful send). A recoverable failure
   // — network drop / idle-timeout abort on a hung upstream (code 'network'), rate limit (429), or a 5xx /
@@ -301,13 +303,28 @@ export async function* runAgent(
       (lastUsage ? tokensFromUsage(lastUsage) + SYSTEM_PROMPT_RESERVE : 0) +
       estimateTokens(messages.slice(lastUsageAt)) -
       Math.ceil(mc.freedChars / CHARS_PER_TOKEN)
-    if (estimate > threshold) {
-      const compacted = await autocompact(messages, compactConfig)
-      if (compacted !== messages) {
-        messages = compacted
-        lastUsage = undefined
-        lastUsageAt = 0
-        compactions.auto++
+    if (estimate > threshold && !autoFloorHit) {
+      // Thrash guard. When the irreducible prompt floor (system + tools + a fresh summary) already
+      // exceeds the threshold — guaranteed on tiny configured windows, where threshold(≤33K) clamps
+      // to 1K — compaction can't get the estimate back under it, and without this guard the loop
+      // re-summarizes EVERY turn: each summarize call is expensive and wipes the working context
+      // (observed in bench: 32K window → auto fired 14/14 turns, 750s, zero files touched). One
+      // ineffective compact (still over the threshold by the very next check) disables proactive
+      // compaction for the rest of the run; the reactive overflow path below stays armed — the
+      // model's REAL window is often larger than the configured one, so oversized prompts usually
+      // still succeed.
+      if (turns <= prevAutoTurn + 1) {
+        autoFloorHit = true
+        console.warn(`[agent] autocompact floor: estimate ${estimate} still over threshold ${threshold} right after compacting — proactive compaction disabled for this run`)
+      } else if (messages.length >= 4) { // fewer = just the summary + the current turn, nothing to fold
+        const compacted = await autocompact(messages, compactConfig)
+        if (compacted !== messages) {
+          messages = compacted
+          lastUsage = undefined
+          lastUsageAt = 0
+          compactions.auto++
+          prevAutoTurn = turns
+        }
       }
     }
 
