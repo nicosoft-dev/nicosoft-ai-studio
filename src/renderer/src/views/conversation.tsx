@@ -67,35 +67,12 @@ function fmtElapsed(ms: number): string {
   return `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
-const basename = (p: string): string => p.split(/[\\/]/).pop() || p
-// What the agent is doing RIGHT NOW, from its in-flight tool. input is {} at tool-start (the renderer gets
-// only id+name live — the full args land in the DB transcript after the tool finishes), so this leans on the
-// tool NAME; a file_path/pattern fills in when present. Per-SEGMENT: it reads a single message's own tool, so
-// concurrent coordinator segments each show their own agent's activity instead of one shared conv-level state.
-function activityLabel(t: ToolCall): string {
-  const p = (t.input ?? null) as { file_path?: string; pattern?: string; description?: string } | null
-  const file = p?.file_path ? ` ${basename(p.file_path)}` : ''
-  switch (t.name) {
-    case 'Read': return `Reading${file}`
-    case 'Write': return `Writing${file}`
-    case 'Edit':
-    case 'MultiEdit': return `Editing${file}`
-    case 'Bash': return p?.description || 'Running command'
-    case 'Grep': return p?.pattern ? `Searching: ${p.pattern}` : 'Searching'
-    case 'Glob': return 'Finding files'
-    case 'TodoWrite': return 'Updating tasks'
-    case 'WebFetch': return 'Fetching page'
-    case 'WebSearch': return 'Searching the web'
-    case 'Task': return p?.description ? `Sub-agent: ${p.description}` : 'Running sub-agent'
-    default: return t.name
-  }
-}
-// The current activity for a streaming message: its last running tool ("Reading", "Running command"), else
-// "Thinking" while the model generates between tool calls. Reads ONLY this message's tools, so it stays
-// per-segment and never bleeds across concurrent agents.
+// The readout's tail activity — ONLY "Thinking", and ONLY while the model is generating between tools (no
+// tool running). While a tool runs we surface nothing (just the dot + elapsed/tokens): per-tool labels
+// (Reading/Running/Searching/…) were intentionally dropped — the user only wants "Thinking" during the think
+// phase. Reads ONLY this message's tools, so it stays per-segment and never bleeds across concurrent agents.
 function segmentActivity(tools?: ToolCall[]): string {
-  if (tools) for (let i = tools.length - 1; i >= 0; i--) if (tools[i].status === 'running') return activityLabel(tools[i])
-  return 'Thinking'
+  return tools?.some((t) => t.status === 'running') ? '' : 'Thinking'
 }
 
 // The live "thinking" readout shown while a reply streams: a steady role-colored dot (CSS breathes its
@@ -119,10 +96,10 @@ function ThinkingReadout({ chars, inputTokens, outputTokens, activity }: { chars
   if (elapsed >= 1000) parts.push(<span>{fmtElapsed(elapsed)}</span>)
   if (inputTokens > 0) parts.push(<span>↑ {fmtReadoutTokens(inputTokens)}</span>)
   if (out > 0) parts.push(<span>↓ {fmtReadoutTokens(out)} {t('conv.tokensSuffix')}</span>)
-  // The activity ("Thinking…" / "Reading …") renders OUTSIDE `parts`, at a fixed trailing position, so its
-  // breathe animation never restarts when parts grow (elapsed crossing 1s, first token landing would shift its
-  // index key and remount it). Sitting outside parts — like the dot — keeps the two in lockstep. Trailing "…"
-  // marks it as in-progress, matching the old Workspace activity line.
+  // The activity ("Thinking…") renders OUTSIDE `parts`, at a fixed trailing position, so its breathe animation
+  // never restarts when parts grow (elapsed crossing 1s / first token landing would shift its index key and
+  // remount it). Sitting outside parts — like the dot — keeps the two in lockstep. Empty activity (a tool is
+  // running) renders nothing — only the think phase shows text.
   return (
     <span className="thinking-readout" aria-label="thinking">
       <span className="tr-dot" />
@@ -132,8 +109,12 @@ function ThinkingReadout({ chars, inputTokens, outputTokens, activity }: { chars
           {p}
         </Fragment>
       ))}
-      {parts.length > 0 ? <span className="tr-sep">·</span> : null}
-      <span className="tr-activity">{activity}…</span>
+      {activity ? (
+        <>
+          {parts.length > 0 ? <span className="tr-sep">·</span> : null}
+          <span className="tr-activity">{activity}…</span>
+        </>
+      ) : null}
     </span>
   )
 }
