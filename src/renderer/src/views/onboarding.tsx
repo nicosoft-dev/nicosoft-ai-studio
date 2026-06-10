@@ -106,42 +106,42 @@ function OnboardProfile(): ReactElement {
   )
 }
 
-// Add the first endpoint for real: pick a provider, paste a key, and Test connection actually saves the
-// endpoint (+ a default model so the probe has something to hit) + key (keychain) and probes it. The
-// created endpoint flows up so the team step can auto-bind to it.
-function OnboardEndpoint({ created, onCreated }: { created: EndpointDto | null; onCreated: (ep: EndpointDto) => void }): ReactElement {
-  const [proto, setProto] = useState<Proto>(created?.protocol ?? 'anthropic')
+// Add endpoints for real — one PER provider. Pick a provider, paste a key, Test connection saves the
+// endpoint (+ a default model so the probe has something to hit) + key (keychain) and probes it; then
+// switch to the next provider and connect it too (a ✓ marks the connected ones). Every created endpoint
+// flows up so Continue seeds models+bindings for ALL of them.
+function OnboardEndpoint({ created, onCreated }: { created: Partial<Record<Proto, EndpointDto>>; onCreated: (ep: EndpointDto) => void }): ReactElement {
+  const [proto, setProto] = useState<Proto>('anthropic')
   // Per-provider drafts: switching the segmented swaps WHICH draft is shown — it never wipes what was
   // typed (an Anthropic key isn't an OpenAI key, so each provider keeps its own URL + key until tested).
   const [drafts, setDrafts] = useState<Record<Proto, { baseURL: string; apiKey: string }>>(() => ({
-    anthropic: { baseURL: created?.protocol === 'anthropic' ? created.baseUrl : PROTO_BASE.anthropic, apiKey: '' },
-    openai: { baseURL: created?.protocol === 'openai' ? created.baseUrl : PROTO_BASE.openai, apiKey: '' },
-    gemini: { baseURL: created?.protocol === 'gemini' ? created.baseUrl : PROTO_BASE.gemini, apiKey: '' },
-    custom: { baseURL: created?.protocol === 'custom' ? created.baseUrl : PROTO_BASE.custom, apiKey: '' }
+    anthropic: { baseURL: created.anthropic?.baseUrl ?? PROTO_BASE.anthropic, apiKey: '' },
+    openai: { baseURL: created.openai?.baseUrl ?? PROTO_BASE.openai, apiKey: '' },
+    gemini: { baseURL: created.gemini?.baseUrl ?? PROTO_BASE.gemini, apiKey: '' },
+    custom: { baseURL: created.custom?.baseUrl ?? PROTO_BASE.custom, apiKey: '' }
   }))
   const baseURL = drafts[proto].baseURL
   const apiKey = drafts[proto].apiKey
   const setBaseURL = (v: string): void => setDrafts((d) => ({ ...d, [proto]: { ...d[proto], baseURL: v } }))
   const setApiKey = (v: string): void => setDrafts((d) => ({ ...d, [proto]: { ...d[proto], apiKey: v } }))
   const [showKey, setShowKey] = useState(false)
-  const [state, setState] = useState<'idle' | 'testing' | 'ok' | 'fail'>(created ? 'ok' : 'idle')
-  const [msg, setMsg] = useState('')
-
-  const pickProto = (p: Proto): void => {
-    setProto(p)
-    setState('idle')
-  }
+  // Per-provider test status, so "Connected" on Anthropic doesn't read as connected while you type
+  // OpenAI's key. The current provider's created endpoint keeps its ✓ when you switch back.
+  const [status, setStatus] = useState<Partial<Record<Proto, { state: 'testing' | 'ok' | 'fail'; msg?: string }>>>(() =>
+    Object.fromEntries(Object.keys(created).map((k) => [k, { state: 'ok' }]))
+  )
+  const cur = status[proto] ?? { state: 'idle' as const }
+  const setCur = (state: 'testing' | 'ok' | 'fail', msg?: string): void => setStatus((m) => ({ ...m, [proto]: { state, msg } }))
+  const curEp = created[proto] ?? null
 
   const test = async (): Promise<void> => {
-    if (!apiKey.trim() && !created) {
-      setState('fail')
-      setMsg('Paste an API key first.')
+    if (!apiKey.trim() && !curEp) {
+      setCur('fail', 'Paste an API key first.')
       return
     }
-    setState('testing')
-    setMsg('')
+    setCur('testing')
     try {
-      let ep = created
+      let ep = curEp
       if (!ep) {
         const dm = PROTO_DEFAULT_MODEL[proto]
         ep = await window.api.endpoints.add({
@@ -159,79 +159,86 @@ function OnboardEndpoint({ created, onCreated }: { created: EndpointDto | null; 
       }
       const r = await window.api.endpoints.test(ep.id)
       if (r.ok) {
-        setState('ok')
+        setCur('ok')
         onCreated(ep)
       } else {
-        setState('fail')
-        setMsg(r.error?.message ?? 'Connection failed')
+        setCur('fail', r.error?.message ?? 'Connection failed')
       }
     } catch (e) {
-      setState('fail')
-      setMsg(e instanceof Error ? e.message : 'Failed to connect')
+      setCur('fail', e instanceof Error ? e.message : 'Failed to connect')
     }
   }
 
   return (
     <>
-      <div className="onboard-h1" style={{ fontSize: 22 }}>Add your first AI endpoint</div>
-      <div className="onboard-sub">Connect a provider so your experts have a model to run on. You can add more later.</div>
+      <div className="onboard-h1" style={{ fontSize: 22 }}>Add your AI endpoints</div>
+      <div className="onboard-sub">Connect each provider you have a key for — experts activate per provider. One is enough to start; add the rest here or in Settings later.</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
         <div>
           <label className="field-label">Provider</label>
-          <Segmented options={(['anthropic', 'openai', 'gemini'] as const).map((p) => ({ v: p, l: PROTO_LABEL[p], disabled: !!created }))} value={proto} onChange={(v) => pickProto(v as 'anthropic' | 'openai' | 'gemini')} />
+          <Segmented
+            options={(['anthropic', 'openai', 'gemini'] as const).map((p) => ({
+              v: p,
+              l: created[p] ? <>{PROTO_LABEL[p]} <Icons.check size={11} /></> : PROTO_LABEL[p]
+            }))}
+            value={proto}
+            onChange={(v) => setProto(v as 'anthropic' | 'openai' | 'gemini')}
+          />
         </div>
         <div>
           <label className="field-label">Base URL</label>
-          <input className="input mono" value={baseURL} onChange={(e) => setBaseURL(e.target.value)} disabled={!!created} spellCheck={false} />
+          <input className="input mono" value={baseURL} onChange={(e) => setBaseURL(e.target.value)} disabled={!!curEp} spellCheck={false} />
         </div>
         <div>
           <label className="field-label">API key</label>
           <div className="key-input-wrap">
             <input className="input mono" type={showKey ? 'text' : 'password'} value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)} placeholder={created ? '•••••• (saved)' : 'sk-…'} />
+              onChange={(e) => setApiKey(e.target.value)} placeholder={curEp ? '•••••• (saved)' : 'sk-…'} />
             <button className="key-toggle" onClick={() => setShowKey((s) => !s)}>
               {showKey ? <Icons.eyeOff size={15} /> : <Icons.eye size={15} />}
             </button>
           </div>
           <div className="link-row">
             <span />
-            {state === 'ok' && <span className="test-success"><Icons.check size={14} /> Connected</span>}
-            {state === 'fail' && (
+            {cur.state === 'ok' && <span className="test-success"><Icons.check size={14} /> Connected</span>}
+            {cur.state === 'fail' && (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--error)', fontSize: 12.5 }}>
-                <Icons.alert size={13} /> {msg}
+                <Icons.alert size={13} /> {cur.msg}
               </span>
             )}
           </div>
         </div>
-        <button className="btn secondary" onClick={() => void test()} disabled={state === 'testing'} style={{ width: '100%' }}>
-          <Icons.plug size={15} /> {state === 'testing' ? 'Testing…' : state === 'ok' ? 'Connected — test again' : 'Test connection'}
+        <button className="btn secondary" onClick={() => void test()} disabled={cur.state === 'testing'} style={{ width: '100%' }}>
+          <Icons.plug size={15} /> {cur.state === 'testing' ? 'Testing…' : cur.state === 'ok' ? 'Connected — test again' : 'Test connection'}
         </button>
       </div>
     </>
   )
 }
 
-// Show the team + which experts the just-added endpoint activates (those whose preferred family matches).
-function OnboardTeam({ endpoint }: { endpoint: EndpointDto | null }): ReactElement {
+// Show the team + which experts the just-added endpoints activate (those whose preferred family matches
+// any connected provider).
+function OnboardTeam({ endpoints }: { endpoints: Partial<Record<Proto, EndpointDto>> }): ReactElement {
   const { EXPERTS } = STUDIO_DATA
+  const connected = Object.keys(endpoints) as Proto[]
   return (
     <>
       <div className="onboard-h1" style={{ fontSize: 22 }}>Meet your team</div>
       <div className="onboard-sub">
-        {endpoint
-          ? `Experts on ${PROTO_LABEL[endpoint.protocol]} are ready. The rest activate as you add their providers in Settings.`
+        {connected.length
+          ? `Experts on ${connected.map((p) => PROTO_LABEL[p]).join(' · ')} are ready. The rest activate as you add their providers in Settings.`
           : 'Eight experts, each on the model best suited to its job. Add an endpoint to activate them.'}
       </div>
       <div className="team-grid">
         {EXPERTS.map((e) => {
-          const bound = !!endpoint && e.family === endpoint.protocol
+          const ep = e.family ? endpoints[e.family as Proto] : undefined
           return (
-            <div className={'team-card' + (bound ? '' : ' dim')} key={e.id}>
+            <div className={'team-card' + (ep ? '' : ' dim')} key={e.id}>
               <Avatar expert={e} size={32} />
               <div className="tc-meta">
                 <div className="tc-name">{e.name}</div>
                 <div className="tc-spec">{e.specialty.split('—')[1] ? e.specialty.split('—')[1].trim() : e.specialty}</div>
-                <div className="tc-model">{bound ? `${PROTO_LABEL[endpoint!.protocol]} · ready` : 'Needs a provider'}</div>
+                <div className="tc-model">{ep ? `${PROTO_LABEL[ep.protocol]} · ready` : 'Needs a provider'}</div>
               </div>
             </div>
           )
@@ -243,18 +250,22 @@ function OnboardTeam({ endpoint }: { endpoint: EndpointDto | null }): ReactEleme
 
 export function Onboarding({ onFinish }: { onFinish: () => void }): ReactElement {
   const [step, setStep] = useState(0)
-  const [endpoint, setEndpoint] = useState<EndpointDto | null>(null)
+  const [endpoints, setEndpoints] = useState<Partial<Record<Proto, EndpointDto>>>({})
+  const addEndpoint = (ep: EndpointDto): void => setEndpoints((m) => ({ ...m, [ep.protocol]: ep }))
   const last = 3
 
+  const seedAll = async (): Promise<void> => {
+    for (const ep of Object.values(endpoints)) await seedEndpointDefaults(ep)
+  }
   const finish = async (): Promise<void> => {
-    if (endpoint) await seedEndpointDefaults(endpoint) // idempotent backstop (Continue already seeded)
+    await seedAll() // idempotent backstop (Continue already seeded)
     await window.api.settings.set('onboarded', true)
     onFinish()
   }
   const next = (): void => {
     // Leaving the endpoint step seeds the defaults right away (models + bindings land in the DB even if
     // the user closes the app on the team step instead of clicking Start).
-    if (step === 2 && endpoint) void seedEndpointDefaults(endpoint)
+    if (step === 2) void seedAll()
     if (step < last) setStep(step + 1)
     else void finish()
   }
@@ -265,8 +276,8 @@ export function Onboarding({ onFinish }: { onFinish: () => void }): ReactElement
       <div className={'onboard-card' + (step === 1 || step === 3 ? ' wide' : '')}>
         {step === 0 && <OnboardWelcome />}
         {step === 1 && <OnboardProfile />}
-        {step === 2 && <OnboardEndpoint created={endpoint} onCreated={setEndpoint} />}
-        {step === 3 && <OnboardTeam endpoint={endpoint} />}
+        {step === 2 && <OnboardEndpoint created={endpoints} onCreated={addEndpoint} />}
+        {step === 3 && <OnboardTeam endpoints={endpoints} />}
         <div className="onboard-foot">
           {step > 0
             ? <button className="btn ghost sm" onClick={back}><Icons.chevronLeft size={14} /> Back</button>
