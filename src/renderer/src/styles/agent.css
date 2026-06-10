@@ -67,13 +67,20 @@
 .tr-subcount { color: var(--text-4); font-size: 11.5px; flex: none; }
 .tr-fail { color: var(--error); display: inline-flex; flex: none; }
 .tr-line.error .tr-verb { color: var(--error); }
-.tr-payload { padding: 0 12px 6px 12px; }
-.tool-run > .tr-line-wrap > .tr-payload { padding: 0 0 6px 0; }
+/* In-card payload: FLAT and full-bleed — the .tr-card is the only container; hairlines above/below
+   delimit it from the neighboring lines instead of nesting a second box. */
+.tr-payload { padding: 0; }
 .tr-payload .tb-detail {
+  border-top: 1px solid var(--border-1);
+  border-bottom: 1px solid var(--border-1);
+  margin-top: 2px;
+}
+/* Lone tool (bare line, no card around it): the payload IS the only container — box it. */
+.tool-run > .tr-line-wrap > .tr-payload { padding: 0 0 6px 0; }
+.tool-run > .tr-line-wrap > .tr-payload .tb-detail {
   border: 1px solid var(--border-1);
   border-radius: var(--r-md);
   background: var(--bg-1);
-  overflow: hidden;
   margin-top: 2px;
 }
 .tr-sublines { border-left: 1px solid var(--border-1); margin: 2px 0 4px 6px; padding-left: 6px; }
