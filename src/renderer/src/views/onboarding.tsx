@@ -3,7 +3,7 @@
    Welcome → Profile (saved to settings) → Add endpoint (real connect) → Meet team (auto-bind by protocol)
    ============================================================ */
 import { useState } from 'react'
-import type { ReactElement } from 'react'
+import type { Dispatch, ReactElement, SetStateAction } from 'react'
 import { Icons } from '@/components/icons'
 import { Avatar, Segmented } from '@/components/primitives'
 import { ProfileForm } from '@/views/profile'
@@ -28,6 +28,12 @@ const PROTO_DEFAULT_MODEL: Record<Proto, { slug: string; contextLength: number }
   gemini: { slug: 'gemini-2.5-flash', contextLength: 1048576 },
   custom: null
 }
+
+// Endpoint-step state (owned by Onboarding, rendered by OnboardEndpoint): per-provider form drafts and
+// per-provider test/save status. Lifted so Back/Continue navigation never wipes what was typed and so
+// Continue can read the drafts to commit them.
+type Drafts = Record<Proto, { baseURL: string; apiKey: string }>
+type StatusMap = Partial<Record<Proto, { state: 'testing' | 'ok' | 'fail'; msg?: string }>>
 
 // Context lengths for the seeded slugs (existing entries keep whatever they already have).
 const SEED_CTX: Record<string, number> = {
@@ -106,30 +112,27 @@ function OnboardProfile(): ReactElement {
   )
 }
 
-// Add endpoints for real — one PER provider. Pick a provider, paste a key, Test connection saves the
-// endpoint (+ a default model so the probe has something to hit) + key (keychain) and probes it; then
-// switch to the next provider and connect it too (a ✓ marks the connected ones). Every created endpoint
-// flows up so Continue seeds models+bindings for ALL of them.
-function OnboardEndpoint({ created, onCreated }: { created: Partial<Record<Proto, EndpointDto>>; onCreated: (ep: EndpointDto) => void }): ReactElement {
-  const [proto, setProto] = useState<Proto>('anthropic')
-  // Per-provider drafts: switching the segmented swaps WHICH draft is shown — it never wipes what was
-  // typed (an Anthropic key isn't an OpenAI key, so each provider keeps its own URL + key until tested).
-  const [drafts, setDrafts] = useState<Record<Proto, { baseURL: string; apiKey: string }>>(() => ({
-    anthropic: { baseURL: created.anthropic?.baseUrl ?? PROTO_BASE.anthropic, apiKey: '' },
-    openai: { baseURL: created.openai?.baseUrl ?? PROTO_BASE.openai, apiKey: '' },
-    gemini: { baseURL: created.gemini?.baseUrl ?? PROTO_BASE.gemini, apiKey: '' },
-    custom: { baseURL: created.custom?.baseUrl ?? PROTO_BASE.custom, apiKey: '' }
-  }))
+// Add endpoints for real — one PER provider. Pick a provider, paste a key; switching the segmented swaps
+// WHICH draft is shown — it never wipes what was typed (an Anthropic key isn't an OpenAI key). Test
+// connection is OPTIONAL validation (it saves + probes immediately); Continue commits every draft that
+// holds a key either way — requiring Test before anything persisted used to silently drop filled-in
+// providers. A ✓ marks the saved ones; every created endpoint flows up so Continue seeds
+// models+bindings for ALL of them.
+function OnboardEndpoint({ created, proto, setProto, drafts, setDrafts, status, setStatus, onCreated }: {
+  created: Partial<Record<Proto, EndpointDto>>
+  proto: Proto
+  setProto: (p: Proto) => void
+  drafts: Drafts
+  setDrafts: Dispatch<SetStateAction<Drafts>>
+  status: StatusMap
+  setStatus: Dispatch<SetStateAction<StatusMap>>
+  onCreated: (ep: EndpointDto) => void
+}): ReactElement {
   const baseURL = drafts[proto].baseURL
   const apiKey = drafts[proto].apiKey
   const setBaseURL = (v: string): void => setDrafts((d) => ({ ...d, [proto]: { ...d[proto], baseURL: v } }))
   const setApiKey = (v: string): void => setDrafts((d) => ({ ...d, [proto]: { ...d[proto], apiKey: v } }))
   const [showKey, setShowKey] = useState(false)
-  // Per-provider test status, so "Connected" on Anthropic doesn't read as connected while you type
-  // OpenAI's key. The current provider's created endpoint keeps its ✓ when you switch back.
-  const [status, setStatus] = useState<Partial<Record<Proto, { state: 'testing' | 'ok' | 'fail'; msg?: string }>>>(() =>
-    Object.fromEntries(Object.keys(created).map((k) => [k, { state: 'ok' }]))
-  )
   const cur = status[proto] ?? { state: 'idle' as const }
   const setCur = (state: 'testing' | 'ok' | 'fail', msg?: string): void => setStatus((m) => ({ ...m, [proto]: { state, msg } }))
   const curEp = created[proto] ?? null
@@ -252,22 +255,83 @@ export function Onboarding({ onFinish }: { onFinish: () => void }): ReactElement
   const [step, setStep] = useState(0)
   const [endpoints, setEndpoints] = useState<Partial<Record<Proto, EndpointDto>>>({})
   const addEndpoint = (ep: EndpointDto): void => setEndpoints((m) => ({ ...m, [ep.protocol]: ep }))
+  const [proto, setProto] = useState<Proto>('anthropic')
+  const [drafts, setDrafts] = useState<Drafts>(() => ({
+    anthropic: { baseURL: PROTO_BASE.anthropic, apiKey: '' },
+    openai: { baseURL: PROTO_BASE.openai, apiKey: '' },
+    gemini: { baseURL: PROTO_BASE.gemini, apiKey: '' },
+    custom: { baseURL: PROTO_BASE.custom, apiKey: '' }
+  }))
+  const [status, setStatus] = useState<StatusMap>({})
+  const [busy, setBusy] = useState(false)
   const last = 3
 
   const seedAll = async (): Promise<void> => {
     for (const ep of Object.values(endpoints)) await seedEndpointDefaults(ep)
+  }
+  // Continue must save what's typed — Test is optional validation, not the save button. Every provider
+  // draft holding a key is committed: create the endpoint if Test didn't already, else re-store the
+  // (possibly edited) key. A failure marks that provider's status and keeps the user on this step.
+  const commitDrafts = async (): Promise<{ map: Partial<Record<Proto, EndpointDto>>; failed: Proto[] }> => {
+    const map = { ...endpoints }
+    const failed: Proto[] = []
+    for (const p of Object.keys(drafts) as Proto[]) {
+      const key = drafts[p].apiKey.trim()
+      if (!key) continue
+      try {
+        const cur = map[p]
+        if (cur) {
+          const updated = await window.api.endpoints.update(cur.id, { apiKey: key })
+          if (updated) map[p] = updated
+        } else {
+          const dm = PROTO_DEFAULT_MODEL[p]
+          map[p] = await window.api.endpoints.add({
+            name: PROTO_LABEL[p],
+            protocol: p,
+            baseUrl: drafts[p].baseURL,
+            enabled: true,
+            availableModels: dm ? [dm] : [],
+            defaultModel: dm?.slug ?? null,
+            apiKey: key
+          })
+        }
+      } catch (e) {
+        failed.push(p)
+        setStatus((m) => ({ ...m, [p]: { state: 'fail', msg: e instanceof Error ? e.message : 'Failed to save' } }))
+      }
+    }
+    setEndpoints(map)
+    return { map, failed }
   }
   const finish = async (): Promise<void> => {
     await seedAll() // idempotent backstop (Continue already seeded)
     await window.api.settings.set('onboarded', true)
     onFinish()
   }
-  const next = (): void => {
-    // Leaving the endpoint step seeds the defaults right away (models + bindings land in the DB even if
-    // the user closes the app on the team step instead of clicking Start).
-    if (step === 2) void seedAll()
+  const next = async (): Promise<void> => {
+    // Leaving the endpoint step commits the drafts and seeds the defaults right away (models + bindings
+    // land in the DB even if the user closes the app on the team step instead of clicking Start).
+    if (step === 2) {
+      setBusy(true)
+      try {
+        const { map, failed } = await commitDrafts()
+        for (const ep of Object.values(map)) await seedEndpointDefaults(ep)
+        if (failed.length) {
+          setProto(failed[0]) // surface the failing provider's error instead of advancing past it
+          return
+        }
+      } finally {
+        setBusy(false)
+      }
+    }
     if (step < last) setStep(step + 1)
     else void finish()
+  }
+  // "Skip — I'll do this later" advances WITHOUT committing drafts (skip means don't save); endpoints
+  // already created via Test still get their defaults seeded.
+  const skip = (): void => {
+    if (step === 2) void seedAll()
+    setStep(step + 1)
   }
   const back = (): void => { if (step > 0) setStep(step - 1) }
 
@@ -276,18 +340,21 @@ export function Onboarding({ onFinish }: { onFinish: () => void }): ReactElement
       <div className={'onboard-card' + (step === 1 || step === 3 ? ' wide' : '')}>
         {step === 0 && <OnboardWelcome />}
         {step === 1 && <OnboardProfile />}
-        {step === 2 && <OnboardEndpoint created={endpoints} onCreated={addEndpoint} />}
+        {step === 2 && (
+          <OnboardEndpoint created={endpoints} proto={proto} setProto={setProto} drafts={drafts}
+            setDrafts={setDrafts} status={status} setStatus={setStatus} onCreated={addEndpoint} />
+        )}
         {step === 3 && <OnboardTeam endpoints={endpoints} />}
         <div className="onboard-foot">
           {step > 0
             ? <button className="btn ghost sm" onClick={back}><Icons.chevronLeft size={14} /> Back</button>
             : <span className="text-link muted" onClick={() => void finish()}>Skip setup — explore first</span>}
-          {(step === 1 || step === 2) && <span className="text-link muted" style={{ marginLeft: 14 }} onClick={next}>Skip — I&apos;ll do this later</span>}
+          {(step === 1 || step === 2) && <span className="text-link muted" style={{ marginLeft: 14 }} onClick={skip}>Skip — I&apos;ll do this later</span>}
           <div className="of-spacer" />
           <Dots step={step} count={4} />
           <div className="of-spacer" />
-          <button className="btn primary sm" onClick={next}>
-            {step === last ? 'Start' : 'Continue'} {step < last && <Icons.arrowRight size={14} />}
+          <button className="btn primary sm" onClick={() => void next()} disabled={busy}>
+            {busy ? 'Saving…' : step === last ? 'Start' : 'Continue'} {!busy && step < last && <Icons.arrowRight size={14} />}
           </button>
         </div>
       </div>
