@@ -87,6 +87,8 @@ export default function App(): ReactElement {
     })
     void useRoles.getState().load()
     void useCustomRoles.getState().load()
+    // Run-once startup loader: reads stores via getState() (not deps) on purpose — depending on them
+    // would re-run the restore on every store identity change. Keyed only on the stable loadConversations.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chat.loadConversations])
 

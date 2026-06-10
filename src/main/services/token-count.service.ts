@@ -7,6 +7,7 @@
 // chat / agent each build that body from their own shape. Non-anthropic providers use rough for now.
 
 import type { Protocol } from '../domain'
+import { CHARS_PER_TOKEN } from '../llm/estimate'
 
 export interface AnthropicCountInput {
   baseUrl: string
@@ -61,11 +62,13 @@ async function viaCountTokensApi(input: AnthropicCountInput): Promise<number | n
 
 // L2 — borrow a real max_tokens:1 request on a small model and read its usage (input + cache split).
 async function viaSmallModelProbe(input: AnthropicCountInput): Promise<number | null> {
+  if (!input.smallModel) return null // no small model to borrow → this probe path doesn't apply
+  const smallModel = input.smallModel
   try {
     const res = await fetch(`${input.baseUrl.replace(/\/$/, '')}/v1/messages`, {
       method: 'POST',
       headers: anthropicHeaders(input.apiKey),
-      body: JSON.stringify({ ...bodyFor(input.smallModel!, input), max_tokens: 1 })
+      body: JSON.stringify({ ...bodyFor(smallModel, input), max_tokens: 1 })
     })
     if (!res.ok) return null
     const json = (await res.json()) as {
@@ -102,22 +105,22 @@ function bodyFor(model: string, input: AnthropicCountInput): Record<string, unkn
 // underestimate can't let context overflow the window unnoticed.
 function roughCount(input: AnthropicCountInput): number {
   let t = 0
-  if (input.system) t += Math.ceil(input.system.length / 4)
+  if (input.system) t += Math.ceil(input.system.length / CHARS_PER_TOKEN)
   for (const m of input.messages) t += roughContent(m.content)
   if (input.tools?.length) t += Math.ceil(JSON.stringify(input.tools).length / 2)
   return t
 }
 
 function roughContent(content: unknown): number {
-  if (typeof content === 'string') return Math.ceil(content.length / 4)
+  if (typeof content === 'string') return Math.ceil(content.length / CHARS_PER_TOKEN)
   if (!Array.isArray(content)) return 0
   let t = 0
   for (const b of content as Record<string, unknown>[]) {
-    if (b.type === 'text' && typeof b.text === 'string') t += Math.ceil(b.text.length / 4)
+    if (b.type === 'text' && typeof b.text === 'string') t += Math.ceil(b.text.length / CHARS_PER_TOKEN)
     else if (b.type === 'image') t += 2000 // conservative image constant
-    else if (b.type === 'tool_use') t += Math.ceil((String(b.name ?? '') + JSON.stringify(b.input ?? {})).length / 4)
+    else if (b.type === 'tool_use') t += Math.ceil((String(b.name ?? '') + JSON.stringify(b.input ?? {})).length / CHARS_PER_TOKEN)
     else if (b.type === 'tool_result') t += roughContent(b.content)
-    else t += Math.ceil(JSON.stringify(b).length / 4)
+    else t += Math.ceil(JSON.stringify(b).length / CHARS_PER_TOKEN)
   }
   return t
 }

@@ -11,6 +11,7 @@
 import { collectTurn } from './llm'
 import { isContentBlock } from './types'
 import type { AgentMessage, ToolResultBlock, Usage } from './types'
+import { CHARS_PER_TOKEN } from '../llm/estimate'
 
 const COMPACTABLE_TOOLS = new Set(['Read', 'Bash', 'Grep', 'Glob', 'Edit', 'Write', 'MultiEdit', 'LS'])
 const CLEARED_MARKER = '[old tool result content cleared to save context]'
@@ -85,7 +86,7 @@ export function estimateTokens(messages: AgentMessage[]): number {
       else if (b.type === 'image') chars += 8_000 // ~2000 tokens flat
     }
   }
-  return Math.ceil(chars / 4)
+  return Math.ceil(chars / CHARS_PER_TOKEN)
 }
 
 const RESERVED_OUTPUT = 20_000

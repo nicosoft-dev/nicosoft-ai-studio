@@ -13,6 +13,7 @@ import { Icons } from '@/components/icons'
 import { Avatar, AvatarStack } from '@/components/primitives'
 import { STUDIO_DATA, PHASES, PHASE_INDEX } from '@/data/studio-data'
 import { toast } from '@/stores/toast'
+import { useT } from '@/stores/locale'
 
 // DTOs derived from the IPC surface — the renderer never imports main-process modules.
 type ProjectDto = Awaited<ReturnType<typeof window.api.project.list>>[number]
@@ -122,6 +123,7 @@ function ProjectsList({
 
 /* — New Project dialog: a folder + a goal; the name is optional (blank → generated from the goal). — */
 function NewProjectDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }): ReactElement {
+  const t = useT()
   const [name, setName] = useState('')
   const [goal, setGoal] = useState('')
   const [cwd, setCwd] = useState('')
@@ -140,10 +142,10 @@ function NewProjectDialog({ onClose, onCreated }: { onClose: () => void; onCreat
         goal: goal.trim() || null,
         cwd: cwd.trim() || null
       })
-      toast.success('Project created')
+      toast.success(t('projects.created'))
       onCreated(p.id)
     } catch {
-      toast.error('Couldn’t create project')
+      toast.error(t('projects.createFailed'))
     } finally {
       setBusy(false)
     }
@@ -459,6 +461,7 @@ function ProjectDetail({
   onBack: () => void
   onOpenExpert: (id: string) => void
 }): ReactElement {
+  const t = useT()
   const doers = project.experts.filter((id) => id !== 'coordinator')
   const [lanesEl, setLanesEl] = useState<HTMLDivElement | null>(null)
   const consultsIdx = project.consults.map((c, i) => ({ ...c, __idx: i }))
@@ -540,7 +543,7 @@ function ProjectDetail({
     } catch (e) {
       // The run never started — unstick the dock instead of leaving `running` true forever.
       setRunning(false)
-      toast.error(e instanceof Error ? e.message : 'Couldn’t start the run')
+      toast.error(e instanceof Error ? e.message : t('projects.startFailed'))
       return
     }
     // BOTH terminal events must settle the dock: a run ending in coordinator:error never fires onDone —
@@ -568,9 +571,9 @@ function ProjectDetail({
       if (ok) await window.api.approval.approve(id)
       else await window.api.approval.reject(id)
       setPending((ps) => ps.filter((p) => p.id !== id))
-      toast.success(ok ? 'Approved' : 'Rejected')
+      toast.success(ok ? t('projects.approved') : t('projects.rejected'))
     } catch {
-      toast.error(ok ? 'Couldn’t approve' : 'Couldn’t reject')
+      toast.error(ok ? t('projects.approveFailed') : t('projects.rejectFailed'))
     }
   }
 

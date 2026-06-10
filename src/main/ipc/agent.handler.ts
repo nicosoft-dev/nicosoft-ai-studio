@@ -1,5 +1,5 @@
 import { ipcMain, type WebContents } from 'electron'
-import { ulid } from 'ulid'
+import { ulid } from '../db/id'
 import type { PermissionDecision } from '../agent/context'
 import { isContentBlock } from '../agent/types'
 import { LlmError } from '../llm/types'

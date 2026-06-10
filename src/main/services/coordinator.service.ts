@@ -409,7 +409,7 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
       //      history carries the verified outcome — a PASS as confirmed context, a needsUser FAIL as a
       //      visible "needs you" message the user sees and the model reads.
       onDone: (verdict: E2EVerdict): void => {
-        console.log(
+        console.warn(
           `[gate-c] e2e verdict for conv=${input.convId}: ${verdict.kind} (rounds=${verdict.rounds}${verdict.needsUser ? ', needsUser' : ''}) — ${verdict.detail}`
         )
         const needsUser = verdict.needsUser ?? false

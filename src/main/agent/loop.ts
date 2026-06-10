@@ -4,6 +4,7 @@
 
 import { z } from 'zod'
 import { LlmError } from '../llm/types'
+import { CHARS_PER_TOKEN } from '../llm/estimate'
 import type { ThinkingParam } from '../llm/types'
 import {
   autocompact,
@@ -294,7 +295,7 @@ export async function* runAgent(
     const estimate =
       (lastUsage ? tokensFromUsage(lastUsage) + SYSTEM_PROMPT_RESERVE : 0) +
       estimateTokens(messages.slice(lastUsageAt)) -
-      Math.ceil(mc.freedChars / 4)
+      Math.ceil(mc.freedChars / CHARS_PER_TOKEN)
     if (estimate > threshold) {
       const compacted = await autocompact(messages, compactConfig)
       if (compacted !== messages) {

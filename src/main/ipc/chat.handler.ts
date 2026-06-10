@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { ulid } from 'ulid'
+import { ulid } from '../db/id'
 import * as chatService from '../services/chat.service'
 import * as compressionService from '../services/compression.service'
 import { LlmError } from '../llm/types'

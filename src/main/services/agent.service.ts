@@ -691,7 +691,7 @@ export async function runCollabSession(
     const sessionDir = join(homedir(), '.nsai', 'sessions', convId, x.roleId)
     return {
       roleId: x.roleId,
-      name: roster.find((r) => r.id === x.roleId)!.name,
+      name: roster.find((r) => r.id === x.roleId)?.name ?? x.roleId,
       initialPrompt: x.initialPrompt,
       runTurn: async (messages, collab, sig) => {
         await mkdir(join(sessionDir, 'tool-results'), { recursive: true })

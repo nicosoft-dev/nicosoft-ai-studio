@@ -1,9 +1,8 @@
 import { ipcMain, dialog, shell } from 'electron'
 import { writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { isAbsolute, join, dirname } from 'node:path'
-import { getDb } from '../db/connection'
+import * as analyticsService from '../services/analytics.service'
 import { readMediaFile } from '../media/storage'
 import type { AppInfo } from './contracts'
 
@@ -48,13 +47,5 @@ export function registerMediaHandlers(): void {
   })
 
   // App info for Settings › About / Privacy: version + local data dir + on-device counts (all local).
-  ipcMain.handle('app:info', (): AppInfo => {
-    const db = getDb()
-    return {
-      version: __APP_VERSION__,
-      dataDir: join(homedir(), '.nsai'),
-      conversations: (db.prepare('SELECT COUNT(*) c FROM conversations').get() as { c: number }).c,
-      memories: (db.prepare('SELECT COUNT(*) c FROM memories').get() as { c: number }).c
-    }
-  })
+  ipcMain.handle('app:info', (): AppInfo => analyticsService.appInfo(__APP_VERSION__))
 }

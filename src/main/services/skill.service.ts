@@ -77,13 +77,14 @@ function createImported(input: SkillInput, ownerPluginId?: string): SkillRow {
 function createBuiltin(input: SkillInput, ownerPluginId?: string): SkillRow {
   const name = (input.name ?? '').trim()
   if (!name) throw new Error('Skill needs a name')
-  if (!(input.body ?? '').trim()) throw new Error('Skill needs instructions')
+  const body = (input.body ?? '').trim()
+  if (!body) throw new Error('Skill needs instructions')
   return skillRepo.create({
     name,
     description: input.description ?? '',
     whenToUse: input.whenToUse ?? '',
     source: 'builtin',
-    body: input.body!,
+    body,
     dirPath: null,
     allowedTools: [],
     scope: input.scope ?? 'all',

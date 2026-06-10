@@ -18,6 +18,7 @@ import { STUDIO_DATA } from '@/data/studio-data'
 import type { McpServerDto, SkillDto, PluginDto } from '@/lib/api'
 import type { PluginBundle } from '@/types'
 import { toast } from '@/stores/toast'
+import { useT } from '@/stores/locale'
 
 /* — small flat switch — */
 function Toggle({ on, onClick, disabled }: { on: boolean; onClick: () => void; disabled?: boolean }): ReactElement {
@@ -105,6 +106,7 @@ function ExtTabHead({ help, action, onAdd }: { help: string; action?: string; on
 
 /* ——— MCP (real data via window.api.mcp) ——— */
 function MCPTab({ onCount }: { onCount: (n: number) => void }): ReactElement {
+  const t = useT();
   const [servers, setServers] = useState<McpServerDto[]>([]);
   const [plugins, setPlugins] = useState<PluginDto[]>([]);
   const [dialog, setDialog] = useState<{ editing: McpServerDto | null } | null>(null);
@@ -132,16 +134,16 @@ function MCPTab({ onCount }: { onCount: (n: number) => void }): ReactElement {
       .then((r) => {
         setTesting(null);
         reload();
-        if (r.ok) toast.success('Connection successful');
-        else toast.error('Connection failed');
+        if (r.ok) toast.success(t('mcp.connectionOk'));
+        else toast.error(t('mcp.connectionFailed'));
       })
-      .catch(() => { setTesting(null); toast.error('Connection failed'); });
+      .catch(() => { setTesting(null); toast.error(t('mcp.connectionFailed')); });
   };
   const onRemove = (id: string): void => {
     void window.api.mcp
       .remove(id)
-      .then(() => { reload(); toast.success('Server removed'); })
-      .catch(() => toast.error('Couldn’t remove server'));
+      .then(() => { reload(); toast.success(t('mcp.serverRemoved')); })
+      .catch(() => toast.error(t('mcp.removeFailed')));
   };
 
   return (
@@ -197,6 +199,7 @@ function MCPTab({ onCount }: { onCount: (n: number) => void }): ReactElement {
 
 /* ——— Skills (real data via window.api.skills) ——— */
 function SkillsTab({ onCount }: { onCount: (n: number) => void }): ReactElement {
+  const t = useT();
   const [skills, setSkills] = useState<SkillDto[]>([]);
   const [plugins, setPlugins] = useState<PluginDto[]>([]);
   const [dialog, setDialog] = useState<{ editing: SkillDto | null } | null>(null);
@@ -212,13 +215,13 @@ function SkillsTab({ onCount }: { onCount: (n: number) => void }): ReactElement 
     void window.api.skills
       .update(s.id, { source: s.source, enabled: !s.enabled })
       .then(reload)
-      .catch(() => toast.error('Couldn’t update skill'));
+      .catch(() => toast.error(t('skill.updateFailed')));
   };
   const onRemove = (id: string): void => {
     void window.api.skills
       .remove(id)
-      .then(() => { reload(); toast.success('Skill removed'); })
-      .catch(() => toast.error('Couldn’t remove skill'));
+      .then(() => { reload(); toast.success(t('skill.removed')); })
+      .catch(() => toast.error(t('skill.removeFailed')));
   };
 
   return (
@@ -268,14 +271,15 @@ function SkillsTab({ onCount }: { onCount: (n: number) => void }): ReactElement 
 /* ——— Plugins ——— */
 const BUNDLE_ICON: Record<PluginBundle['type'], string> = { skill: "zap", mcp: "terminal", role: "users" };
 function PluginsTab({ onCount }: { onCount: (n: number) => void }): ReactElement {
+  const t = useT();
   const [plugins, setPlugins] = useState<PluginDto[]>([]);
   const [dialog, setDialog] = useState(false);
 
   const reload = (): void => void window.api.plugins.list().then((p) => { setPlugins(p); onCount(p.length); });
   useEffect(() => { reload(); }, []);
 
-  const onToggle = (p: PluginDto): void => void window.api.plugins.toggle(p.id, !p.enabled).then(reload).catch(() => toast.error('Couldn’t update plugin'));
-  const onUninstall = (id: string): void => { void window.api.plugins.uninstall(id).then(() => { reload(); toast.success('Plugin uninstalled'); }).catch(() => toast.error('Couldn’t uninstall plugin')); };
+  const onToggle = (p: PluginDto): void => void window.api.plugins.toggle(p.id, !p.enabled).then(reload).catch(() => toast.error(t('plugin.updateFailed')));
+  const onUninstall = (id: string): void => { void window.api.plugins.uninstall(id).then(() => { reload(); toast.success(t('plugin.uninstalled')); }).catch(() => toast.error(t('plugin.uninstallFailed'))); };
 
   return (
     <div className="ext-tab">
@@ -333,6 +337,7 @@ function bundleSummary(bundles: PluginDto["bundles"]): string {
 /* ——— Tools (built-in ns_ tools) ——— */
 const TOOLS_ENABLED_KEY = 'tools.generate_image.enabled';
 function ToolsTab(): ReactElement {
+  const t = useT();
   const { EXPERT_BY_ID } = STUDIO_DATA;
   const designer = EXPERT_BY_ID['designer'];
   const b = useRoleBinding(designer);
@@ -343,7 +348,7 @@ function ToolsTab(): ReactElement {
   const toggle = (): void => {
     const next = !enabled;
     setEnabled(next);
-    void window.api.settings.set(TOOLS_ENABLED_KEY, next).catch(() => toast.error('Couldn’t update tools'));
+    void window.api.settings.set(TOOLS_ENABLED_KEY, next).catch(() => toast.error(t('tools.updateFailed')));
   };
   return (
     <div className="ext-tab">

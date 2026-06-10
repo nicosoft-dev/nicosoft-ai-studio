@@ -12,10 +12,8 @@ export function registerSkillHandlers(): void {
   // Folder picker for importing a SKILL.md directory. Returns the chosen path, or null if cancelled.
   ipcMain.handle('skills:pickDir', async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
-    const res = await dialog.showOpenDialog(win ?? undefined!, {
-      title: 'Select a skill folder (containing SKILL.md)',
-      properties: ['openDirectory']
-    })
+    const opts = { title: 'Select a skill folder (containing SKILL.md)', properties: ['openDirectory' as const] }
+    const res = await (win ? dialog.showOpenDialog(win, opts) : dialog.showOpenDialog(opts))
     return res.canceled || res.filePaths.length === 0 ? null : res.filePaths[0]
   })
 }

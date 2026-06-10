@@ -149,7 +149,7 @@ class SchedulerEngine {
     const binding = rolesService.getBinding(roleId)
     if (!binding?.endpointId || !binding.model) throw new Error(`${where}: role "${roleId}" not bound`)
     if (!endpointRepo.getById(binding.endpointId)) throw new Error(`${where}: endpoint missing`)
-    if (!keychain.getApiKey(binding.endpointId)) throw new Error(`${where}: no api key`)
+    if (keychain.keyStatus(binding.endpointId) !== 'ok') throw new Error(`${where}: no api key`)
 
     const prompt = prior ? `${instruction}\n\n--- Output from the previous step ---\n${prior}` : instruction
     const res = await run(

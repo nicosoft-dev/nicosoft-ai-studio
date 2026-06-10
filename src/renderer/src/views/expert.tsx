@@ -8,6 +8,7 @@ import { createPortal } from 'react-dom'
 import { STUDIO_DATA } from '@/data/studio-data'
 import { useMemory } from '@/stores/memory'
 import { toast } from '@/stores/toast'
+import { useT } from '@/stores/locale'
 import { useChat } from '@/stores/chat'
 import { useCustomRoles } from '@/stores/custom-roles'
 import { useAllExperts } from '@/lib/all-experts'
@@ -173,6 +174,7 @@ function EquippedSection({ expertId }: { expertId: string }): ReactElement {
 const toMemItem = (m: MemoryDto): MemoryItem => ({ id: m.id, text: m.content })
 
 function MemorySection({ expertId }: { expertId: string }): ReactElement {
+  const t = useT()
   const mem = useMemory()
   useEffect(() => {
     void mem.load()
@@ -191,15 +193,15 @@ function MemorySection({ expertId }: { expertId: string }): ReactElement {
         <span className="ds-title">Memory <span className="ds-sub">— what this expert remembers about you</span></span>
         <label className="learn-toggle">
           <span>Self-learning</span>
-          <MemToggle on={learning} onClick={() => void mem.setSelfLearning(expertId, !learning).catch(() => toast.error('Couldn’t update setting'))} />
+          <MemToggle on={learning} onClick={() => void mem.setSelfLearning(expertId, !learning).catch(() => toast.error(t('mem.updateSettingFailed')))} />
         </label>
       </div>
       {empty ? (
         <div className="detail-empty">Nothing remembered yet — memories form as you chat.</div>
       ) : (
         <div className="mem-layers">
-          <MemoryLayer layer="SHARED" items={shared} onEdit={(id, t) => void mem.update(id, t).then(() => toast.success('Memory updated')).catch(() => toast.error('Couldn’t update memory'))} onDelete={(id) => void mem.remove(id).then(() => toast.success('Memory removed')).catch(() => toast.error('Couldn’t remove memory'))} />
-          <MemoryLayer layer="ROLE" items={role} onEdit={(id, t) => void mem.update(id, t).then(() => toast.success('Memory updated')).catch(() => toast.error('Couldn’t update memory'))} onDelete={(id) => void mem.remove(id).then(() => toast.success('Memory removed')).catch(() => toast.error('Couldn’t remove memory'))} />
+          <MemoryLayer layer="SHARED" items={shared} onEdit={(id, text) => void mem.update(id, text).then(() => toast.success(t('mem.updated'))).catch(() => toast.error(t('mem.updateFailed')))} onDelete={(id) => void mem.remove(id).then(() => toast.success(t('mem.removed'))).catch(() => toast.error(t('mem.removeFailed')))} />
+          <MemoryLayer layer="ROLE" items={role} onEdit={(id, text) => void mem.update(id, text).then(() => toast.success(t('mem.updated'))).catch(() => toast.error(t('mem.updateFailed')))} onDelete={(id) => void mem.remove(id).then(() => toast.success(t('mem.removed'))).catch(() => toast.error(t('mem.removeFailed')))} />
         </div>
       )}
     </div>

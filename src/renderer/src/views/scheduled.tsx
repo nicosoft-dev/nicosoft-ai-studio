@@ -13,6 +13,7 @@ import { Icons } from '@/components/icons'
 import { Dropdown } from '@/views/profile'
 import { MemToggle } from '@/views/memory'
 import { toast } from '@/stores/toast'
+import { useT } from '@/stores/locale'
 
 // DTO from the preload bridge — same shape as the scheduler's model (ipc/contracts), no mapping layer.
 type TaskDto = Awaited<ReturnType<typeof window.api.scheduled.list>>[number]
@@ -249,6 +250,7 @@ function ScheduledEditor({
   onBack: () => void
   onSaved: () => void
 }): ReactElement {
+  const t = useT()
   const { EXPERTS } = STUDIO_DATA
   const [name, setName] = useState(task ? task.name : 'New scheduled task')
   const [tf, setTf] = useState<TriggerForm>(() => formFromTask(task))
@@ -284,10 +286,10 @@ function ScheduledEditor({
       const payload = { name: name.trim() || 'Untitled task', schedule: buildSchedule(tf), steps, durable: true, cwd: cwd.trim() || undefined }
       if (task) await window.api.scheduled.update(task.id, payload)
       else await window.api.scheduled.create(payload)
-      toast.success(task ? 'Task updated' : 'Task scheduled')
+      toast.success(task ? t('scheduled.taskUpdated') : t('scheduled.taskScheduled'))
       onSaved()
     } catch {
-      toast.error(task ? 'Couldn’t update task' : 'Couldn’t schedule task')
+      toast.error(task ? t('scheduled.updateFailed') : t('scheduled.scheduleFailed'))
     } finally {
       setSaving(false)
     }
@@ -296,10 +298,10 @@ function ScheduledEditor({
   const del = async (): Promise<void> => {
     try {
       if (task) await window.api.scheduled.remove(task.id)
-      toast.success('Task deleted')
+      toast.success(t('scheduled.taskDeleted'))
       onSaved()
     } catch {
-      toast.error('Couldn’t delete task')
+      toast.error(t('scheduled.deleteFailed'))
     }
   }
 
@@ -464,6 +466,7 @@ function ScheduledEditor({
 }
 
 export function ScheduledView({ onOpenConversation }: { onOpenConversation?: (id: string) => void }): ReactElement {
+  const t = useT()
   const [tasks, setTasks] = useState<TaskDto[]>([])
   const [editing, setEditing] = useState<{ id: string | null } | null>(null) // {id} edit | {id:null} new | null list
 
@@ -481,12 +484,12 @@ export function ScheduledView({ onOpenConversation }: { onOpenConversation?: (id
     }
   }, [reload])
 
-  const toggle = async (t: TaskDto): Promise<void> => {
+  const toggle = async (task: TaskDto): Promise<void> => {
     try {
-      await window.api.scheduled.setEnabled(t.id, !t.enabled)
+      await window.api.scheduled.setEnabled(task.id, !task.enabled)
       void reload()
     } catch {
-      toast.error('Couldn’t update task')
+      toast.error(t('scheduled.updateFailed'))
     }
   }
   const onSaved = (): void => {

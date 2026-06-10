@@ -12,6 +12,7 @@ import { buildTool } from '../tool'
 import type { AgentContext } from '../context'
 import type { ToolResultBlock } from '../types'
 
+// playwright's types are devDependency-only; keep this file buildable without them by typing loosely.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type APIRequestContext = any
 type APIResponse = any

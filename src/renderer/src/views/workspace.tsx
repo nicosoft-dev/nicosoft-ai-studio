@@ -10,6 +10,7 @@ import { ImageViewer, type ViewerImage } from '@/components/image-viewer'
 import { useChat } from '@/stores/chat'
 import { useWorkspace } from '@/stores/workspace'
 import { toast } from '@/stores/toast'
+import { useT } from '@/stores/locale'
 
 const basename = (p: string): string => p.split(/[\\/]/).pop() || p
 // Tools that CREATE/CHANGE a file on disk — only these count as "produced" (Read is excluded by design).
@@ -32,6 +33,7 @@ interface WsTask {
 }
 
 export function WorkspaceDrawer({ onClose, activeConv }: { onClose: () => void; activeConv: string | null }): ReactElement {
+  const t = useT()
   const [files, setFiles] = useState<WsFile[]>([])
   const [images, setImages] = useState<ViewerImage[]>([])
   const [tasks, setTasks] = useState<WsTask[]>([])
@@ -49,8 +51,8 @@ export function WorkspaceDrawer({ onClose, activeConv }: { onClose: () => void; 
   const saveImage = (img: ViewerImage): void => {
     void window.api.media
       .save(img.url, img.name)
-      .then((path) => { if (path) toast.success('Image saved') })
-      .catch(() => toast.error('Couldn’t save image'))
+      .then((path) => { if (path) toast.success(t('conv.imageSaved')) })
+      .catch(() => toast.error(t('conv.imageSaveFailed')))
   }
 
   // TodoWrite updates are tool calls (no new message), so msgCount stays put while a run streams. Poll a

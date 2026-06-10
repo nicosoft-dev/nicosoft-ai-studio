@@ -144,3 +144,8 @@ export function remove(id: string): void {
 export function removeByRole(roleId: string): void {
   getDb().prepare(`DELETE FROM memories WHERE layer = 'role' AND role_id = ?`).run(roleId)
 }
+
+// Total memory count — for the Settings › About / Privacy on-device stats.
+export function count(): number {
+  return (getDb().prepare('SELECT COUNT(*) c FROM memories').get() as { c: number }).c
+}

@@ -4,6 +4,7 @@ import * as endpointRepo from '../repos/endpoint.repo'
 import * as keychain from '../keychain/keychain'
 import * as memoryService from './memory.service'
 import { chat as llmChat } from '../llm/client'
+import { estimateTextTokens, CHARS_PER_TOKEN } from '../llm/estimate'
 import type { MessageRow } from '../repos/conversation.repo'
 import type { SummaryRow } from '../repos/summary.repo'
 import { agentEvents } from './event-bus'
@@ -202,9 +203,7 @@ function estimateMessageTokens(messages: MessageRow[]): number {
     chars += m.content.length
     if (Array.isArray(m.attachments)) chars += m.attachments.length * 8_000 // ~2000 tokens/image
   }
-  return Math.ceil(chars / 4)
+  return Math.ceil(chars / CHARS_PER_TOKEN)
 }
 
-function estimateTextTokens(text: string): number {
-  return Math.ceil(text.length / 4)
-}
+// estimateTextTokens imported from llm/estimate (single source for the chars/4 heuristic).

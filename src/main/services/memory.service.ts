@@ -4,6 +4,7 @@ import * as convRepo from '../repos/conversation.repo'
 import * as endpointRepo from '../repos/endpoint.repo'
 import * as roleRepo from '../repos/role.repo'
 import * as keychain from '../keychain/keychain'
+import { estimateTextTokens } from '../llm/estimate'
 import { chat as llmChat } from '../llm/client'
 import { pickSmallModel } from './model-select'
 import type { MemoryLayer, MemoryType, MemorySource, MemoryRow } from '../repos/memory.repo'
@@ -91,7 +92,7 @@ export async function extract(ctx: ExtractContext, trigger: ExtractTrigger): Pro
       // self-learning off → keep only global shared memory; drop role-specific items
       if (it.layer === 'role' && !selfLearning) continue
       const roleId = it.layer === 'role' ? ctx.roleId : null
-      const tokens = Math.ceil(it.content.length / 4)
+      const tokens = estimateTextTokens(it.content)
       const dup = findDup(it.content, pool, it.layer, roleId)
       if (dup) {
         // Refresh the content when it actually changed (knowledge evolves) but never downgrade the
@@ -219,6 +220,51 @@ function parseIndices(raw: string): number[] {
 const EXPLICIT_RE = /\b(remember|note that|keep in mind|for future reference|don't forget|make a note)\b/i
 export function isExplicit(text: string): boolean {
   return EXPLICIT_RE.test(text)
+}
+
+// — Memory CRUD for the Memory UI. The IPC handler is a thin pass-through to these; all the business
+//   rules (length cap, type/layer normalization, token cost, the user-source dedup precedence) live here
+//   so the boundary stays dumb. Mirrors how memory:onTurn already routed through this service. —
+
+// Cap user-authored memory length so one entry can't exceed the per-turn recall budget (matches the
+// extractor's MAX_CONTENT_CHARS).
+const MAX_MEMORY_CHARS = 500
+
+export interface MemoryAddArgs {
+  content: string
+  type?: string
+  layer?: string
+  roleId?: string | null
+}
+export interface MemoryUpdateArgs {
+  id: string
+  content: string
+}
+
+export function list(): MemoryRow[] {
+  return memoryRepo.listAll()
+}
+
+export function add(input: MemoryAddArgs): MemoryRow {
+  const type: MemoryType = input.type === 'preference' || input.type === 'learning' ? input.type : 'fact'
+  const content = input.content.trim().slice(0, MAX_MEMORY_CHARS)
+  return memoryRepo.create({
+    layer: input.layer === 'role' ? 'role' : 'shared',
+    roleId: input.layer === 'role' ? (input.roleId ?? null) : null,
+    type,
+    content,
+    source: 'user', // user-authored memory outranks auto-extracted on dedup
+    tokens: estimateTextTokens(content)
+  })
+}
+
+export function update(input: MemoryUpdateArgs): void {
+  const content = input.content.trim().slice(0, MAX_MEMORY_CHARS)
+  return memoryRepo.update(input.id, { content, tokens: estimateTextTokens(content) })
+}
+
+export function remove(id: string): void {
+  return memoryRepo.remove(id)
 }
 
 interface Extracted {

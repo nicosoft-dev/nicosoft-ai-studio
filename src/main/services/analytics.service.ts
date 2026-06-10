@@ -7,7 +7,10 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { getDb } from '../db/connection'
-import type { AnalyticsSummary } from '../ipc/contracts'
+import type { AnalyticsSummary, AppInfo } from '../ipc/contracts'
+import * as convRepo from '../repos/conversation.repo'
+import * as memoryRepo from '../repos/memory.repo'
+import { homedir as osHomedir } from 'node:os'
 
 // created_at is stored as UTC ISO (new Date().toISOString()); local-midnight N days ago as that same UTC ISO.
 function localMidnightISO(daysAgo = 0): string {
@@ -135,4 +138,16 @@ function scanToolsToday(): { label: string; v: number }[] {
     }
   }
   return [...counts.entries()].map(([label, v]) => ({ label, v })).sort((a, b) => b.v - a.v)
+}
+
+// Settings › About / Privacy: app version + local data dir + on-device counts. Version is injected at
+// build time (see media.handler / electron.vite.config.ts) and passed in by the boundary; the counts go
+// through the repos so this service adds no new inline SQL.
+export function appInfo(version: string): AppInfo {
+  return {
+    version,
+    dataDir: join(osHomedir(), '.nsai'),
+    conversations: convRepo.count(),
+    memories: memoryRepo.count()
+  }
 }

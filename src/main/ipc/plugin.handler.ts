@@ -11,10 +11,8 @@ export function registerPluginHandlers(): void {
   // Folder picker for installing a plugin. Returns the chosen path, or null if cancelled.
   ipcMain.handle('plugins:pickDir', async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
-    const res = await dialog.showOpenDialog(win ?? undefined!, {
-      title: 'Select a plugin folder (containing plugin.json)',
-      properties: ['openDirectory']
-    })
+    const opts = { title: 'Select a plugin folder (containing plugin.json)', properties: ['openDirectory' as const] }
+    const res = await (win ? dialog.showOpenDialog(win, opts) : dialog.showOpenDialog(opts))
     return res.canceled || res.filePaths.length === 0 ? null : res.filePaths[0]
   })
 }

@@ -238,3 +238,8 @@ export function listByConversation(convId: string): MessageRow[] {
     .all(convId) as unknown as MessageRaw[]
   return rows.map(mapMessage)
 }
+
+// Total conversation count — for the Settings › About / Privacy on-device stats.
+export function count(): number {
+  return (getDb().prepare('SELECT COUNT(*) c FROM conversations').get() as { c: number }).c
+}
