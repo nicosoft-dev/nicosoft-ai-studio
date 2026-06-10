@@ -202,6 +202,9 @@ input, textarea, select { font-family: inherit; color: inherit; }
   background: var(--bg-1);
   display: flex; align-items: center;
   padding: 0 14px; gap: 8px;
+  /* Windows/Linux window-controls overlay sits over the topbar's right end — reserve exactly its width.
+     env(titlebar-area-*) only exists in overlay mode; the fallbacks make this 14px (= no-op) on macOS. */
+  padding-right: max(14px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)));
   user-select: none;
   -webkit-app-region: drag;
 }
