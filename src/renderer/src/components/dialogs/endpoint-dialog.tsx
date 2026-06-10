@@ -121,7 +121,9 @@ export function EndpointDialog({
           value={proto}
           onChange={(p) => {
             setProto(p as Proto)
-            setBaseURL(PROTO_BASE[p])
+            // Follow the provider default only while the URL is still one of the defaults — a URL the
+            // user typed (e.g. a proxy/gateway) survives an accidental provider toggle.
+            setBaseURL((prev) => (Object.values(PROTO_BASE).includes(prev) ? PROTO_BASE[p] : prev))
           }}
         />
       </div>

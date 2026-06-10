@@ -66,15 +66,24 @@ function OnboardProfile(): ReactElement {
 // created endpoint flows up so the team step can auto-bind to it.
 function OnboardEndpoint({ created, onCreated }: { created: EndpointDto | null; onCreated: (ep: EndpointDto) => void }): ReactElement {
   const [proto, setProto] = useState<Proto>(created?.protocol ?? 'anthropic')
-  const [baseURL, setBaseURL] = useState(created?.baseUrl ?? PROTO_BASE['anthropic'])
-  const [apiKey, setApiKey] = useState('')
+  // Per-provider drafts: switching the segmented swaps WHICH draft is shown — it never wipes what was
+  // typed (an Anthropic key isn't an OpenAI key, so each provider keeps its own URL + key until tested).
+  const [drafts, setDrafts] = useState<Record<Proto, { baseURL: string; apiKey: string }>>(() => ({
+    anthropic: { baseURL: created?.protocol === 'anthropic' ? created.baseUrl : PROTO_BASE.anthropic, apiKey: '' },
+    openai: { baseURL: created?.protocol === 'openai' ? created.baseUrl : PROTO_BASE.openai, apiKey: '' },
+    gemini: { baseURL: created?.protocol === 'gemini' ? created.baseUrl : PROTO_BASE.gemini, apiKey: '' },
+    custom: { baseURL: created?.protocol === 'custom' ? created.baseUrl : PROTO_BASE.custom, apiKey: '' }
+  }))
+  const baseURL = drafts[proto].baseURL
+  const apiKey = drafts[proto].apiKey
+  const setBaseURL = (v: string): void => setDrafts((d) => ({ ...d, [proto]: { ...d[proto], baseURL: v } }))
+  const setApiKey = (v: string): void => setDrafts((d) => ({ ...d, [proto]: { ...d[proto], apiKey: v } }))
   const [showKey, setShowKey] = useState(false)
   const [state, setState] = useState<'idle' | 'testing' | 'ok' | 'fail'>(created ? 'ok' : 'idle')
   const [msg, setMsg] = useState('')
 
   const pickProto = (p: Proto): void => {
     setProto(p)
-    setBaseURL(PROTO_BASE[p])
     setState('idle')
   }
 
@@ -224,7 +233,7 @@ export function Onboarding({ onFinish }: { onFinish: () => void }): ReactElement
         <div className="onboard-foot">
           {step > 0
             ? <button className="btn ghost sm" onClick={back}><Icons.chevronLeft size={14} /> Back</button>
-            : <span />}
+            : <span className="text-link muted" onClick={() => void finish()}>Skip setup — explore first</span>}
           {(step === 1 || step === 2) && <span className="text-link muted" style={{ marginLeft: 14 }} onClick={next}>Skip — I&apos;ll do this later</span>}
           <div className="of-spacer" />
           <Dots step={step} count={4} />
