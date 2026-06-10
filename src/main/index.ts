@@ -1,5 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, nativeTheme, protocol } from 'electron'
 import { join } from 'path'
+import { cpSync, existsSync, renameSync } from 'node:fs'
 import { getDb } from './db/connection'
 import * as settingsService from './services/settings.service'
 import { registerIpc } from './ipc/register'
@@ -26,7 +27,29 @@ declare const __APP_VERSION__: string
 // under another ("⚠ stored key cannot be decrypted" in Settings → re-enter the key once). Pinning the
 // path at least makes every launch mode read the SAME credentials/profile; keychain.ts surfaces the
 // identity mismatch explicitly instead of reporting "no API key configured".
-app.setPath('userData', join(app.getPath('appData'), 'nicosoft-ai-studio'))
+// The pinned dir carries the product name ("NicoSoft AI Studio"); earlier builds pinned the kebab-case
+// package id. On first launch after the rename, the legacy dir is BACKED UP (full copy, kept forever as
+// "<legacy>-backup") and then renamed into place — the data itself (SQLite, sessions, media,
+// credentials.json) moves unchanged, and safeStorage's master key is bound to the app identity, not this
+// path, so stored API keys keep decrypting. Any migration failure falls back to the legacy dir: starting
+// on the old path beats starting on an empty profile.
+function resolveUserDataDir(): string {
+  const base = app.getPath('appData')
+  const next = join(base, 'NicoSoft AI Studio')
+  const legacy = join(base, 'nicosoft-ai-studio')
+  if (existsSync(next) || !existsSync(legacy)) return next
+  const backup = legacy + '-backup'
+  try {
+    if (!existsSync(backup)) cpSync(legacy, backup, { recursive: true }) // backup FIRST — never a lone copy
+    renameSync(legacy, next)
+    console.log(`[userData] migrated ${legacy} -> ${next} (backup kept at ${backup})`)
+    return next
+  } catch (err) {
+    console.error('[userData] migration failed, staying on the legacy dir:', err)
+    return legacy
+  }
+}
+app.setPath('userData', resolveUserDataDir())
 app.setName('NicoSoft AI Studio')
 app.setAboutPanelOptions({
   applicationName: 'NicoSoft AI Studio',
