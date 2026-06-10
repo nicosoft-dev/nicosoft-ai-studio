@@ -191,7 +191,6 @@ export default function App(): ReactElement {
   if (view === 'onboarding') {
     return (
       <div className="window">
-        <WindowControls />
         <Onboarding
           onFinish={() => {
             setView('studio')
@@ -200,13 +199,13 @@ export default function App(): ReactElement {
           }}
         />
         <Toaster />
+        <WindowControls />
       </div>
     )
   }
 
   return (
     <div className="window">
-      <WindowControls />
       {view === 'settings' ? (
         <SettingsView tab={settingsTab} onTab={setSettingsTab} onBack={() => setView('app')} />
       ) : (
@@ -301,6 +300,7 @@ export default function App(): ReactElement {
         />
       )}
       <Toaster />
+      <WindowControls />
     </div>
   )
 }

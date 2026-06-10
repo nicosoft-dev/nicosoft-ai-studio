@@ -3,6 +3,13 @@
 // native controls; the native titleBarOverlay was rejected — it pins them top-RIGHT and paints its own
 // background strip. macOS renders nothing here (real traffic lights). Fixed + high z so every view
 // (shell, settings, onboarding) has them; the buttons are no-drag islands inside the drag regions.
+//
+// MOUNT ORDER MATTERS: this component must be the LAST child of .window. Chromium builds the OS drag
+// region by walking the layout tree in DOCUMENT order, applying union (drag) / difference (no-drag)
+// sequentially — z-index is irrelevant. Mounted before the content, our no-drag holes get punched
+// first and .sidebar-header/.topbar's drag rect then covers them back: the buttons render on top but
+// every click hit-tests as the caption (drag) at the OS level, so they were unclickable on Windows'
+// main view while working on onboarding (which has no overlapping drag region).
 
 import type { ReactElement } from 'react'
 
