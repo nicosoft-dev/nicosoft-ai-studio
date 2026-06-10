@@ -128,10 +128,9 @@
   overflow: auto;
 }
 .tb-md .md { font-size: 12px; }
-/* Read result rendered as a code block — drop the standalone block's chrome (border/radius/margin) since
-   it already sits inside .tb-detail, and cap its height so a large file scrolls instead of stretching. */
+/* Read / diff results render a BARE CodeBlock (no .code-block container, no lang/Copy head — the tool
+   card already is the container); cap the height so a large file scrolls instead of stretching. */
 .tb-code { max-height: 420px; overflow: auto; }
-.tb-code .code-block { margin: 0; border: none; border-radius: 0; }
 
 /* — Server-side tool status row (web_search etc.) — faint, non-interactive (the API ran it) — */
 .server-bubble {

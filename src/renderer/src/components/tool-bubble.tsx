@@ -95,7 +95,7 @@ function ResultBody({ tool }: { tool: ToolCall }): ReactElement {
   if (tool.name === 'Bash' && isGitDiff(text)) {
     return (
       <div className="tb-code">
-        <CodeBlock lang="diff" code={text.slice(0, 50000)} />
+        <CodeBlock lang="diff" code={text.slice(0, 50000)} bare />
       </div>
     )
   }
@@ -122,7 +122,7 @@ export function ToolDetail({ tool }: { tool: ToolCall }): ReactElement | null {
       {isDiff ? <DiffView name={tool.name} input={input} /> : null}
       {isReadResult ? (
         <div className="tb-code">
-          <CodeBlock lang={extToLang(String(input.file_path ?? ''))} code={stripLineNumbers(tool.result!).slice(0, 50000)} />
+          <CodeBlock lang={extToLang(String(input.file_path ?? ''))} code={stripLineNumbers(tool.result!).slice(0, 50000)} bare />
         </div>
       ) : hasResult && !isDiff ? (
         <ResultBody tool={tool} />

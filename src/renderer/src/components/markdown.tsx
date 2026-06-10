@@ -86,7 +86,9 @@ export function extToLang(filePath: string): string {
 
 // One fenced code block: Shiki highlights asynchronously (highlighter loads on first use); until it
 // resolves (or if the language is unknown) we show a plain <pre> fallback so text is never lost.
-export function CodeBlock({ lang, code }: { lang: string; code: string }): ReactElement {
+// `bare` drops the chrome (container + lang/Copy head) and renders only the highlighted body — for
+// hosts that already provide a container, like a tool card's expanded payload (.tb-code).
+export function CodeBlock({ lang, code, bare }: { lang: string; code: string; bare?: boolean }): ReactElement {
   const [html, setHtml] = useState('')
   const [copied, setCopied] = useState(false)
   useEffect(() => {
@@ -108,17 +110,19 @@ export function CodeBlock({ lang, code }: { lang: string; code: string }): React
     setCopied(true)
     setTimeout(() => setCopied(false), 1200)
   }
+  const body = html ? (
+    <div className="code-body" dangerouslySetInnerHTML={{ __html: html }} />
+  ) : (
+    <pre className="code-body code-plain"><code>{code}</code></pre>
+  )
+  if (bare) return body
   return (
     <div className="code-block">
       <div className="code-head">
         <span className="code-lang">{lang}</span>
         <button className="code-copy" onClick={copy} type="button">{copied ? 'Copied' : 'Copy'}</button>
       </div>
-      {html ? (
-        <div className="code-body" dangerouslySetInnerHTML={{ __html: html }} />
-      ) : (
-        <pre className="code-body code-plain"><code>{code}</code></pre>
-      )}
+      {body}
     </div>
   )
 }
