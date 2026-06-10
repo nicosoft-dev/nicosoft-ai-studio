@@ -69,6 +69,9 @@ export interface AgentResult {
   reason: 'completed' | 'max_turns' | 'aborted'
   messages: AgentMessage[]
   turns: number
+  // Compaction firings this run (layer 2 / layer 3) — surfaced into run-stats so long-run behavior
+  // (does the agent stay on task across destructive summarization?) is measurable, not anecdotal.
+  compactions: { micro: number; auto: number }
 }
 
 const SUBAGENT_SYSTEM =
@@ -193,6 +196,7 @@ export async function* runAgent(
   let lastUsageAt = 0
   const compactConfig: CompactConfig = { protocol: params.protocol, baseUrl, apiKey, model, signal: ctx.signal }
   const threshold = autocompactThreshold(contextWindow)
+  const compactions = { micro: 0, auto: 0 } // → AgentResult, for run-stats
   let reactiveCompacted = false // bounce guard: if a send overflows right after a reactive compact, fail
   // Transient-failure retry budget, PER request (reset after each successful send). A recoverable failure
   // — network drop / idle-timeout abort on a hung upstream (code 'network'), rate limit (429), or a 5xx /
@@ -287,6 +291,7 @@ export async function* runAgent(
     // structure-preserving, runs before the expensive autocompact so it can keep it from firing.
     const mc = microcompact(messages)
     messages = mc.messages
+    if (mc.freedChars > 0) compactions.micro++
     // Layer 3: autocompact when the running estimate crosses the threshold. The estimate subtracts the
     // chars microcompact just freed (still counted inside lastUsage.inTokens until the next real send)
     // and adds a fixed reserve for the gateway-injected system prompt estimateTokens can't see — but
@@ -302,6 +307,7 @@ export async function* runAgent(
         messages = compacted
         lastUsage = undefined
         lastUsageAt = 0
+        compactions.auto++
       }
     }
 
@@ -386,6 +392,7 @@ export async function* runAgent(
           lastUsage = undefined
           lastUsageAt = 0
           reactiveCompacted = true
+          compactions.auto++
           continue
         }
       }
@@ -393,7 +400,7 @@ export async function* runAgent(
     }
     // Anthropic rejects an empty-content assistant message — if the turn produced nothing usable,
     // end rather than push it (which would 400 the next request).
-    if (assistant.content.length === 0) return { reason: 'completed', messages, turns }
+    if (assistant.content.length === 0) return { reason: 'completed', messages, turns, compactions }
 
     const assistantMsg: AgentMessage = { role: 'assistant', content: assistant.content }
     messages.push(assistantMsg)
@@ -403,7 +410,7 @@ export async function* runAgent(
 
     // Loop continues iff the assistant requested ≥1 tool — NOT based on stop_reason (§2.1).
     const toolUses = assistant.content.filter((b): b is ToolUseBlock => b.type === 'tool_use')
-    if (toolUses.length === 0) return { reason: 'completed', messages, turns }
+    if (toolUses.length === 0) return { reason: 'completed', messages, turns, compactions }
 
     // The tools were already executing as they streamed in (StreamingToolExecutor); drain for results
     // in original order. Pairing holds by construction (one result per tool_use, same id, in order).
@@ -413,7 +420,7 @@ export async function* runAgent(
     yield { type: 'tool_results', message: userMsg }
 
     turns += 1
-    if (ctx.signal.aborted) return { reason: 'aborted', messages, turns }
-    if (maxTurns !== undefined && turns >= maxTurns) return { reason: 'max_turns', messages, turns }
+    if (ctx.signal.aborted) return { reason: 'aborted', messages, turns, compactions }
+    if (maxTurns !== undefined && turns >= maxTurns) return { reason: 'max_turns', messages, turns, compactions }
   }
 }

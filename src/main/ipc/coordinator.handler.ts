@@ -6,7 +6,7 @@
 
 import { ipcMain } from 'electron'
 import { readFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
+import { dataDir } from '../db/connection'
 import { join, resolve, sep } from 'node:path'
 import { ulid } from '../db/id'
 import type { PermissionDecision } from '../agent/context'
@@ -226,7 +226,7 @@ export function registerCoordinatorHandlers(): void {
   ipcMain.handle('verify:screenshot', async (_e, filePath: string): Promise<string | null> => {
     try {
       if (typeof filePath !== 'string' || !filePath.toLowerCase().endsWith('.png')) return null
-      const root = resolve(join(homedir(), '.nsai', 'sessions'))
+      const root = resolve(join(dataDir(), 'sessions'))
       const abs = resolve(filePath)
       if (abs !== root && !abs.startsWith(root + sep)) return null
       const buf = await readFile(abs)

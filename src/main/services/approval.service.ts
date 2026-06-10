@@ -5,7 +5,7 @@
 // (tool_name, tool_input) — doc §131. A coordinator "is this still applicable?" LLM re-check BEFORE replay
 // is the noted future addition (§131 "重放前可加一步 coordinator 复核") — not done in this first version.
 
-import { homedir } from 'node:os'
+import { dataDir } from '../db/connection'
 import { join } from 'node:path'
 import { findTool } from '../agent/tool'
 import { CORE_TOOLS } from '../agent/registry'
@@ -47,7 +47,7 @@ export async function approve(id: string): Promise<ReplayResult> {
 async function replay(p: PendingApprovalRow): Promise<ReplayResult> {
   const tool = findTool(CORE_TOOLS, p.toolName)
   if (!tool) return { ok: false, output: `unknown tool: ${p.toolName}` }
-  const sessionDir = join(homedir(), '.nsai', 'sessions', p.convId, 'replay')
+  const sessionDir = join(dataDir(), 'sessions', p.convId, 'replay')
   const ctx: AgentContext = {
     cwd: p.cwd,
     signal: new AbortController().signal,

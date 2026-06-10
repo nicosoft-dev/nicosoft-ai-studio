@@ -5,7 +5,7 @@
 // recomputes it for recurring tasks. Single store instance per main process.
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { dataDir } from '../../db/connection'
 import { join, dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { parseSchedule, nextCronRun } from './cron'
@@ -14,7 +14,7 @@ import type { ScheduledTask, CreateTaskInput, TaskRun } from '../../ipc/contract
 
 const MAX_RUNS = 10 // recent fire results kept per task (newest first)
 
-const FILE = join(homedir(), '.nsai', 'scheduled_tasks.json')
+const FILE = join(dataDir(), 'scheduled_tasks.json')
 
 // Session-only tasks (durable:false) — one array per main-process run.
 const sessionTasks: ScheduledTask[] = []

@@ -5,8 +5,8 @@
 // the persisted-conversation → agent-seed mapping both entry points share.
 
 import { createWriteStream } from 'node:fs'
-import { mkdir } from 'node:fs/promises'
-import { homedir } from 'node:os'
+import { appendFile, mkdir } from 'node:fs/promises'
+import { dataDir } from '../db/connection'
 import { join } from 'node:path'
 import { ulid } from '../db/id'
 import type { AgentContext, RequestPermission, AskUser } from '../agent/context'
@@ -101,7 +101,7 @@ export async function runAgentLoop(
   cb: AgentCallbacks,
   signal: AbortSignal,
 ): Promise<{ text: string; inTokens: number; contextTokens: number; outTokens: number; reason: string; turns: number; attachments: MessageAttachmentDto[] }> {
-  const sessionDir = join(homedir(), '.nsai', 'sessions', loop.convId)
+  const sessionDir = join(dataDir(), 'sessions', loop.convId)
   await mkdir(join(sessionDir, 'tool-results'), { recursive: true })
   const transcript = createWriteStream(join(sessionDir, 'transcript.jsonl'), { flags: 'a' })
   // Without an 'error' listener a failed write (disk full / perms) crashes the main process — swallow.
@@ -163,6 +163,10 @@ export async function runAgentLoop(
   let outTokens = 0
   const toolImages: MessageAttachmentDto[] = [] // images any tool produced this run → assistant-message attachments
   const toolNames = new Map<string, string>() // tool_use id → name, to pair tool:post with its tool
+  // Run report (doc 48): per-run counters → sessions/<convId>/run-stats.jsonl. One line per finished
+  // run (incl. aborted/max_turns); a run that dies on a hard LLM error throws past this and writes none.
+  const startedAt = Date.now()
+  const toolCalls = { total: 0, errors: 0, byName: {} as Record<string, number> }
   agentEvents.emit({ type: 'session:start', convId: loop.convId, roleId: loop.roleId, ts: Date.now() })
   try {
     for (;;) {
@@ -182,6 +186,8 @@ export async function runAgentLoop(
         for (const b of value.message.content) {
           if (isContentBlock(b) && b.type === 'tool_use') {
             toolNames.set(b.id, b.name)
+            toolCalls.total++
+            toolCalls.byName[b.name] = (toolCalls.byName[b.name] ?? 0) + 1
             agentEvents.emit({ type: 'tool:pre', convId: loop.convId, roleId: loop.roleId, tool: b.name, ts: Date.now() })
           }
         }
@@ -192,6 +198,7 @@ export async function runAgentLoop(
         const content: AnyBlock[] = []
         for (const b of value.message.content) {
           if (isContentBlock(b) && b.type === 'tool_result') {
+            if (b.is_error) toolCalls.errors++
             agentEvents.emit({ type: 'tool:post', convId: loop.convId, roleId: loop.roleId, tool: toolNames.get(b.tool_use_id) ?? 'unknown', isError: b.is_error ?? false, ts: Date.now() })
             const { attachments, redacted } = await persistToolResultImages(loop.convId, b)
             for (const att of attachments) {
@@ -219,6 +226,27 @@ export async function runAgentLoop(
       if (n > 0) console.warn(`[agent] reclaimed ${n} unclosed e2e browser session(s) for run ${loop.runId}`)
     })
   }
+
+  const endedAt = Date.now()
+  void appendFile(
+    join(sessionDir, 'run-stats.jsonl'),
+    JSON.stringify({
+      runId: loop.runId,
+      convId: loop.convId,
+      roleId: loop.roleId,
+      model: loop.model,
+      startedAt,
+      endedAt,
+      durationMs: endedAt - startedAt,
+      reason: result.reason,
+      turns: result.turns,
+      inTokens,
+      contextTokens: lastContext,
+      outTokens,
+      toolCalls,
+      compactions: result.compactions,
+    }) + '\n',
+  ).catch(() => {}) // stats are best-effort — never fail the run over them
 
   return {
     text: finalAssistantText(result.messages),

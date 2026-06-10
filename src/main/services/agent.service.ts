@@ -11,7 +11,7 @@
 // collaboration), agent-system (system-prompt building).
 
 import { existsSync, readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { dataDir } from '../db/connection'
 import { join } from 'node:path'
 import { ulid } from '../db/id'
 import { buildToolsParam } from '../agent/loop'
@@ -188,7 +188,7 @@ export async function run(
 // message per run (this service persists only the final reply), so all of a run's tools attach to that
 // single message — if that ever changes, the renderer needs a per-message key, not just run_id.
 export function readTranscript(convId: string): Record<string, RunTranscript> {
-  const file = join(homedir(), '.nsai', 'sessions', convId, 'transcript.jsonl')
+  const file = join(dataDir(), 'sessions', convId, 'transcript.jsonl')
   if (!existsSync(file)) return {}
   let lines: string[]
   try {

@@ -4,7 +4,7 @@
 // today" by scanning the per-run transcripts (ts-stamped). All times are bucketed in the user's LOCAL day.
 
 import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { dataDir } from '../db/connection'
 import { join } from 'node:path'
 import type { AnalyticsSummary, AppInfo } from '../ipc/contracts'
 import * as analyticsRepo from '../repos/analytics.repo'
@@ -104,7 +104,7 @@ export function getSummary(): AnalyticsSummary {
 // "Tool calls today" by tool name. The transcript jsonl stamps each event with `ts`; we only scan
 // transcripts touched today (mtime gate) and only count tool_use blocks whose line ts is in today.
 function scanToolsToday(): { label: string; v: number }[] {
-  const dir = join(homedir(), '.nsai', 'sessions')
+  const dir = join(dataDir(), 'sessions')
   const todayMs = startOfTodayMs()
   const counts = new Map<string, number>()
   let sessions: string[]
@@ -144,7 +144,7 @@ function scanToolsToday(): { label: string; v: number }[] {
 export function appInfo(version: string): AppInfo {
   return {
     version,
-    dataDir: join(homedir(), '.nsai'),
+    dataDir: dataDir(),
     conversations: convRepo.count(),
     memories: memoryRepo.count()
   }

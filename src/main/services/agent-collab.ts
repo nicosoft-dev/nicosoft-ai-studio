@@ -4,7 +4,7 @@
 // persistence stays with the caller (coordinator-collab).
 
 import { mkdir } from 'node:fs/promises'
-import { homedir } from 'node:os'
+import { dataDir } from '../db/connection'
 import { join } from 'node:path'
 import type { AgentContext, PermissionRequest, PermissionDecision } from '../agent/context'
 import type { AgentLlmEvent } from '../agent/llm'
@@ -128,7 +128,7 @@ export async function runCollabSession(
       roster.filter((r) => r.id !== x.roleId),
       x.cwd,
     )
-    const sessionDir = join(homedir(), '.nsai', 'sessions', convId, x.roleId)
+    const sessionDir = join(dataDir(), 'sessions', convId, x.roleId)
     return {
       roleId: x.roleId,
       name: roster.find((r) => r.id === x.roleId)?.name ?? x.roleId,
