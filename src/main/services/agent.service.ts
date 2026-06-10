@@ -143,7 +143,16 @@ export async function run(
               throw new LlmError('bad_request', `agent does not support ${ep.protocol} endpoints yet`)
             })()
   const key = keychain.getApiKey(input.endpointId)
-  if (!key) throw new LlmError('bad_key', 'no API key configured for this endpoint')
+  if (!key) {
+    // Same split as chat.service: an unreadable key (encrypted under a different app identity) must not
+    // masquerade as "not configured" — Settings shows it exists, so tell the user to re-enter it.
+    throw new LlmError(
+      'bad_key',
+      keychain.keyStatus(input.endpointId) === 'unreadable'
+        ? 'stored API key cannot be decrypted (app identity changed) — re-enter it in Settings → Endpoints'
+        : 'no API key configured for this endpoint'
+    )
+  }
 
   const convId = input.convId
   const runId = ulid()

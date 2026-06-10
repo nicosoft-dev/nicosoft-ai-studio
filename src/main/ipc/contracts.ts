@@ -1,7 +1,10 @@
 import type { ModelInfo, Protocol } from '../domain'
 
 // DTOs crossing the IPC boundary (handlers ↔ preload ↔ renderer). The renderer-facing Endpoint
-// view carries `hasKey` (a boolean) but never the key itself — secrets stay in the keychain.
+// view carries `keyState` but never the key itself — secrets stay in the keychain.
+// 'ok' = usable · 'missing' = never configured · 'unreadable' = stored under a different app identity
+// (the OS keychain can't decrypt it; the user must re-enter it once). Only 'ok' is usable — the badge
+// must agree with what a request will actually experience.
 
 export interface EndpointDto {
   id: string
@@ -12,7 +15,7 @@ export interface EndpointDto {
   availableModels: ModelInfo[]
   enabled: boolean
   cacheEnabled: boolean
-  hasKey: boolean
+  keyState: 'ok' | 'missing' | 'unreadable'
   createdAt: string
 }
 

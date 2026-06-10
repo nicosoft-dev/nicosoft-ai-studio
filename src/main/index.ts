@@ -15,11 +15,18 @@ declare const __APP_VERSION__: string
 // Branding (macOS app menu + About panel). Show "NicoSoft AI Studio" instead of the dev package id /
 // "Electron", with the app version (not the Electron runtime version) and the app icon. In packaged
 // builds electron-builder's productName already does this; this also fixes the unpackaged dev run.
-// setName is pinned back to the existing userData dir so the rename can't orphan the on-disk Chromium
-// profile (renderer localStorage / caches); the SQLite database lives in ~/.nsai and is unaffected.
-const userDataDir = app.getPath('userData')
+//
+// userData is pinned to ONE fixed directory regardless of how the app was launched. The default derives
+// from the INITIAL app name, which varies by entry point — `electron .` reads package.json ("nicosoft-
+// ai-studio"), `electron out/main/index.js` (single-file, e.g. e2e drivers) falls back to "Electron",
+// a packaged build uses productName — so the same machine ended up with multiple userData worlds, each
+// with its own credentials.json. Worse, safeStorage's OS-keychain entry is ALSO bound to that initial
+// identity (setName below does NOT move it), so keys encrypted under one launch mode can't be decrypted
+// under another ("⚠ stored key cannot be decrypted" in Settings → re-enter the key once). Pinning the
+// path at least makes every launch mode read the SAME credentials/profile; keychain.ts surfaces the
+// identity mismatch explicitly instead of reporting "no API key configured".
+app.setPath('userData', join(app.getPath('appData'), 'nicosoft-ai-studio'))
 app.setName('NicoSoft AI Studio')
-app.setPath('userData', userDataDir)
 app.setAboutPanelOptions({
   applicationName: 'NicoSoft AI Studio',
   applicationVersion: __APP_VERSION__,

@@ -44,7 +44,8 @@ function bindBannerMessage(
   if (needAgentProto) return t('conv.needAgentProto', { name })
   if (b.endpoints.length === 0 || !selectedEp) return t('conv.noEndpointYet', { name })
   if (!selectedEp.enabled) return t('conv.endpointDisabled', { name, endpoint: selectedEp.name })
-  if (!selectedEp.hasKey) return t('conv.endpointNoKey', { endpoint: selectedEp.name })
+  if (selectedEp.keyState === 'unreadable') return t('conv.endpointKeyUnreadable', { endpoint: selectedEp.name })
+  if (selectedEp.keyState !== 'ok') return t('conv.endpointNoKey', { endpoint: selectedEp.name })
   if (!b.model) return t('conv.endpointNoModel', { name })
   return t('conv.bindEndpoint', { name }) // unreachable given noEndpoint already true — defensive
 }
@@ -453,7 +454,7 @@ function Composer({
     selectedEp.protocol !== 'gemini'
   const noEndpoint =
     b.loaded &&
-    (b.endpoints.length === 0 || !selectedEp || !selectedEp.enabled || !selectedEp.hasKey || !b.model || needAgentProto)
+    (b.endpoints.length === 0 || !selectedEp || !selectedEp.enabled || selectedEp.keyState !== 'ok' || !b.model || needAgentProto)
   const ready = b.loaded && !noEndpoint && (!needsCwd || !!cwd)
   const effectiveDepth = (b.depth || 'medium') as ThinkingDepth
 

@@ -19,7 +19,7 @@ function toDto(row: EndpointRow): EndpointDto {
     enabled: row.enabled,
     cacheEnabled: row.cacheEnabled,
     createdAt: row.createdAt,
-    hasKey: keychain.hasApiKey(row.id)
+    keyState: keychain.keyStatus(row.id)
   }
 }
 
@@ -72,7 +72,18 @@ export async function test(id: string): Promise<EndpointTestResult> {
   const row = endpointRepo.getById(id)
   if (!row) return { ok: false, error: { code: 'not_found', message: 'endpoint not found' } }
   const key = keychain.getApiKey(id)
-  if (!key) return { ok: false, error: { code: 'bad_key', message: 'no API key configured' } }
+  if (!key) {
+    return {
+      ok: false,
+      error: {
+        code: 'bad_key',
+        message:
+          keychain.keyStatus(id) === 'unreadable'
+            ? 'stored API key cannot be decrypted (app identity changed) — re-enter it'
+            : 'no API key configured'
+      }
+    }
+  }
   const model = row.defaultModel || row.availableModels[0]?.slug
   if (!model) return { ok: false, error: { code: 'bad_request', message: 'no model configured to test' } }
   try {

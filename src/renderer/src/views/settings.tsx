@@ -147,7 +147,12 @@ function EndpointsPage({
               <span className="er-proto">{ep.protocol}</span>
               <span className={"er-status " + health}>{ep.enabled ? t('epPage.enabled') : t('epPage.disabled')}</span>
               <span className="er-models">{t('epPage.models', { count: ep.availableModels.length })}</span>
-              <span className="er-key">{ep.hasKey ? t('epPage.keySet') : t('epPage.noKey')}</span>
+              {/* Three states, not two: 'unreadable' (key stored under a different app identity — OS
+                  keychain can't decrypt it) must not show as "key set" (it will fail at request time)
+                  nor as "no key" (the user DID set one); it asks for a one-time re-enter. */}
+              <span className={'er-key' + (ep.keyState === 'unreadable' ? ' bad' : '')}>
+                {ep.keyState === 'ok' ? t('epPage.keySet') : ep.keyState === 'unreadable' ? t('epPage.keyUnreadable') : t('epPage.noKey')}
+              </span>
               <span className="er-actions">
                 <button className="btn sm ghost" onClick={() => onEdit(ep)}>{t('epPage.edit')}</button>
                 <EndpointRowMenu onEdit={() => onEdit(ep)} onDelete={() => onDelete(ep.id)} />

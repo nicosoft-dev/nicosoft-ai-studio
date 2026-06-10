@@ -811,7 +811,7 @@ export function RoleEditorDialog({
         if (b?.model) setModel(b.model)
       } else if (eps.length > 0) {
         // First enabled endpoint with a key is the sensible default for a new role.
-        const first = eps.find((e) => e.enabled && e.hasKey) || eps[0]
+        const first = eps.find((e) => e.enabled && e.keyState === 'ok') || eps[0]
         setEndpointId(first.id)
       }
     })()
@@ -910,8 +910,8 @@ export function RoleEditorDialog({
               >
                 {endpoints.length === 0 ? <option value="">{tr('roleEditor.noEndpoints')}</option> : null}
                 {endpoints.map((e) => (
-                  <option key={e.id} value={e.id} disabled={!e.enabled || !e.hasKey}>
-                    {e.name} · {e.protocol}{!e.hasKey ? tr('roleEditor.noKeySuffix') : !e.enabled ? tr('roleEditor.disabledSuffix') : ''}
+                  <option key={e.id} value={e.id} disabled={!e.enabled || e.keyState !== 'ok'}>
+                    {e.name} · {e.protocol}{e.keyState !== 'ok' ? tr('roleEditor.noKeySuffix') : !e.enabled ? tr('roleEditor.disabledSuffix') : ''}
                   </option>
                 ))}
               </select>

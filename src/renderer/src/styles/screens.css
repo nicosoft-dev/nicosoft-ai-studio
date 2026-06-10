@@ -490,6 +490,8 @@
 .endpoint-row .er-status.degraded { color: var(--warning); }
 .endpoint-row .er-models { font-size: 12.5px; color: var(--text-3); width: 78px; flex: 0 0 78px; }
 .endpoint-row .er-key { font-family: var(--mono); font-size: 12px; color: var(--text-4); flex: 1; }
+/* key stored under a different app identity — unusable until re-entered; color it as a fault */
+.endpoint-row .er-key.bad { color: var(--error); }
 .endpoint-row .er-actions { display: flex; gap: 4px; align-items: center; }
 .add-endpoint-row { display: flex; align-items: center; gap: 8px; padding: 12px 15px; color: var(--text-3); font-size: 13px; cursor: pointer; transition: background 0.1s, color 0.1s; }
 .add-endpoint-row:hover { background: var(--bg-2); color: var(--text-1); }
