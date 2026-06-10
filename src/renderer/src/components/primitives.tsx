@@ -102,13 +102,14 @@ export function DispatchBadge({ chain }: { chain: string[] }): ReactElement {
 }
 
 /* — small flat switch (one source: previously memory.tsx MemToggle + extensions.tsx Toggle) — */
-export function Switch({ on, onClick, disabled }: { on: boolean; onClick: () => void; disabled?: boolean }): ReactElement {
+export function Switch({ on, onClick, disabled, ariaLabel }: { on: boolean; onClick: () => void; disabled?: boolean; ariaLabel?: string }): ReactElement {
   return (
     <button
       className={'switch' + (on ? ' on' : '') + (disabled ? ' disabled' : '')}
       onClick={disabled ? undefined : onClick}
       role="switch"
       aria-checked={on}
+      aria-label={ariaLabel}
       disabled={disabled}
     >
       <span className="knob" />

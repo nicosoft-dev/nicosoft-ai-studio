@@ -7,12 +7,10 @@
   "settings.nav.privacy": "Privacy",
   "settings.nav.about": "About",
   "settings.back": "Back to Studio",
-
   "settings.theme.label": "Theme",
   "settings.theme.auto": "Auto (System)",
   "settings.theme.light": "Light",
   "settings.theme.dark": "Dark",
-
   "settings.language.label": "Language",
   "settings.language.auto": "Auto (System)",
   "settings.language.en": "English",
@@ -20,19 +18,14 @@
   "settings.language.zh-Hant": "繁體中文",
   "settings.language.ko": "한국어",
   "settings.language.ja": "日本語",
-
   "settings.general.title": "General",
   "settings.general.desc": "Appearance and language.",
-
-
-
   "settings.privacy.title": "Privacy",
   "settings.privacy.desc": "NicoSoft AI Studio is local-first. Your conversations, memories, projects, and settings persist solely on this device — no NicoSoft accounts, no servers, and no cloud sync. We collect zero analytics or telemetry; absolutely nothing about how you use the application is sent anywhere.",
   "settings.privacy.onDevice": "On-device",
   "settings.privacy.dataFolder": "Data folder",
   "settings.privacy.stats": "{conversations} conversations · {memories} memories",
   "settings.privacy.revealTitle": "Reveal in Finder",
-
   "settings.about.title": "About",
   "settings.about.tagline": "{version} · Apache-2.0 · Open Source",
   "settings.about.desc": "A desktop workspace where a team of AI experts with names — engineers, designers, translators, editors, analysts, schedulers, and coordinators — work for you, running on top of the model providers of your choice.",
@@ -43,7 +36,6 @@
   "settings.about.engineVal": "Electron · React",
   "settings.about.author": "Author",
   "settings.about.note": "Built to run on your device, against your model providers — nothing about how you use it is ever sent anywhere else.",
-
   "sidebar.newConversation": "New Conversation",
   "rolePicker.title": "New conversation — pick a role",
   "sidebar.overview": "Overview",
@@ -76,7 +68,6 @@
   "sidebar.archive": "Archive",
   "sidebar.unarchive": "Unarchive",
   "sidebar.delete": "Delete",
-
   "topbar.workspace": "Workspace",
   "topbar.actions": "Actions",
   "topbar.settings": "Settings",
@@ -96,10 +87,8 @@
   "topbar.renameFailed": "Couldn't rename",
   "topbar.updateFailed": "Couldn't update",
   "topbar.archiveFailed": "Couldn't archive",
-
   "role.deleteTitle": "Delete {name}?",
   "role.deleteBody": "This will remove {name}, its conversations, and what it learned about you. The shared memory remains. This action cannot be undone.",
-
   "profile.title": "Profile",
   "profile.desc": "Shared context that helps every expert understand you. It's appended to every request and stays strictly on this device.",
   "profile.displayName": "Display Name",
@@ -140,11 +129,7 @@
   "profile.saveFailed": "Couldn't save profile — try again",
   "profile.reverted": "Reverted to saved profile",
   "profile.resetFailed": "Couldn't reset form",
-
   "memory.layer": "Layer",
-
-
-
   "ep.editTitle": "Edit endpoint",
   "ep.addTitle": "Add endpoint",
   "ep.name": "Name",
@@ -167,12 +152,8 @@
   "ep.connectionFailed": "Connection failed",
   "ep.testing": "Testing…",
   "ep.testConnection": "Test connection",
-  "ep.cancel": "Cancel",
-  "ep.save": "Save",
-
   "mcp.editTitle": "Edit MCP server",
   "mcp.addTitle": "Add MCP server",
-  "mcp.agentScopeNote": "Only experts with an agent run extensions today (currently Engineer). Others are saved but stay inactive until they get an agent.",
   "mcp.pasteConfig": "Paste config JSON",
   "mcp.configHint": "Standard mcpServers format — fills the fields below",
   "mcp.notValidJson": "Not valid JSON",
@@ -194,10 +175,6 @@
   "mcp.headers": "Headers",
   "mcp.secretsHint": "KEY=value per line · kept in keychain",
   "mcp.secretsUnchanged": "•••••• (leave blank to keep)",
-  "mcp.scope": "Scope",
-  "mcp.allExperts": "All experts",
-  "mcp.specific": "Specific",
-  "mcp.noAgent": "no agent",
   "mcp.serverSaved": "Server saved",
   "mcp.saveFailed": "Couldn’t save server",
   "mcp.testFirst": "Save the server first, then test the connection.",
@@ -207,9 +184,6 @@
   "mcp.toolCount": "{count} tools",
   "mcp.testing": "Testing…",
   "mcp.testConnection": "Test connection",
-  "mcp.cancel": "Cancel",
-  "mcp.save": "Save",
-
   "skill.editTitle": "Edit skill",
   "skill.addTitle": "Add skill",
   "skill.source": "Source",
@@ -228,16 +202,8 @@
   "skill.whenPlaceholder": "When the user asks to review a diff",
   "skill.instructions": "Instructions",
   "skill.instructionsPlaceholder": "Step-by-step instructions the model follows when this skill is invoked…",
-  "skill.scope": "Scope",
-  "skill.allExperts": "All experts",
-  "skill.specific": "Specific",
-  "skill.noAgent": "no agent",
-  "skill.agentScopeNote": "Only experts with an agent run extensions today (currently Engineer). Others are saved but stay inactive until they get an agent.",
   "skill.saved": "Skill saved",
   "skill.saveFailed": "Couldn’t save skill",
-  "skill.cancel": "Cancel",
-  "skill.save": "Save",
-
   "plugin.title": "Install plugin",
   "plugin.folder": "Plugin folder",
   "plugin.folderHint": "must contain plugin.json",
@@ -246,8 +212,6 @@
   "plugin.note": "Installs the plugin's skills, MCP servers and roles. Skills + MCP are scoped to all experts (active for those that have an agent); the roles are added to your sidebar.",
   "plugin.installing": "Installing…",
   "plugin.install": "Install",
-  "plugin.cancel": "Cancel",
-
   "roleEditor.editTitle": "Edit role",
   "roleEditor.newTitle": "New role",
   "roleEditor.unnamed": "Unnamed",
@@ -268,7 +232,6 @@
   "roleEditor.greeting": "Greeting",
   "roleEditor.optional": "optional",
   "roleEditor.greetingPlaceholder": "First line the expert shows on a new conversation",
-  "roleEditor.cancel": "Cancel",
   "roleEditor.saving": "Saving…",
   "roleEditor.saveChanges": "Save changes",
   "roleEditor.createRole": "Create role",
@@ -277,7 +240,6 @@
   "roleEditor.saveFailed": "Couldn’t save",
   "roleEditor.noKeySuffix": " · no key",
   "roleEditor.disabledSuffix": " · disabled",
-
   "cmdk.searchPlaceholder": "Search conversations, roles, actions…",
   "cmdk.recentConversations": "Recent conversations",
   "cmdk.roles": "Roles",
@@ -296,18 +258,15 @@
   "cmdk.navigate": "navigate",
   "cmdk.open": "open",
   "cmdk.close": "close",
-
   "ap.planTitle": "Plan ready for review",
   "ap.revise": "Revise",
   "ap.approveRun": "Approve & run",
   "ap.wantsToRun": "wants to run",
   "ap.deny": "Deny",
   "ap.allow": "Allow",
-
   "q.isAsking": "{name} is asking",
   "q.theAgent": "The agent",
   "q.otherPlaceholder": "Or type another answer…",
-
   "mem.title": "Memory",
   "mem.descBefore": "What your experts remember about you, across three layers — ",
   "mem.descShared": " (about you), ",
@@ -334,7 +293,6 @@
   "mem.updateFailed": "Couldn’t update memory",
   "mem.removed": "Memory removed",
   "mem.removeFailed": "Couldn’t remove memory",
-
   "conv.tokensSuffix": "tokens",
   "conv.requestFailedRetrying": "Request failed · retrying ({attempt}/{max})",
   "conv.synthesis": "synthesis",
@@ -357,7 +315,6 @@
   "conv.imageSaved": "Image saved",
   "conv.imageSaveFailed": "Couldn’t save image",
   "conv.refineLeadIn": "Refine the image above — ",
-
   "epPage.title": "Endpoints",
   "epPage.desc": "Connect AI providers. Each endpoint exposes one or more models that your experts run on.",
   "epPage.enabled": "enabled",
@@ -375,7 +332,6 @@
   "epPage.added": "Endpoint added",
   "epPage.saveFailed": "Couldn’t save endpoint",
   "epPage.addFailed": "Couldn’t add endpoint",
-
   "rolesPage.title": "Roles",
   "rolesPage.desc": "Bind each expert to the endpoint and model best suited to its job. The recommended model family is shown under each name — a starting point you can always override.",
   "rolesPage.legendAnthropic": "reasoning & code",
@@ -413,5 +369,12 @@
   "plugin.updateFailed": "Couldn’t update plugin",
   "plugin.uninstalled": "Plugin uninstalled",
   "plugin.uninstallFailed": "Couldn’t uninstall plugin",
-  "tools.updateFailed": "Couldn’t update tools"
+  "tools.updateFailed": "Couldn’t update tools",
+  "common.cancel": "Cancel",
+  "common.save": "Save",
+  "scope.label": "Scope",
+  "scope.allExperts": "All experts",
+  "scope.specific": "Specific",
+  "scope.noAgent": "no agent",
+  "scope.agentScopeNote": "Only experts with an agent run extensions today (currently Engineer). Others are saved but stay inactive until they get an agent."
 }

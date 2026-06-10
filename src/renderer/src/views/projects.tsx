@@ -14,6 +14,7 @@ import { Avatar, AvatarStack } from '@/components/primitives'
 import { STUDIO_DATA, PHASES, PHASE_INDEX } from '@/data/studio-data'
 import { toast } from '@/stores/toast'
 import { useT } from '@/stores/locale'
+import { Modal } from '@/components/modal'
 
 // DTOs derived from the IPC surface — the renderer never imports main-process modules.
 type ProjectDto = Awaited<ReturnType<typeof window.api.project.list>>[number]
@@ -152,53 +153,49 @@ function NewProjectDialog({ onClose, onCreated }: { onClose: () => void; onCreat
   }
 
   return (
-    <div className="overlay" onMouseDown={onClose}>
-      <div className="dialog wide" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="dialog-head">
-          <span className="dh-title">New Project</span>
-          <button className="icon-btn" onClick={onClose}>
-            <Icons.x size={16} />
-          </button>
-        </div>
-        <div className="dialog-body">
-          <div>
-            <label className="field-label">Project folder</label>
-            <div className="np-path">
-              <input className="input mono" value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder="/path/to/your/project" />
-              <button className="btn ghost np-browse" onClick={pick} aria-label="Browse for a folder" title="Browse for a folder">
-                <Icons.folder size={16} />
-              </button>
-            </div>
-          </div>
-          <div>
-            <label className="field-label">
-              What should the team build? <span style={{ color: 'var(--text-4)', fontWeight: 400 }}>· goal</span>
-            </label>
-            <textarea
-              className="input np-goal"
-              rows={4}
-              value={goal}
-              onChange={(e) => setGoal(e.target.value)}
-              placeholder="Describe the project — goal, structure, constraints, anything the team should know…"
-            />
-          </div>
-          <div>
-            <label className="field-label">
-              Name <span style={{ color: 'var(--text-4)', fontWeight: 400 }}>· optional — generated from the goal if blank</span>
-            </label>
-            <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Leave blank to auto-generate" />
-          </div>
-        </div>
-        <div className="dialog-foot">
+    <Modal
+      title="New Project"
+      onClose={onClose}
+      className="wide"
+      foot={
+        <>
           <button className="btn ghost" onClick={onClose}>
             Cancel
           </button>
           <button className="btn primary" onClick={create} disabled={busy || (!goal.trim() && !name.trim())}>
             {busy ? 'Creating…' : 'Create project'}
           </button>
+        </>
+      }
+    >
+      <div>
+        <label className="field-label">Project folder</label>
+        <div className="np-path">
+          <input className="input mono" value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder="/path/to/your/project" />
+          <button className="btn ghost np-browse" onClick={pick} aria-label="Browse for a folder" title="Browse for a folder">
+            <Icons.folder size={16} />
+          </button>
         </div>
       </div>
-    </div>
+      <div>
+        <label className="field-label">
+          What should the team build? <span style={{ color: 'var(--text-4)', fontWeight: 400 }}>· goal</span>
+        </label>
+        <textarea
+          className="input np-goal"
+          rows={4}
+          value={goal}
+          onChange={(e) => setGoal(e.target.value)}
+          placeholder="Describe the project — goal, structure, constraints, anything the team should know…"
+        />
+      </div>
+      <div>
+        <label className="field-label">
+          Name <span style={{ color: 'var(--text-4)', fontWeight: 400 }}>· optional — generated from the goal if blank</span>
+        </label>
+        <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Leave blank to auto-generate" />
+      </div>
+    </Modal>
   )
 }
 
