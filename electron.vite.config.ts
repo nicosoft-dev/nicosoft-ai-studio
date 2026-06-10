@@ -11,6 +11,19 @@ const pkg = JSON.parse(readFileSync(resolve('package.json'), 'utf-8')) as { vers
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        // externalizeDepsPlugin only externalizes `dependencies` — playwright is a DEV dependency
+        // (e2e_browser tool, dev roles only), so rollup BUNDLED it into out/main. Bundling hoisted
+        // playwright-core's lazy `require("chromium-bidi/…")` (never executed on the normal launch
+        // paths) into an eager top-level require, crashing EVERY e2e_browser launch with "Cannot find
+        // module 'chromium-bidi/…'". Externalized, import('playwright') resolves the real package from
+        // node_modules in dev (lazy requires stay lazy), and a packaged build (no devDeps) fails
+        // cleanly into the tool's existing "playwright unavailable" path — the degradation its header
+        // comment was designed for.
+        external: ['playwright', 'playwright-core']
+      }
+    },
     define: {
       __APP_VERSION__: JSON.stringify(pkg.version)
     }
