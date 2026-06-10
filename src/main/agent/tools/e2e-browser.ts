@@ -126,17 +126,31 @@ async function launch(input: Input, ctx: AgentContext): Promise<ActionResult> {
   if (!input.target) throw new Error('launch requires `target` (an http(s):// URL or a path to main.js)')
   const { chromium, _electron } = await import('playwright')
   const sessionId = randomUUID()
+  // A half-failed launch must clean up after itself: once the process exists, any later step throwing
+  // (newPage/goto, firstWindow timeout) would otherwise leak it FOREVER — it never reached the sessions
+  // Map, so neither the run-end reclaim nor an explicit close can ever find it. (Found live: an Electron
+  // target with no window leaked its process exactly this way.)
   if (/^https?:\/\//i.test(input.target)) {
     const browser = await chromium.launch()
-    const page = await browser.newPage()
-    await page.goto(input.target)
-    sessions.set(sessionId, { page, browser, owner: ctx.runId })
+    try {
+      const page = await browser.newPage()
+      await page.goto(input.target)
+      sessions.set(sessionId, { page, browser, owner: ctx.runId })
+    } catch (e) {
+      await browser.close().catch(() => {})
+      throw e
+    }
     return { sessionId, ok: true, detail: `chromium launched at ${input.target}` }
   }
   // filesystem path → Electron app under test
   const electronApp = await _electron.launch({ args: [input.target], cwd: input.cwd ?? ctx.cwd })
-  const page = await electronApp.firstWindow()
-  sessions.set(sessionId, { page, electronApp, owner: ctx.runId })
+  try {
+    const page = await electronApp.firstWindow()
+    sessions.set(sessionId, { page, electronApp, owner: ctx.runId })
+  } catch (e) {
+    await electronApp.close().catch(() => {})
+    throw e
+  }
   return { sessionId, ok: true, detail: `electron launched from ${input.target}` }
 }
 
