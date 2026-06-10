@@ -25,10 +25,38 @@ interface BrowserSession {
   page: Page
   browser?: Browser
   electronApp?: ElectronApp
+  // Owning run (ctx.runId at launch). runAgentLoop's finally reclaims every session tagged with its
+  // runId, so a run that ends/aborts/errors without an explicit `close` can't leak a browser process.
+  owner?: string
 }
 
 // Live sessions keyed by sessionId. Survives across tool calls within a run (module-level singleton).
 const sessions = new Map<string, BrowserSession>()
+
+// Run-scoped reclaim: tear down every session the given run launched and never closed. Called from
+// runAgentLoop's finally (same lifecycle as ServiceRegistry/SubAgentPool/LSP disposal). Sessions owned
+// by OTHER concurrent runs are untouched. Returns the reclaim count so the caller can log leaks.
+export async function disposeE2ESessionsOwnedBy(runId: string): Promise<number> {
+  let n = 0
+  for (const [id, s] of sessions) {
+    if (s.owner !== runId) continue
+    sessions.delete(id)
+    n++
+    try {
+      await teardown(s)
+    } catch {
+      /* already dying — nothing better to do */
+    }
+  }
+  return n
+}
+
+// App-quit backstop: close everything regardless of owner (the process is going away anyway).
+export async function disposeAllE2ESessions(): Promise<void> {
+  const all = [...sessions.values()]
+  sessions.clear()
+  await Promise.allSettled(all.map((s) => teardown(s)))
+}
 
 const inputSchema = z.object({
   action: z
@@ -102,13 +130,13 @@ async function launch(input: Input, ctx: AgentContext): Promise<ActionResult> {
     const browser = await chromium.launch()
     const page = await browser.newPage()
     await page.goto(input.target)
-    sessions.set(sessionId, { page, browser })
+    sessions.set(sessionId, { page, browser, owner: ctx.runId })
     return { sessionId, ok: true, detail: `chromium launched at ${input.target}` }
   }
   // filesystem path → Electron app under test
   const electronApp = await _electron.launch({ args: [input.target], cwd: input.cwd ?? ctx.cwd })
   const page = await electronApp.firstWindow()
-  sessions.set(sessionId, { page, electronApp })
+  sessions.set(sessionId, { page, electronApp, owner: ctx.runId })
   return { sessionId, ok: true, detail: `electron launched from ${input.target}` }
 }
 

@@ -9,6 +9,7 @@ import { connectEnabled as connectMcpServers } from './services/mcp.service'
 import { loadEnabled as loadSkills } from './services/skill.service'
 import { schedulerEngine } from './agent/scheduler/engine'
 import { scheduledTaskStore } from './agent/scheduler/store'
+import { disposeAllE2ESessions } from './agent/tools/e2e-browser'
 
 declare const __APP_VERSION__: string
 
@@ -72,7 +73,15 @@ function createWindow(): void {
   win.on('ready-to-show', () => win.show())
 
   win.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    // Only hand the OS well-known safe schemes. Model output / web-search results render as links —
+    // an exotic scheme (file:, app protocols) must not reach openExternal, which would launch whatever
+    // the OS associates with it.
+    try {
+      const proto = new URL(details.url).protocol
+      if (proto === 'http:' || proto === 'https:' || proto === 'mailto:') void shell.openExternal(details.url)
+    } catch {
+      /* unparsable URL → drop */
+    }
     return { action: 'deny' }
   })
 
@@ -131,4 +140,10 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+// Backstop for e2e_browser sessions on quit: per-run reclaim (agent.service finally) covers normal run
+// endings; this covers quitting mid-run so no Playwright child outlives the app.
+app.on('before-quit', () => {
+  void disposeAllE2ESessions()
 })

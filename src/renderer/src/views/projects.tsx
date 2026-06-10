@@ -532,15 +532,34 @@ function ProjectDetail({
     if (!convId || !prompt || running) return
     setDraft('')
     setRunning(true)
-    await window.api.conversations.append(convId, { author: 'user', content: prompt })
-    const cwdByRole = project.cwd ? Object.fromEntries(doers.map((r) => [r, project.cwd as string])) : undefined
-    const { streamId } = await window.api.coordinator.run({ convId, prompt, cwdByRole })
-    const off = window.api.coordinator.onDone(async (d) => {
-      if (d.streamId !== streamId) return
-      off()
+    let streamId = ''
+    try {
+      await window.api.conversations.append(convId, { author: 'user', content: prompt })
+      const cwdByRole = project.cwd ? Object.fromEntries(doers.map((r) => [r, project.cwd as string])) : undefined
+      ;({ streamId } = await window.api.coordinator.run({ convId, prompt, cwdByRole }))
+    } catch (e) {
+      // The run never started — unstick the dock instead of leaving `running` true forever.
       setRunning(false)
+      toast.error(e instanceof Error ? e.message : 'Couldn’t start the run')
+      return
+    }
+    // BOTH terminal events must settle the dock: a run ending in coordinator:error never fires onDone —
+    // listening to done alone leaked a listener per failed run and left the dock disabled until reopen.
+    const settle = (): void => {
+      offDone()
+      offErr()
+      setRunning(false)
+    }
+    const offDone = window.api.coordinator.onDone(async (d) => {
+      if (d.streamId !== streamId) return
+      settle()
       const msgs = await window.api.conversations.messages(convId)
       setDannyReply([...msgs].reverse().find((m) => m.author !== 'user')?.content ?? '')
+    })
+    const offErr = window.api.coordinator.onError((d) => {
+      if (d.streamId !== streamId) return
+      settle()
+      setDannyReply(`⚠ ${d.message}`)
     })
   }
 

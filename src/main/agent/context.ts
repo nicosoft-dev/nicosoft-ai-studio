@@ -80,6 +80,11 @@ export interface SubAgentPool {
 export interface AgentContext {
   cwd: string // confined project root; every tool path must resolve under this
   signal: AbortSignal // cancellation — threaded into bash spawns and sub-agents
+  // Owning run id for run-scoped resource ownership: tools holding live resources across calls
+  // (e2e_browser sessions) tag them with this, and runAgentLoop's finally reclaims by it — a run that
+  // ends/aborts/errors without an explicit close must not leak a browser process. Run-level, not
+  // per-turn (turnCtx spreads preserve it); concurrent runs each carry their own.
+  runId?: string
   readFileState: Map<string, ReadFileEntry> // keyed by absolute path; powers stale-write detection
   permissionMode: PermissionMode
   // The run's ORIGINAL mode, captured before any EnterPlanMode flipped it. ExitPlanMode restores to this

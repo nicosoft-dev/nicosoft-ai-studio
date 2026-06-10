@@ -1,3 +1,6 @@
+import { rm } from 'node:fs/promises'
+import { join } from 'node:path'
+import { homedir } from 'node:os'
 import * as convRepo from '../repos/conversation.repo'
 import * as titleService from './title.service'
 import { persistDataUrl, removeConversationMedia } from '../media/storage'
@@ -106,6 +109,11 @@ export async function generateTitle(input: ConversationTitleInput): Promise<stri
 export function remove(convId: string): void {
   convRepo.remove(convId)
   removeConversationMedia(convId) // DB rows cascade via FK; the media files don't — drop them too
+  // Agent runs persist transcript.jsonl + tool-results/ (and e2e screenshots) under
+  // ~/.nsai/sessions/<convId>/ — outside both the DB and the media dir, so neither cleanup above touches
+  // it. Without this, deleted conversations leave their full tool-output history on disk forever.
+  // Fire-and-forget: a failed disk cleanup must not block the user-facing delete.
+  void rm(join(homedir(), '.nsai', 'sessions', convId), { recursive: true, force: true }).catch(() => {})
 }
 
 // Serialize a conversation to Markdown or JSON for the export action (the handler writes it to disk).

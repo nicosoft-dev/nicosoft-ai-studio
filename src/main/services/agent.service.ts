@@ -30,7 +30,7 @@ import { LSPManager } from '../agent/lsp/manager'
 import { startServiceTool, stopServiceTool, serviceLogsTool, listServicesTool } from '../agent/tools/service'
 import { agentSpawnTool, agentSendTool, agentWaitTool, agentCloseTool, agentBatchTool } from '../agent/tools/async-subagent'
 import { lspTool } from '../agent/tools/lsp'
-import { e2eBrowserTool } from '../agent/tools/e2e-browser'
+import { e2eBrowserTool, disposeE2ESessionsOwnedBy } from '../agent/tools/e2e-browser'
 import { e2eRequestTool } from '../agent/tools/e2e-request'
 import type { Tool } from '../agent/tool'
 import type { AgentRunInput, MessageAttachmentDto, ToolCallDto, RunTranscript } from '../ipc/contracts'
@@ -367,6 +367,7 @@ export async function runAgentLoop(
   const ctx: AgentContext = {
     cwd: loop.cwd,
     signal,
+    runId: loop.runId, // run-scoped resource ownership — e2e_browser sessions are reclaimed by it below
     readFileState: new Map(),
     permissionMode: loop.permissionMode,
     requestPermission: cb.requestPermission,
@@ -457,6 +458,11 @@ export async function runAgentLoop(
     registry.dispose() // tree-kill any dev servers this run started — no zombies, no resource pile-up
     subAgents.disposeAll() // tree-kill any background sub-agents — none outlive the parent run
     lsp?.dispose() // tree-kill the language server if one was spawned
+    // Reclaim e2e_browser sessions this run launched and never closed — without this, a run that ends,
+    // aborts, or errors mid-verification leaks a live Chromium/Electron process per forgotten session.
+    void disposeE2ESessionsOwnedBy(loop.runId).then((n) => {
+      if (n > 0) console.warn(`[agent] reclaimed ${n} unclosed e2e browser session(s) for run ${loop.runId}`)
+    })
   }
 
   return {

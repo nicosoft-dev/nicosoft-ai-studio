@@ -961,6 +961,27 @@ export const useChat = create<ChatState>((set, get) => {
         }
       }
       const cid = convId
+      // Shared failure path for ALL three send routes (coordinator / agent / chat). The FIRST message of
+      // a fresh conversation failing means nothing was persisted — roll the empty conversation back so it
+      // doesn't linger title-less in History with a phantom user bubble. Established conversations keep
+      // their history and surface the error on the streaming placeholder instead.
+      const failSend = (e: unknown): void => {
+        if (isNew) {
+          void window.api.conversations.remove(cid).catch(() => {})
+          set((s) => {
+            const byConv = { ...s.byConversation }
+            delete byConv[cid]
+            return {
+              conversations: s.conversations.filter((c) => c.id !== cid),
+              byConversation: byConv,
+              streaming: { ...s.streaming, [cid]: false },
+              activeConv: s.activeConv === cid ? null : s.activeConv
+            }
+          })
+        } else {
+          finishWithError(cid, e instanceof Error ? e.message : String(e))
+        }
+      }
       const userImages = (images ?? []).map((i) => ({ url: i.dataUrl, name: i.name }))
 
       // Optimistic render FIRST (no empty-state flash). The streaming assistant placeholder fills in via
@@ -1016,7 +1037,7 @@ export const useChat = create<ChatState>((set, get) => {
           const { streamId } = await window.api.coordinator.run({ convId: cid, prompt: text, cwdByRole: ws.cwdByExpert, modeByRole: ws.modeByExpert })
           coordinatorMeta.set(streamId, { convId: cid, endpointId, model })
         } catch (e) {
-          finishWithError(cid, e instanceof Error ? e.message : String(e))
+          failSend(e)
         }
         return
       }
@@ -1041,23 +1062,7 @@ export const useChat = create<ChatState>((set, get) => {
           })
           agentMeta.set(streamId, { convId: cid, expertId, endpointId, model })
         } catch (e) {
-          if (isNew) {
-            // First agent run of a fresh conversation failed before the backend persisted anything —
-            // roll back the empty conversation so it doesn't linger title-less with a phantom user bubble.
-            void window.api.conversations.remove(cid).catch(() => {})
-            set((s) => {
-              const byConv = { ...s.byConversation }
-              delete byConv[cid]
-              return {
-                conversations: s.conversations.filter((c) => c.id !== cid),
-                byConversation: byConv,
-                streaming: { ...s.streaming, [cid]: false },
-                activeConv: s.activeConv === cid ? null : s.activeConv
-              }
-            })
-          } else {
-            finishWithError(cid, e instanceof Error ? e.message : String(e))
-          }
+          failSend(e)
         }
         return
       }
@@ -1084,7 +1089,7 @@ export const useChat = create<ChatState>((set, get) => {
         const { streamId } = await window.api.chat.send({ convId: cid, roleId: expertId, endpointId, model, systemPrompt, thinking })
         streamMeta.set(streamId, { convId: cid, expertId, endpointId, model })
       } catch (e) {
-        finishWithError(cid, e instanceof Error ? e.message : String(e))
+        failSend(e)
       }
     },
 
