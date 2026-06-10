@@ -198,6 +198,9 @@ input, textarea, select { font-family: inherit; color: inherit; }
   place-items: center;
   color: var(--text-3);
   transition: background 0.12s, color 0.12s;
+  /* app-region does NOT inherit and the container-level carve-out is unreliable for fixed elements on
+     Windows — each button must opt out of the drag region itself or clicks land on the caption. */
+  -webkit-app-region: no-drag;
 }
 .wc-btn:hover { background: var(--bg-3); color: var(--text-1); }
 .wc-btn.wc-close:hover { background: #e5484d; color: #fff; }
