@@ -2,13 +2,14 @@
    NicoSoft AI Studio — User profile / "About you"
    Shared context that helps every expert understand the user.
    ============================================================ */
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 import { Icons } from '@/components/icons'
 import { STUDIO_DATA } from '@/data/studio-data'
 import { toast } from '@/stores/toast'
 import { useAnchoredMenu } from '@/lib/use-anchored-menu'
+import { isValidTimezone, systemTimezone, timezoneGroups, tzLabel, type TzEntry } from '@/lib/timezones'
 import { useT } from '@/stores/locale'
 
 interface DropdownOption {
@@ -29,14 +30,21 @@ const REPLY_LANG_KEYS: { v: string; labelKey: string }[] = [
   { v: 'en', labelKey: 'profile.langEn' },
   { v: 'zh', labelKey: 'profile.langZh' }
 ]
-const TIMEZONES = [
-  '(UTC−08:00) Pacific Time',
-  '(UTC−05:00) Eastern Time',
-  '(UTC+00:00) GMT / London',
-  '(UTC+01:00) Central European',
-  '(UTC+08:00) China Standard',
-  '(UTC+09:00) Japan Standard'
-]
+// tz persists an IANA id ('Asia/Shanghai') or 'auto' (= follow the OS). Earlier builds stored one of
+// six display strings — map those to their IANA equivalent on load so nobody's saved profile breaks.
+const LEGACY_TZ: Record<string, string> = {
+  '(UTC−08:00) Pacific Time': 'America/Los_Angeles',
+  '(UTC−05:00) Eastern Time': 'America/New_York',
+  '(UTC+00:00) GMT / London': 'Europe/London',
+  '(UTC+01:00) Central European': 'Europe/Paris',
+  '(UTC+08:00) China Standard': 'Asia/Shanghai',
+  '(UTC+09:00) Japan Standard': 'Asia/Tokyo'
+}
+function normalizeTz(tz: string | undefined): string {
+  if (!tz || tz === 'auto') return 'auto'
+  if (tz in LEGACY_TZ) return LEGACY_TZ[tz]
+  return isValidTimezone(tz) ? tz : 'auto'
+}
 
 const PROFILE_DEFAULTS = {
   name: '',
@@ -44,7 +52,7 @@ const PROFILE_DEFAULTS = {
   stack: '',
   tone: 'Friendly',
   lang: 'auto',
-  tz: TIMEZONES[0],
+  tz: 'auto',
   about: ''
 }
 
@@ -124,6 +132,94 @@ export function Dropdown({
   )
 }
 
+/* — Timezone picker: searchable, continent-grouped, with an "Auto (System)" head entry that resolves to
+ *   the OS timezone live. Same dark portal-popup pattern as Dropdown, plus a sticky search row — the full
+ *   IANA catalog (~418 zones) is unbrowseable without filter-as-you-type. Catalog builds lazily on first
+ *   open (module-cached). — */
+function TimezoneSelect({ value, onChange }: { value: string; onChange: (v: string) => void }): ReactElement {
+  const t = useT()
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const [width, setWidth] = useState<number>()
+  const triggerRef = useRef<HTMLDivElement>(null)
+  const { menuRef, style } = useAnchoredMenu(open, triggerRef, 'down')
+  const sys = systemTimezone()
+  const autoLabel = `${t('profile.tzAuto')} · ${tzLabel(sys)}`
+  const current = value === 'auto' ? autoLabel : tzLabel(value)
+  const groups = open ? timezoneGroups() : []
+  const ql = q.trim().toLowerCase()
+  const matches = (e: TzEntry, regionLabel: string): boolean =>
+    !ql ||
+    e.city.toLowerCase().includes(ql) ||
+    e.id.toLowerCase().includes(ql) ||
+    e.offsetText.toLowerCase().includes(ql) ||
+    regionLabel.toLowerCase().includes(ql)
+  const toggle = (): void => {
+    if (!open) {
+      setWidth(triggerRef.current?.offsetWidth)
+      setQ('')
+    }
+    setOpen((s) => !s)
+  }
+  const pick = (v: string): void => {
+    onChange(v)
+    setOpen(false)
+  }
+  return (
+    <div className="dropdown">
+      <div ref={triggerRef} className="select-box" style={{ width: '100%' }} onClick={toggle}>
+        <Icons.globe size={14} style={{ color: 'var(--text-4)' }} />
+        <span>{current}</span>
+        <Icons.chevronDown size={14} className="chev" />
+      </div>
+      {open &&
+        createPortal(
+          <>
+            <div className="dropdown-backdrop" onClick={() => setOpen(false)} />
+            <div ref={menuRef} className="dropdown-pop tz-pop" style={{ ...style, width }}>
+              <div className="tz-search">
+                <Icons.search size={13} />
+                <input
+                  autoFocus
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder={t('profile.tzSearch')}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') setOpen(false)
+                  }}
+                />
+              </div>
+              {/* Auto stays visible above the groups regardless of filter — it's the recommended default. */}
+              <div className={'dropdown-item' + (value === 'auto' ? ' active' : '')} onClick={() => pick('auto')}>
+                <span>{autoLabel}</span>
+                {value === 'auto' && <Icons.check size={14} />}
+              </div>
+              {groups.map((g) => {
+                const regionLabel = t(`tz.region.${g.region}`)
+                const entries = g.entries.filter((e) => matches(e, regionLabel))
+                if (entries.length === 0) return null
+                return (
+                  <Fragment key={g.region}>
+                    <div className="tz-group-head">{regionLabel}</div>
+                    {entries.map((e) => (
+                      <div key={e.id} className={'dropdown-item' + (e.id === value ? ' active' : '')} onClick={() => pick(e.id)}>
+                        <span>
+                          ({e.offsetText}) {e.city}
+                        </span>
+                        {e.id === value && <Icons.check size={14} />}
+                      </div>
+                    ))}
+                  </Fragment>
+                )
+              })}
+            </div>
+          </>,
+          document.body
+        )}
+    </div>
+  )
+}
+
 export function ProfileForm({ compact, nudgeName }: { compact?: boolean; nudgeName?: boolean }): ReactElement {
   const t = useT()
   const toneOptions: DropdownOption[] = TONES.map((v) => ({ v, l: t(TONE_LABEL_KEYS[v]) }))
@@ -138,7 +234,7 @@ export function ProfileForm({ compact, nudgeName }: { compact?: boolean; nudgeNa
   useEffect(() => {
     void window.api.settings.get<Partial<typeof PROFILE_DEFAULTS>>('profile').then((saved) => {
       if (saved) {
-        setP((prev) => ({ ...prev, ...saved }))
+        setP((prev) => ({ ...prev, ...saved, tz: normalizeTz(saved.tz ?? prev.tz) }))
         if (saved.name) STUDIO_DATA.USER_PROFILE.name = saved.name.trim()
       }
       setLoaded(true)
@@ -177,7 +273,7 @@ export function ProfileForm({ compact, nudgeName }: { compact?: boolean; nudgeNa
   const resetForm = async (): Promise<void> => {
     try {
       const saved = await window.api.settings.get<Partial<typeof PROFILE_DEFAULTS>>('profile')
-      const next = { ...PROFILE_DEFAULTS, ...(saved ?? {}) }
+      const next = { ...PROFILE_DEFAULTS, ...(saved ?? {}), tz: normalizeTz(saved?.tz) }
       setP(next)
       setDirty(false)
       STUDIO_DATA.USER_PROFILE.name = next.name.trim()
@@ -239,7 +335,7 @@ export function ProfileForm({ compact, nudgeName }: { compact?: boolean; nudgeNa
       {!compact && (
         <div className="pf-field">
           <label className="field-label">{t('profile.timezone')}</label>
-          <Dropdown options={TIMEZONES} value={p.tz} onChange={set('tz')} icon="globe" />
+          <TimezoneSelect value={p.tz} onChange={set('tz')} />
         </div>
       )}
 
