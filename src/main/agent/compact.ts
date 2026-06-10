@@ -100,8 +100,11 @@ export function autocompactThreshold(contextWindow: number): number {
 // === Layer 3: autocompact ===
 const COMPACT_MAX_OUTPUT = 20_000
 // Cap the transcript fed to the summary call so the compaction call itself can't overflow (else the
-// overflow-fixer is disabled by overflow). Keep the TAIL (most recent) when over.
+// overflow-fixer is disabled by overflow). When over, keep HEAD + TAIL — never tail-only: the head
+// holds the original request and earliest decisions (exactly what the summary's "Primary Request"
+// section needs); the tail keeps the most recent work.
 const MAX_TRANSCRIPT_CHARS = 400_000
+const TRANSCRIPT_HEAD_CHARS = 20_000
 const MAX_TOOL_RESULT_IN_TRANSCRIPT = 800
 
 const COMPACT_SYSTEM = 'You are a helpful AI assistant tasked with summarizing conversations.'
@@ -145,7 +148,9 @@ function messagesToTranscript(messages: AgentMessage[]): string {
   }
   let transcript = out.join('\n\n')
   if (transcript.length > MAX_TRANSCRIPT_CHARS) {
-    transcript = '[... earlier history truncated to fit the summary call ...]\n\n' + transcript.slice(-MAX_TRANSCRIPT_CHARS)
+    const head = transcript.slice(0, TRANSCRIPT_HEAD_CHARS)
+    const tail = transcript.slice(-(MAX_TRANSCRIPT_CHARS - TRANSCRIPT_HEAD_CHARS))
+    transcript = head + '\n\n[... middle of the history truncated to fit the summary call ...]\n\n' + tail
   }
   return transcript
 }
@@ -156,6 +161,30 @@ const COMPACT_PREFIX =
 const COMPACT_SUFFIX =
   '\n\nContinue the conversation from where it left off. Resume directly — do not acknowledge this ' +
   'summary or recap; pick up the work.'
+
+// The task brief must survive compaction STRUCTURALLY — pinned verbatim next to the summary, not left
+// to the summary model's discretion. Observed failure (bench gemini-sse-compact, 32K window): the
+// summary saw the full transcript yet the continuation came back with "the previous session's task
+// didn't carry over — what would you like me to work on?" mid-fix. Chained compaction reuses the
+// pinned block from the prior compact message (the regex below must stay in sync with these headers).
+const ORIGINAL_REQUEST_HEADER = '## Original request (verbatim)'
+const SUMMARY_HEADER = '## Session summary'
+const ORIGINAL_REQUEST_MAX_CHARS = 6_000
+
+function originalRequestOf(messages: AgentMessage[]): string {
+  const first = messages.find((m) => m.role === 'user')
+  if (!first) return ''
+  const text = first.content
+    .filter(isContentBlock)
+    .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+    .map((b) => b.text)
+    .join('\n')
+    .trim()
+  const pinned = text.match(/## Original request \(verbatim\)\n\n([\s\S]*?)\n\n## Session summary/)
+  if (pinned) return pinned[1]
+  if (text.startsWith(COMPACT_PREFIX)) return '' // prior compact without a pinned block — nothing to carry
+  return text.slice(0, ORIGINAL_REQUEST_MAX_CHARS)
+}
 
 export interface CompactConfig {
   protocol: 'anthropic' | 'openai' | 'gemini'
@@ -190,7 +219,11 @@ export async function autocompact(messages: AgentMessage[], config: CompactConfi
     const stripped = raw.replace(/<analysis>[\s\S]*?<\/analysis>/g, '').replace(/<\/?summary>/g, '').trim()
     const summary = stripped || raw.trim()
     if (!summary) return messages // empty — keep original history; caller may retry
-    return [{ role: 'user', content: [{ type: 'text', text: COMPACT_PREFIX + summary + COMPACT_SUFFIX }] }]
+    const original = originalRequestOf(messages)
+    const body = original
+      ? `${ORIGINAL_REQUEST_HEADER}\n\n${original}\n\n${SUMMARY_HEADER}\n\n${summary}`
+      : summary
+    return [{ role: 'user', content: [{ type: 'text', text: COMPACT_PREFIX + body + COMPACT_SUFFIX }] }]
   } catch {
     return messages // compaction call failed (network / itself too long) — don't lose history
   }
