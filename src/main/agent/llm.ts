@@ -48,6 +48,7 @@ interface AgentMessagesBody {
   tools: AnyToolSchema[]
   stream: true
   thinking?: { type: 'enabled'; budget_tokens: number } | { type: 'adaptive' }
+  output_config?: { effort: string } // effort-capable Claude (Opus 4.5+/Sonnet 4.6+/Fable)
 }
 
 // Text/tool-call lifecycle events surfaced to the caller for UI progress (not the loop's data path —
@@ -103,12 +104,14 @@ async function* callWithToolsAnthropic(
     stream: true,
   }
   // Extended thinking (shared directive). Loop policy: lift max_tokens only when the run's own ceiling is
-  // at or below the budget (budget_tokens must stay < max_tokens).
+  // at or below the budget (budget_tokens must stay < max_tokens — legacy budget path only; effort rides
+  // output_config and needs no lift).
   const directive = anthropicThinkingDirective(req.thinking)
   if (directive) {
     body.thinking = directive
     if (directive.type === 'enabled' && req.maxTokens <= directive.budget_tokens) body.max_tokens = directive.budget_tokens + req.maxTokens
   }
+  if (req.thinking?.effort) body.output_config = { effort: req.thinking.effort }
   if (req.cacheEnabled) applyAnthropicCacheControls(body)
   const blocks: (Accum | undefined)[] = []
   let stopReason: StopReason = null

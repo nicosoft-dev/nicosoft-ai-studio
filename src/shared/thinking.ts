@@ -16,10 +16,15 @@ export type ThinkingDepth = EffortLevel | 'max'
 // the DEFAULT (nothing stored) is the model's TOP tier — think as hard as possible unless dialed down.
 export type ThinkingChoice = ThinkingDepth | 'adaptive'
 
-// Resolved directive sent with a request. Exactly one field set: effort (OpenAI Responses / Gemini 3),
-// budgetTokens (Anthropic extended thinking / Gemini 2.5), or adaptive (Anthropic 4.6+ self-budgets).
+// Resolved directive sent with a request.
+//   effort       — OpenAI Responses / Gemini 3 reasoning level, AND Anthropic effort-capable models
+//                  (Opus 4.5+/Sonnet 4.6+: wire = output_config.effort; 'max' is Anthropic-only)
+//   budgetTokens — LEGACY Anthropic extended thinking (pre-effort Claude) / Gemini 2.5 thinkingBudget
+//   adaptive     — Anthropic 4.6+ thinking {type:"adaptive"}; combines WITH effort (a tier pick on
+//                  4.6+ resolves to adaptive+effort; the bare "Adaptive" choice is adaptive alone)
+// budgetTokens never combines with the others; budget on 4.7+/Fable is a hard 400 upstream.
 export interface ThinkingParam {
-  effort?: EffortLevel
+  effort?: EffortLevel | 'max'
   budgetTokens?: number
   adaptive?: boolean
 }
@@ -34,15 +39,14 @@ export function protocolFamily(protocol: string): ProtocolFamily {
   return null
 }
 
-// Claude effort levels expressed as extended-thinking budgets — budget_tokens is the universally-supported
-// wire form any Anthropic-protocol endpoint accepts (new Opus models also take the effort enum, but budget
-// is the safe, portable choice).
+// LEGACY Claude tiers expressed as extended-thinking budgets — the compatibility path for models that
+// PREDATE the effort parameter (Sonnet ≤4.5, Opus ≤4.1, Claude 3.x). Effort-capable models (Opus 4.5+,
+// Sonnet 4.6+, Fable) never take budgets: budget_tokens is deprecated on 4.6 and a hard 400 on
+// 4.7+/Fable — they go through output_config.effort (see anthropicEffortDepths).
 export const ANTHROPIC_BUDGET: Partial<Record<ThinkingDepth, number>> = {
   low: 1024,
   medium: 8192,
-  high: 32768,
-  xhigh: 49152,
-  max: 65536
+  high: 32768
 }
 // Gemini 2.5 budgets — sub-model token ceilings (no 'max' tier). Gemini 3 takes an effort level instead.
 export const GEMINI_PRO_BUDGET: Partial<Record<ThinkingDepth, number>> = { low: 1024, medium: 8192, high: 32768 }
@@ -50,18 +54,33 @@ export const GEMINI_FLASH_BUDGET: Partial<Record<ThinkingDepth, number>> = { low
 // Gemini-3 effort knob — three native levels.
 export const GEMINI3_DEPTHS: ThinkingDepth[] = ['low', 'medium', 'high']
 
-// Per-model Claude tiers: low/medium/high base; +max on Opus 4.6+; +xhigh(Extra) on Opus 4.7+.
-// Haiku has no thinking; non-Opus or older Opus Claude gets the base three.
+// LEGACY Claude budget tiers — only reached for models WITHOUT effort support (Sonnet ≤4.5, Opus ≤4.1,
+// Claude 3.x). Haiku never thinks. Effort-capable models are routed to anthropicEffortDepths by
+// thinkingKnob before this is consulted.
 export function anthropicDepths(slug: string): ThinkingDepth[] {
   if (slug.includes('haiku')) return []
-  const tiers: ThinkingDepth[] = ['low', 'medium', 'high']
-  const opus = /opus-4[.\-](\d+)/.exec(slug) // matches both claude-opus-4-6 and claude-opus-4.6
-  if (opus) {
-    const minor = parseInt(opus[1], 10)
-    if (minor >= 7) tiers.push('xhigh')
-    if (minor >= 6) tiers.push('max')
+  return ['low', 'medium', 'high']
+}
+
+// Anthropic effort tiers by model (wire = output_config.effort; verified against the API docs):
+//   Opus 4.5          → low/medium/high
+//   Opus 4.6          → low/medium/high/max          ('max' arrives with 4.6)
+//   Opus 4.7+ / Fable → low/medium/high/xhigh/max    ('xhigh' arrives with 4.7)
+//   Sonnet 4.6+       → low/medium/high/max
+//   everything older  → [] (legacy budget path)
+export function anthropicEffortDepths(slug: string): ThinkingDepth[] {
+  if (slug.includes('haiku')) return []
+  if (slug.includes('fable')) return ['low', 'medium', 'high', 'xhigh', 'max']
+  const m = /(opus|sonnet)-4[.\-](\d+)/.exec(slug) // claude-opus-4-8 / claude-sonnet-4.6
+  if (!m) return []
+  const minor = parseInt(m[2], 10)
+  if (m[1] === 'opus') {
+    if (minor >= 7) return ['low', 'medium', 'high', 'xhigh', 'max']
+    if (minor >= 6) return ['low', 'medium', 'high', 'max']
+    if (minor >= 5) return ['low', 'medium', 'high']
+    return []
   }
-  return tiers
+  return minor >= 6 ? ['low', 'medium', 'high', 'max'] : []
 }
 
 // OpenAI reasoning effort by model (verified against the OpenAI API docs):
@@ -82,11 +101,12 @@ export function openaiDepths(slug: string): ThinkingDepth[] {
   return tiers
 }
 
-// Opus 4.6+ / Sonnet 4.6+ are trained on adaptive thinking — the model self-budgets when sent
-// { adaptive: true }. Offered as a selectable choice next to the explicit tiers (not a lock: these
-// models accept explicit budgets too). Haiku never thinks.
+// Opus/Sonnet 4.6+ and Fable are trained on adaptive thinking — the model self-budgets when sent
+// thinking {type:"adaptive"}. Offered as a selectable choice next to the effort tiers; a tier pick on
+// these models rides WITH adaptive (adaptive + output_config.effort). Haiku never thinks.
 export function supportsAdaptiveThinking(slug: string): boolean {
   if (slug.includes('haiku')) return false
+  if (slug.includes('fable')) return true
   const m = /(opus|sonnet)-4[.\-](\d+)/.exec(slug) // claude-opus-4-8 / claude-sonnet-4.6
   return m ? parseInt(m[2], 10) >= 6 : false
 }
@@ -99,13 +119,15 @@ export function clampDepth(depth: ThinkingDepth, supported: ThinkingDepth[]): Th
 }
 
 // Which thinking knob a (family, slug) exposes — THE single source both processes resolve from
-// (renderer capability/picker, main resolveDepth). effort = enum knob (OpenAI Responses / Gemini 3);
-// budget = token allowance (Anthropic extended thinking / Gemini 2.5); adaptiveOption marks Anthropic
-// 4.6+ where 'adaptive' is selectable alongside the tiers.
+// (renderer capability/picker, main resolveDepth).
+//   effort — enum knob: OpenAI Responses / Gemini 3 / Anthropic effort-capable models (Opus 4.5+,
+//            Sonnet 4.6+, Fable — wire = output_config.effort). adaptiveOption marks Anthropic 4.6+:
+//            'adaptive' is selectable alongside the tiers, and a tier pick rides WITH adaptive.
+//   budget — token allowance: LEGACY Anthropic (pre-effort Claude) / Gemini 2.5 thinkingBudget.
 export type ThinkingKnob =
   | { kind: 'none' }
-  | { kind: 'effort'; depths: ThinkingDepth[] }
-  | { kind: 'budget'; mapping: Partial<Record<ThinkingDepth, number>>; adaptiveOption?: boolean }
+  | { kind: 'effort'; depths: ThinkingDepth[]; adaptiveOption?: boolean }
+  | { kind: 'budget'; mapping: Partial<Record<ThinkingDepth, number>> }
 
 function budgetsFor(depths: ThinkingDepth[], table: Partial<Record<ThinkingDepth, number>>): Partial<Record<ThinkingDepth, number>> {
   const out: Partial<Record<ThinkingDepth, number>> = {}
@@ -117,9 +139,15 @@ export function thinkingKnob(family: ProtocolFamily, slug: string): ThinkingKnob
   const s = (slug || '').toLowerCase()
   if (!s || !family) return { kind: 'none' }
   if (family === 'anthropic') {
+    // Effort-capable Claude goes through output_config.effort, uniformly — budget_tokens is the
+    // COMPATIBILITY path for models that predate effort (deprecated on 4.6, hard 400 on 4.7+/Fable).
+    const effort = anthropicEffortDepths(s)
+    if (effort.length > 0) {
+      return { kind: 'effort', depths: effort, ...(supportsAdaptiveThinking(s) ? { adaptiveOption: true } : {}) }
+    }
     const depths = anthropicDepths(s)
     if (depths.length === 0) return { kind: 'none' }
-    return { kind: 'budget', mapping: budgetsFor(depths, ANTHROPIC_BUDGET), ...(supportsAdaptiveThinking(s) ? { adaptiveOption: true } : {}) }
+    return { kind: 'budget', mapping: budgetsFor(depths, ANTHROPIC_BUDGET) }
   }
   if (family === 'openai') {
     const depths = openaiDepths(s)

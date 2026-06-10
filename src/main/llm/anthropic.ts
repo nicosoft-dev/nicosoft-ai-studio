@@ -44,6 +44,7 @@ interface MessagesBody {
   stream: true
   system?: string | TextBlock[]
   thinking?: { type: 'enabled'; budget_tokens: number } | { type: 'adaptive' }
+  output_config?: { effort: string } // effort-capable Claude (Opus 4.5+/Sonnet 4.6+/Fable)
 }
 
 // Turn a single attachment into an Anthropic image block. data: URLs are split into base64 source;
@@ -90,12 +91,14 @@ function buildBody(req: ChatRequest): MessagesBody {
   const system = toSystem(req.messages)
   if (system) body.system = system
   // Extended thinking (shared directive). Chat policy: always lift max_tokens above the budget so the
-  // visible answer keeps MAX_TOKENS of room on top of the thinking allowance.
+  // visible answer keeps MAX_TOKENS of room on top of the thinking allowance (legacy budget path only —
+  // effort rides output_config and needs no lift).
   const directive = anthropicThinkingDirective(req.thinking)
   if (directive) {
     body.thinking = directive
     if (directive.type === 'enabled') body.max_tokens = directive.budget_tokens + MAX_TOKENS
   }
+  if (req.thinking?.effort) body.output_config = { effort: req.thinking.effort }
   if (req.cacheEnabled) applyAnthropicCacheControls(body)
   return body
 }

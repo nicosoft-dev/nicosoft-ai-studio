@@ -16,10 +16,12 @@ export function anthropicHeaders(apiKey: string): Record<string, string> {
   }
 }
 
-// Extended-thinking directive. Adaptive (Opus/Sonnet 4.6+): the model self-budgets — { type: 'adaptive' }
-// with no token count (mirrors claude-code). Legacy budget: { type: 'enabled', budget_tokens }. Callers
-// own their max_tokens policy (budget_tokens must stay < max_tokens; chat lifts unconditionally, the
-// agent loop lifts only when its own ceiling is at or below the budget).
+// Extended-thinking directive. Adaptive (Opus/Sonnet 4.6+/Fable): { type: 'adaptive' } — the model
+// self-budgets; an effort tier rides SEPARATELY as body.output_config.effort (both body builders set it
+// from ThinkingParam.effort). Legacy budget: { type: 'enabled', budget_tokens } — the compatibility path
+// for pre-effort Claude only (deprecated on 4.6, hard 400 on 4.7+/Fable). Callers own their max_tokens
+// policy (budget_tokens must stay < max_tokens; chat lifts unconditionally, the agent loop lifts only
+// when its own ceiling is at or below the budget).
 export type AnthropicThinkingDirective = { type: 'enabled'; budget_tokens: number } | { type: 'adaptive' }
 export function anthropicThinkingDirective(thinking?: ThinkingParam): AnthropicThinkingDirective | undefined {
   if (thinking?.adaptive) return { type: 'adaptive' }

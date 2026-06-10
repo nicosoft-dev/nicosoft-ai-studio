@@ -54,7 +54,7 @@ export function supportedDepths(cap: ThinkingCapability): ThinkingDepth[] {
 }
 
 export function hasAdaptiveOption(cap: ThinkingCapability): boolean {
-  return cap.kind === 'budget' && !!cap.adaptiveOption
+  return cap.kind === 'effort' && !!cap.adaptiveOption
 }
 
 // Is a stored choice valid for this capability?
@@ -69,22 +69,23 @@ export function defaultThinkingChoice(family: Family, slug: string): ThinkingCho
   return highestDepth(family, slug)
 }
 
-// Resolve a chosen depth into the backend directive. null when the model can't think. A stale
-// 'adaptive' on a model without the option (binding re-pointed) clamps to the top tier.
+// Resolve a chosen depth into the backend directive (mirror of main's resolveDepth). null when the
+// model can't think. On Anthropic 4.6+ a tier pick rides WITH adaptive (adaptive + effort); the bare
+// 'adaptive' choice is adaptive alone. A stale choice the model doesn't offer clamps to its top tier
+// — including 'max', which only passes through on models whose own tier list contains it.
 export function resolveThinking(cap: ThinkingCapability, choice: ThinkingChoice): ThinkingParam | null {
   if (cap.kind === 'none') return null
+  const adaptive = hasAdaptiveOption(cap)
   if (choice === 'adaptive') {
-    if (hasAdaptiveOption(cap)) return { adaptive: true }
+    if (adaptive) return { adaptive: true }
     const tiers = supportedDepths(cap)
     choice = tiers[tiers.length - 1]
   }
-  if (cap.kind === 'effort') {
-    // 'max' is Anthropic-only — clamp it for effort models. Every other tier passes through (the
-    // picker only ever offers depths the model supports).
-    if (choice === 'max') return { effort: 'high' }
-    return { effort: choice as Exclude<ThinkingDepth, 'max'> }
-  }
-  const budget = cap.mapping[choice]
+  const tiers = supportedDepths(cap)
+  const eff = tiers.includes(choice) ? choice : tiers[tiers.length - 1]
+  if (eff === undefined) return null
+  if (cap.kind === 'effort') return { ...(adaptive ? { adaptive: true } : {}), effort: eff as ThinkingParam['effort'] }
+  const budget = cap.mapping[eff]
   return budget !== undefined ? { budgetTokens: budget } : null
 }
 

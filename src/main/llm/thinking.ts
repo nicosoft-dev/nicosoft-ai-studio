@@ -15,20 +15,24 @@ import {
 import type { ThinkingParam } from './types'
 
 // Resolve a stored choice into the directive sent to the model. undefined = the model can't think.
-// budgetTokens (Anthropic / Gemini 2.5) XOR effort (OpenAI / Gemini 3) XOR adaptive (Anthropic 4.6+,
-// explicit 'adaptive' pick only), never combined. No stored choice → the model's TOP tier (per-role
-// default is "think as hard as possible"); 'adaptive' stored on a model that lost the option (binding
-// re-pointed) clamps to the top tier instead of silently dropping thinking.
+// effort (OpenAI / Gemini 3 / effort-capable Claude — Anthropic wire = output_config.effort) XOR
+// budgetTokens (legacy Claude / Gemini 2.5); on Anthropic 4.6+ a tier pick rides WITH adaptive
+// (adaptive + effort), while the explicit 'adaptive' choice is adaptive alone (model self-budgets,
+// upstream-default effort). No stored choice → the model's TOP tier (per-role default is "think as
+// hard as possible"); a stale choice the model doesn't offer (binding re-pointed) clamps to its top
+// tier instead of silently dropping thinking. 'max' is list-driven — it passes through only on models
+// whose tier list contains it (Anthropic 4.6+); elsewhere it clamps to that model's own top tier.
 export function resolveDepth(protocol: string, slug: string, depth: string | null | undefined): ThinkingParam | undefined {
   const knob = thinkingKnob(protocolFamily(protocol), slug)
   if (knob.kind === 'none') return undefined
   const choice = (depth || undefined) as ThinkingChoice | undefined
-  if (choice === 'adaptive' && knob.kind === 'budget' && knob.adaptiveOption) return { adaptive: true }
+  const adaptive = knob.kind === 'effort' && !!knob.adaptiveOption
+  if (choice === 'adaptive' && adaptive) return { adaptive: true }
   const tiers = knobDepths(knob)
   const want: ThinkingDepth = choice && choice !== 'adaptive' ? choice : tiers[tiers.length - 1]
   const eff = clampDepth(want, tiers)
   if (!eff) return undefined
-  if (knob.kind === 'effort') return { effort: (eff === 'max' ? 'high' : eff) as ThinkingParam['effort'] }
+  if (knob.kind === 'effort') return { ...(adaptive ? { adaptive: true } : {}), effort: eff as ThinkingParam['effort'] }
   const budget = knob.mapping[eff]
   return budget !== undefined ? { budgetTokens: budget } : undefined
 }
