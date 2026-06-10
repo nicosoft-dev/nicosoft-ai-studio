@@ -75,6 +75,9 @@
   border-bottom: 1px solid var(--border-1);
   margin-top: 2px;
 }
+/* …except when the expanded tool is the card's LAST line: the card's own bottom border is right below,
+   so the payload's bottom hairline would read as a double line. */
+.tr-card > .tr-line-wrap:last-child > .tr-payload .tb-detail { border-bottom: none; }
 /* Lone tool (bare line, no card around it): the payload IS the only container — box it. */
 .tool-run > .tr-line-wrap > .tr-payload { padding: 0 0 6px 0; }
 .tool-run > .tr-line-wrap > .tr-payload .tb-detail {
