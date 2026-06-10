@@ -2,11 +2,11 @@
 // agent loop sees a stable, namespaced tool name. Normalization keeps names within the Anthropic
 // tool-name charset [a-zA-Z0-9_-] by replacing anything else with '_'.
 
-export function normalizeNameForMCP(name: string): string {
+function normalizeNameForMCP(name: string): string {
   return name.replace(/[^a-zA-Z0-9_-]/g, '_')
 }
 
-export function mcpPrefix(serverName: string): string {
+function mcpPrefix(serverName: string): string {
   return `mcp__${normalizeNameForMCP(serverName)}__`
 }
 

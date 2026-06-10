@@ -29,7 +29,7 @@ const IMAGE_GEN_ROLES = new Set(['designer'])
 const COORDINATOR_ID = 'coordinator'
 export const roleHasAgent = (expertId: string): boolean => AGENT_ROLES.has(expertId)
 export const roleHasImageGen = (expertId: string): boolean => IMAGE_GEN_ROLES.has(expertId)
-export const roleIsCoordinator = (expertId: string): boolean => expertId === COORDINATOR_ID
+const roleIsCoordinator = (expertId: string): boolean => expertId === COORDINATOR_ID
 
 export interface ToolCall {
   id: string

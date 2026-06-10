@@ -10,6 +10,3 @@ export const MODE_OPTIONS: { value: AgentMode; label: string; hint: string }[] =
   { value: 'bypass', label: 'Auto', hint: 'Run everything without asking' }
 ]
 
-export function modeLabel(mode: AgentMode): string {
-  return MODE_OPTIONS.find((o) => o.value === mode)?.label ?? 'Ask'
-}

@@ -4,7 +4,7 @@
 
 // Known Gemini image backends always offered in the picker, even if the bound endpoint hasn't listed
 // them explicitly. Nano Banana (generateContent IMAGE) + Imagen (predict) families.
-export const KNOWN_IMAGE_MODELS = [
+const KNOWN_IMAGE_MODELS = [
   'nano-banana-pro-preview',
   'gemini-3.1-flash-image-preview',
   'imagen-4.0-generate-001',
@@ -16,7 +16,7 @@ export const DEFAULT_IMAGE_MODEL = 'nano-banana-pro-preview'
 
 // True when a slug is an image-generation model (Imagen / Nano Banana / *-image). Mirror of
 // imageModelCaps()'s detection in main/media/image-models.ts.
-export function isImageModel(slug: string): boolean {
+function isImageModel(slug: string): boolean {
   const s = slug.toLowerCase()
   return s.includes('imagen') || s.includes('nano-banana') || s.includes('-image')
 }

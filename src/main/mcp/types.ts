@@ -17,7 +17,6 @@ export const McpHttpConfig = z.object({
 })
 export const McpServerConfigSchema = z.discriminatedUnion('type', [McpStdioConfig, McpHttpConfig])
 export type McpServerConfig = z.infer<typeof McpServerConfigSchema>
-export type McpTransportType = McpServerConfig['type']
 
 // Which roles see a server's tools: 'all', or an explicit list of role ids.
 export type McpScope = 'all' | string[]

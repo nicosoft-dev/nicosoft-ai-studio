@@ -22,7 +22,7 @@ export interface AnthropicCountInput {
 const cache = new Map<string, number>()
 const CACHE_CAP = 2000
 
-export async function countAnthropic(input: AnthropicCountInput): Promise<number> {
+async function countAnthropic(input: AnthropicCountInput): Promise<number> {
   const key = hashKey(input)
   const hit = cache.get(key)
   if (hit !== undefined) return hit

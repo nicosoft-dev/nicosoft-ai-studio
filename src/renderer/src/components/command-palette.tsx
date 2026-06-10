@@ -18,7 +18,7 @@ export interface SlashCommand {
   run: (ctx: CommandContext) => void
 }
 
-export const SLASH_COMMANDS: SlashCommand[] = [
+const SLASH_COMMANDS: SlashCommand[] = [
   { name: 'clear', desc: 'Start a new conversation', run: (c) => c.newConversation() },
   { name: 'compact', desc: 'Summarize older history now to free up context', run: (c) => c.compact() },
   { name: 'plan', desc: 'Plan mode — investigate read-only, then propose a plan', run: (c) => c.setPlanMode(true) },

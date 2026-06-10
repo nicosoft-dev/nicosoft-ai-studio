@@ -677,11 +677,6 @@ export interface PluginDto {
   enabled: boolean
 }
 
-export interface PluginInstallResult {
-  ok: boolean
-  plugin?: PluginDto
-  error?: string
-}
 
 // === Project (Coordinator 2.0 — doc 19 §1/§13) ===
 // A project is one complete piece of work: goal + a working directory + a plan of tasks (assigned to
@@ -748,9 +743,6 @@ export interface ProjectTaskInput {
   assigneeRoleId?: string | null
   deps?: string[]
   stepNo?: number
-}
-export interface ProjectTestInput {
-  title: string
 }
 
 // Pushed on project:updated — a live collab event changed the project's tasks/phase; the renderer

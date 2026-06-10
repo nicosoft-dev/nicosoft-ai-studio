@@ -5,7 +5,7 @@
 import { realpath } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
-export class ConfinementError extends Error {
+class ConfinementError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'ConfinementError'
@@ -14,7 +14,7 @@ export class ConfinementError extends Error {
 
 // Lexical-only: resolve `p` against `cwd` and ensure it stays inside `cwd`. Cheap but blind to
 // symlinks — use confineReal for anything that actually gets opened.
-export function confinePath(cwd: string, p: string): string {
+function confinePath(cwd: string, p: string): string {
   const abs = isAbsolute(p) ? resolve(p) : resolve(cwd, p)
   const rel = relative(cwd, abs)
   if (rel === '') return abs // the cwd itself

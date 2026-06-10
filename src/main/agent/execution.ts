@@ -61,7 +61,7 @@ async function checkPermission(
 }
 
 // Run one tool_use through the full pipeline. Always resolves to exactly one tool_result.
-export async function runOne(
+async function runOne(
   toolUse: ToolUseBlock,
   tools: readonly Tool[],
   ctx: AgentContext,
@@ -94,7 +94,7 @@ export async function runOne(
 }
 
 // Whether a tool_use is concurrency-safe (read-only). Unparsable input or a throw → unsafe.
-export function isToolSafe(toolUse: ToolUseBlock, tools: readonly Tool[]): boolean {
+function isToolSafe(toolUse: ToolUseBlock, tools: readonly Tool[]): boolean {
   const tool = findTool(tools, toolUse.name)
   try {
     const parsed = tool?.inputSchema.safeParse(toolUse.input)

@@ -5,7 +5,7 @@
 import { LlmError, type LlmErrorCode } from './types'
 
 // Map an upstream HTTP status to our error taxonomy. Kept identical across all three providers.
-export function codeForStatus(status: number): LlmErrorCode {
+function codeForStatus(status: number): LlmErrorCode {
   if (status === 401) return 'bad_key'
   if (status === 403) return 'forbidden'
   if (status === 429) return 'rate_limited'

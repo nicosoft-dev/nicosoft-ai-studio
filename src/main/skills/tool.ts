@@ -11,7 +11,7 @@ import type { ToolResultBlock } from '../agent/types'
 import { parseFrontmatter } from './frontmatter'
 import { SKILL_FILE, type LoadedSkill } from './types'
 
-export const SKILL_TOOL_NAME = 'Skill'
+const SKILL_TOOL_NAME = 'Skill'
 
 interface SkillCallResult {
   error: boolean

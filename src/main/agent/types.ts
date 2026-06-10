@@ -84,7 +84,7 @@ export interface AssistantTurn {
   usage: Usage
 }
 
-// Anthropic `tools` param entry — name + description + JSON Schema (from zod-to-json-schema).
+// Anthropic `tools` param entry — name + description + JSON Schema (from zod's z.toJSONSchema).
 // `defer_loading` marks a tool for tool_search: excluded from the initial context, surfaced only when
 // the model discovers it via the tool_search tool.
 export interface ToolSchema {

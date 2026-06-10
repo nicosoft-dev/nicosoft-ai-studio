@@ -115,7 +115,7 @@ export function Topbar({
   )
 }
 
-export function RoleRow({
+function RoleRow({
   expert,
   active,
   onChat,

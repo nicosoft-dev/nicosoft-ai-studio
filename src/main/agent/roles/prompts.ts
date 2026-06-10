@@ -14,7 +14,7 @@ import { COMMON_PREAMBLE } from './common-preamble'
 // Display names shown to the user + used by Danny when it refers to a teammate. The role_id keys stay the
 // internal contract (routing / bindings / dispatch / AGENT_ROLES) — only the surface name changed, so a
 // rename never touches the wiring. roleIdFromName accepts either the display name or the raw id.
-export const ROLE_DISPLAY_NAMES: Record<string, string> = {
+const ROLE_DISPLAY_NAMES: Record<string, string> = {
   coordinator: 'Danny',
   generalist: 'Amélie',
   engineer: 'Flynn',
@@ -303,10 +303,6 @@ const ROLE_SECTIONS: Record<string, string> = {
   scheduler: SCHEDULER_PROMPT
 }
 
-// All built-in role ids (coordinator + 8 dispatched).
-export const BUILTIN_ROLE_IDS = ['coordinator', 'generalist', 'engineer', 'shuri', 'designer', 'translator', 'editor', 'analyst', 'scheduler'] as const
-export type BuiltinRoleId = (typeof BUILTIN_ROLE_IDS)[number]
-
 // Dispatched role ids (everything Danny can route to — Danny itself is the router, not a destination).
 export const DISPATCHABLE_ROLE_IDS = ['generalist', 'engineer', 'shuri', 'designer', 'translator', 'editor', 'analyst', 'scheduler'] as const
 export type DispatchableRoleId = (typeof DISPATCHABLE_ROLE_IDS)[number]
@@ -321,6 +317,3 @@ export function buildRolePrompt(roleId: string): string | null {
   return `${COMMON_PREAMBLE}\n\n${section}`
 }
 
-export function isDispatchableRole(roleId: string): roleId is DispatchableRoleId {
-  return roleId in ROLE_SECTIONS
-}

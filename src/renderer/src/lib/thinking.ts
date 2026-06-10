@@ -157,14 +157,6 @@ export function resolveThinking(cap: ThinkingCapability, depth: ThinkingDepth): 
   return budget !== undefined ? { budgetTokens: budget } : null
 }
 
-// Clamp a depth to what the model supports (used when switching models). Returns the highest supported
-// depth if the current one isn't available; null if the model can't think at all.
-export function clampDepth(cap: ThinkingCapability, depth: ThinkingDepth): ThinkingDepth | null {
-  const ds = supportedDepths(cap)
-  if (ds.length === 0) return null
-  if (ds.includes(depth)) return depth
-  return ds[ds.length - 1]
-}
 
 // Map an endpoint's protocol to the model family the thinking engine reasons about. openai + custom
 // (both Responses-API) collapse to 'openai'; unknown protocols → null (no thinking).

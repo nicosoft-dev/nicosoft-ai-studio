@@ -54,7 +54,7 @@ function toolResultText(tr: ToolResultBlock): string {
 
 // AgentMessage[] → Gemini contents. assistant→model, user→user. functionResponse needs the tool NAME, so we
 // remember each tool_use's id→name from the assistant turn and resolve it on the user's tool_result.
-export function toContents(messages: AgentMessage[]): GeminiContent[] {
+function toContents(messages: AgentMessage[]): GeminiContent[] {
   const idToName = new Map<string, string>()
   const out: GeminiContent[] = []
   for (const m of messages) {
@@ -99,7 +99,7 @@ export function toContents(messages: AgentMessage[]): GeminiContent[] {
 
 // AnyToolSchema[] → Gemini tools. Custom ToolSchema → functionDeclarations; a server tool (web_search /
 // google_search) → the built-in {google_search:{}} grounding tool. Combining the two needs Gemini 3 (doc 29).
-export function toGeminiTools(schemas: AnyToolSchema[]): unknown[] {
+function toGeminiTools(schemas: AnyToolSchema[]): unknown[] {
   const fns: { name: string; description: string; parameters: Record<string, unknown> }[] = []
   let wantsSearch = false
   for (const s of schemas) {

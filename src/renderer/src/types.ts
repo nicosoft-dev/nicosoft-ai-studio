@@ -17,33 +17,6 @@ export interface Expert {
   unconfigured?: boolean
 }
 
-export type BlockType = 'para' | 'quote' | 'code' | 'imagecard' | 'notice'
-export interface Block {
-  type: BlockType
-  html?: string
-  lang?: string
-  code?: string
-}
-
-export interface Segment {
-  who: string // 'user' | expertId
-  model?: string
-  ts?: string
-  synthesis?: boolean
-  streaming?: boolean
-  blocks: Block[]
-}
-
-export interface Conversation {
-  title: string
-  expert: string
-  collab?: boolean
-  dispatch?: string[]
-  notice?: boolean
-  loading?: boolean
-  segments: Segment[]
-}
-
 export interface MemoryItem {
   id: string
   text: string
@@ -83,41 +56,10 @@ export interface ExtensionsData {
   plugins: Plugin[]
 }
 
-export interface RoleBinding {
-  id: string
-  family: Family
-  model: string
-}
 export interface Greeting {
   greeting: string
   chips: string[]
 }
-export interface ProjectTask {
-  id: string
-  title: string
-  expert: string
-  deps: string[]
-  status: 'done' | 'doing' | 'todo'
-  output: string | null
-}
-export interface ProjectTest {
-  id: string
-  title: string
-  status: 'pass' | 'pending' | 'fail'
-}
-export interface Project {
-  id: string
-  title: string
-  summary: string
-  goal: string
-  phase: string
-  progress: number
-  chair: string
-  experts: string[]
-  plan: ProjectTask[]
-  tests: ProjectTest[]
-}
-
 export interface StudioData {
   EXPERTS: Expert[]
   EXPERT_BY_ID: Record<string, Expert>

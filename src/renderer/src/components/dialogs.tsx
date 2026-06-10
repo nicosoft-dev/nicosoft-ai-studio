@@ -216,11 +216,6 @@ export function EndpointDialog({
 
 /* — Add / Edit MCP server dialog (controlled) — */
 // Extensions (MCP + Skills) only run inside an agent loop, which today only Engineer has. A capability
-// scoped to a role without an agent is saved but never reaches a model — surface that honestly instead
-// of letting the user assume it's live. Future per-role agents widen roleHasAgent and this resolves itself.
-const AGENT_SCOPE_NOTE =
-  'Only experts with an agent run extensions today (currently Engineer). Others are saved but stay inactive until they get an agent.'
-
 export function McpDialog({
   initial,
   onClose,

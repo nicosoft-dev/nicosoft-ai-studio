@@ -87,10 +87,6 @@ export function useT(): TFunction {
   return (key, vars) => interpolate(lookup(resolved, key), vars)
 }
 
-// Non-reactive lookup for use outside React.
-export function translate(key: string, vars?: Record<string, string | number>): string {
-  return interpolate(lookup(useLocale.getState().resolved, key), vars)
-}
 
 // Call once at startup: start tracking OS language changes while in 'auto'.
 let inited = false

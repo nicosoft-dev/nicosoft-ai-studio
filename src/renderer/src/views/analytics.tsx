@@ -40,7 +40,7 @@ function fmtTokens(n: number): string {
 type TrendPoint = number | { v: number }
 
 /* — Thin line trend with hairline gridlines (non-scaling strokes) — */
-export function LineTrend({
+function LineTrend({
   data,
   color = "var(--accent)",
   height = 60,
@@ -84,7 +84,7 @@ interface BarRow {
 }
 
 /* — Horizontal bar list — */
-export function BarList({ rows, max, neutral }: { rows: BarRow[]; max?: number; neutral?: boolean }): ReactElement {
+function BarList({ rows, max, neutral }: { rows: BarRow[]; max?: number; neutral?: boolean }): ReactElement {
   const m = max || Math.max(...rows.map((r) => r.v), 1);
   return (
     <div className="bar-list">
@@ -102,7 +102,7 @@ export function BarList({ rows, max, neutral }: { rows: BarRow[]; max?: number; 
 }
 
 /* — Vertical mini bars (peak hours) — */
-export function MiniBars({ data, peakColor = "var(--accent)" }: { data: number[]; peakColor?: string }): ReactElement {
+function MiniBars({ data, peakColor = "var(--accent)" }: { data: number[]; peakColor?: string }): ReactElement {
   const max = Math.max(...data, 1);
   return (
     <div className="mini-bars">

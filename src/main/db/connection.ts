@@ -69,10 +69,6 @@ export function getDb(): DatabaseSync {
   return instance
 }
 
-export function closeDb(): void {
-  instance?.close()
-  instance = null
-}
 
 // Run fn inside a transaction; commit on success, roll back on throw. For multi-table operations that
 // must be atomic — e.g. deleting a role and cascading its memories + conversations.
