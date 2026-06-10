@@ -96,6 +96,7 @@
 }
 .tr-live .tr-verb { color: var(--text-3); }
 .tr-live .tr-target { color: var(--text-2); }
+.tr-cached { color: var(--text-4); } /* cache-served share of ↑ — informational, dimmer than the fresh count */
 .tr-dot,
 .tb-dot {
   width: 7px;

@@ -43,7 +43,7 @@ export interface CoordinatorCallbacks {
   onStepStart: (roleId: string, dispatch: string[] | null, model: string) => void
   onDelta: (roleId: string, text: string) => void
   onStepDone: (roleId: string, text: string, inputTokens: number, outputTokens?: number) => void
-  onUsage?: (roleId: string, inputTokens: number, outputTokens?: number) => void // live ↑in + ↓out per chunk; roleId tags the dispatched step so the renderer isolates per-segment (coordinator path)
+  onUsage?: (roleId: string, inputTokens: number, outputTokens?: number, cachedTokens?: number) => void // live ↑in + ↓out per chunk (cachedTokens = cache-read share); roleId tags the dispatched step so the renderer isolates per-segment (coordinator path)
   onTurnFinalUsage?: (usage: { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number }) => void
   // Agent-dispatched experts (engineer/shuri/generalist/analyst/scheduler/translator/editor/designer) run a
   // full tool-using loop — these surface its tool activity + approval prompts to the coordinator UI. Only the

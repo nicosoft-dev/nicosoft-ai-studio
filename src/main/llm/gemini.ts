@@ -184,7 +184,7 @@ export const chatGemini: ChatFn = async (req: ChatRequest, onDelta: OnDelta): Pr
         if (typeof u.promptTokenCount === 'number' && u.promptTokenCount > 0) inTokens = u.promptTokenCount
         if (typeof u.candidatesTokenCount === 'number' && u.candidatesTokenCount > 0) outTokens = u.candidatesTokenCount
         if (typeof u.cachedContentTokenCount === 'number' && u.cachedContentTokenCount > 0) cacheReadTokens = u.cachedContentTokenCount
-        onDelta({ usage: { inTokens, outTokens } })
+        onDelta({ usage: { inTokens, outTokens, cachedTokens: cacheReadTokens } })
       }
     }
   } catch (err) {

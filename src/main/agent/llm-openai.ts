@@ -230,7 +230,7 @@ export async function* callWithToolsOpenAI(
             cacheReadTokens = u.input_tokens_details?.cached_tokens ?? 0
             // OpenAI reports usage only at the end (no per-delta counts), so this is a single end-of-turn
             // correction; the live readout estimates ↓ until it lands.
-            onEvent?.({ type: 'usage', inputTokens: inTokens, outputTokens: outTokens })
+            onEvent?.({ type: 'usage', inputTokens: inTokens, outputTokens: outTokens, cachedTokens: cacheReadTokens })
           }
           break
         }

@@ -36,6 +36,8 @@ export function ChatView({ expert, onOpenSettings, onBackToProject }: { expert: 
   const ctxIn = activeConv ? (chat.contextTokens[activeConv] ?? 0) : 0
   const baseIn = liveIn || ctxIn
   const baseOut = liveOut
+  // Cached split only applies to REAL live pings — the count_tokens fallback (ctxIn) has no split.
+  const baseCached = liveIn && activeConv ? (chat.liveCached[activeConv] ?? 0) : 0
   const convStreaming = activeConv ? (chat.streaming[activeConv] ?? false) : false
   const retry = activeConv ? chat.retry[activeConv] : null
   const error = activeConv ? chat.error[activeConv] : null
@@ -152,6 +154,7 @@ export function ChatView({ expert, onOpenSettings, onBackToProject }: { expert: 
                     onOpenImage={openImage}
                     inputTokens={baseIn}
                     outputTokens={baseOut}
+                    cachedTokens={baseCached}
                     pendingLive={convStreaming && ri === runs.length - 1 && firstMsg.role === 'assistant'}
                   />
                 </Fragment>

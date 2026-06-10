@@ -69,7 +69,7 @@ export async function runCollaboration(
     onExpertStream: (roleId, ev) => {
       if (ev.type === 'text') cb.onDelta(roleId, ev.delta)
       else if (ev.type === 'tool_use_start') cb.onToolStart?.(roleId, ev.id, ev.name)
-      else if (ev.type === 'usage') cb.onUsage?.(roleId, ev.inputTokens, ev.outputTokens)
+      else if (ev.type === 'usage') cb.onUsage?.(roleId, ev.inputTokens, ev.outputTokens, ev.cachedTokens)
       else if (ev.type === 'turn-final') cb.onTurnFinalUsage?.(ev.usage)
     },
     onExpertEvent: (roleId, ev) => {

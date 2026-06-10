@@ -59,7 +59,7 @@ export type AgentLlmEvent =
   | { type: 'tool_use_input'; id: string; delta: string }
   | { type: 'sub_tool_start'; parentToolId: string; toolUseId: string; name: string; input?: Record<string, unknown>; subAgentId?: string }
   | { type: 'sub_tool_done'; parentToolId: string; toolUseId: string; name: string; result?: unknown; isError?: boolean; subAgentId?: string }
-  | { type: 'usage'; inputTokens: number; outputTokens: number } // cumulative REAL usage, streamed live per chunk
+  | { type: 'usage'; inputTokens: number; outputTokens: number; cachedTokens?: number } // in-flight request's REAL usage per chunk; cachedTokens = cache-read share of inputTokens (Codex-style split in the ↑ readout)
   | { type: 'turn-final'; usage: FinalUsage } // exactly-once final usage for accumulation
 
 export interface FinalUsage {
@@ -141,7 +141,7 @@ async function* callWithToolsAnthropic(
           inTokens = ev.message?.usage?.input_tokens ?? 0
           cacheReadTokens = ev.message?.usage?.cache_read_input_tokens ?? 0
           cacheCreationTokens = ev.message?.usage?.cache_creation_input_tokens ?? 0
-          onEvent?.({ type: 'usage', inputTokens: inTokens + cacheReadTokens + cacheCreationTokens, outputTokens: 0 })
+          onEvent?.({ type: 'usage', inputTokens: inTokens + cacheReadTokens + cacheCreationTokens, outputTokens: 0, cachedTokens: cacheReadTokens })
           break
         case 'content_block_start': {
           const cb = ev.content_block
@@ -202,7 +202,7 @@ async function* callWithToolsAnthropic(
           if (ev.delta?.stop_reason) stopReason = ev.delta.stop_reason as StopReason
           if (typeof ev.usage?.output_tokens === 'number') {
             outTokens = ev.usage.output_tokens
-            onEvent?.({ type: 'usage', inputTokens: inTokens + cacheReadTokens + cacheCreationTokens, outputTokens: outTokens })
+            onEvent?.({ type: 'usage', inputTokens: inTokens + cacheReadTokens + cacheCreationTokens, outputTokens: outTokens, cachedTokens: cacheReadTokens })
           }
           break
         default:

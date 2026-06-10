@@ -153,11 +153,11 @@ export const chatAnthropic: ChatFn = async (req: ChatRequest, onDelta: OnDelta):
           inTokens = (u.input_tokens ?? 0) + cacheReadTokens + cacheCreationTokens
         }
         if (u && typeof u.output_tokens === 'number') outTokens = u.output_tokens
-        onDelta({ usage: { inTokens, outTokens } }) // live ↑in (real, incl. cache) from the very first event
+        onDelta({ usage: { inTokens, outTokens, cachedTokens: cacheReadTokens } }) // live ↑in (real, incl. cache) from the very first event
       } else if (ev.type === 'message_delta') {
         if (ev.usage && typeof ev.usage.output_tokens === 'number') {
           outTokens = ev.usage.output_tokens
-          onDelta({ usage: { inTokens, outTokens } }) // live ↓out, real, accumulating per delta
+          onDelta({ usage: { inTokens, outTokens, cachedTokens: cacheReadTokens } }) // live ↓out, real, accumulating per delta
         }
       }
     }

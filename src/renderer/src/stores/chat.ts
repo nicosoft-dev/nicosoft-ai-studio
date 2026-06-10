@@ -89,7 +89,7 @@ export const useChat = create<ChatState>((set, get) => {
   // Coordinator: route a dispatched step's live usage to ITS streaming bubble (per-segment), so concurrent
   // segments each show their own ↑/↓ instead of all reading the shared conv-level overlay (BUG 2). Walks back
   // to the streaming assistant tagged with this roleId (parallel panels finish out of order).
-  const updateSegmentLive = (convId: string, roleId: string, inputTokens: number, outputTokens?: number): void => {
+  const updateSegmentLive = (convId: string, roleId: string, inputTokens: number, outputTokens?: number, cachedTokens?: number): void => {
     set((s) => {
       const cur = s.byConversation[convId]
       if (!cur) return s
@@ -99,6 +99,7 @@ export const useChat = create<ChatState>((set, get) => {
           const msgs = cur.map((x) => ({ ...x }))
           msgs[i].liveInputTokens = inputTokens
           if (outputTokens !== undefined) msgs[i].liveOutputTokens = outputTokens
+          if (cachedTokens !== undefined) msgs[i].liveCachedTokens = cachedTokens
           return { byConversation: { ...s.byConversation, [convId]: msgs } }
         }
       }
@@ -387,13 +388,14 @@ export const useChat = create<ChatState>((set, get) => {
         else set((s) => ({ contextTokens: { ...s.contextTokens, [d.convId]: d.inputTokens } }))
       } else if (d.kind === 'live') {
         if (seg) {
-          updateSegmentLive(d.convId, seg, d.inputTokens, d.outputTokens)
+          updateSegmentLive(d.convId, seg, d.inputTokens, d.outputTokens, d.cacheReadInputTokens)
         } else {
           set((s) => ({
             liveInput: { ...s.liveInput, [d.convId]: d.inputTokens },
             // Real output only rides the streaming pings that carry it; one without output keeps the last value
             // so ↓ stays visible next to ↑ across the whole turn instead of flickering to an estimate.
-            liveOutput: typeof d.outputTokens === 'number' ? { ...s.liveOutput, [d.convId]: d.outputTokens } : s.liveOutput
+            liveOutput: typeof d.outputTokens === 'number' ? { ...s.liveOutput, [d.convId]: d.outputTokens } : s.liveOutput,
+            liveCached: typeof d.cacheReadInputTokens === 'number' ? { ...s.liveCached, [d.convId]: d.cacheReadInputTokens } : s.liveCached
           }))
         }
       } else if (d.kind === 'turn-final') {
@@ -401,7 +403,8 @@ export const useChat = create<ChatState>((set, get) => {
         // instead of lingering on this request's last streamed cumulative ping until the next request starts.
         set((s) => ({
           liveInput: { ...s.liveInput, [d.convId]: 0 },
-          liveOutput: { ...s.liveOutput, [d.convId]: 0 }
+          liveOutput: { ...s.liveOutput, [d.convId]: 0 },
+          liveCached: { ...s.liveCached, [d.convId]: 0 }
         }))
       }
     })
@@ -665,6 +668,7 @@ export const useChat = create<ChatState>((set, get) => {
     contextTokens: {},
     liveInput: {},
     liveOutput: {},
+    liveCached: {},
     streamStartedAt: {},
     retry: {},
 
@@ -779,6 +783,7 @@ export const useChat = create<ChatState>((set, get) => {
           // overwritten by the turn's own count.
           liveInput: { ...s.liveInput, [cid]: 0 },
           liveOutput: { ...s.liveOutput, [cid]: 0 },
+          liveCached: { ...s.liveCached, [cid]: 0 },
           error: { ...s.error, [cid]: null }
         }
       })

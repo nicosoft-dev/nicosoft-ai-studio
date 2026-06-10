@@ -183,7 +183,7 @@ export async function* callWithToolsGemini(
         if (typeof u.promptTokenCount === 'number' && u.promptTokenCount > 0) inTokens = u.promptTokenCount
         if (typeof u.candidatesTokenCount === 'number' && u.candidatesTokenCount > 0) outTokens = u.candidatesTokenCount
         if (typeof u.cachedContentTokenCount === 'number' && u.cachedContentTokenCount > 0) cacheReadTokens = u.cachedContentTokenCount
-        onEvent?.({ type: 'usage', inputTokens: inTokens, outputTokens: outTokens })
+        onEvent?.({ type: 'usage', inputTokens: inTokens, outputTokens: outTokens, cachedTokens: cacheReadTokens })
       }
     }
   } catch (err) {

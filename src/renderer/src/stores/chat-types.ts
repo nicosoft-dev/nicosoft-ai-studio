@@ -38,6 +38,7 @@ export interface ChatMessage {
   outputTokens?: number // real output tokens for THIS turn (upstream usage) — finalized ↓ readout once the turn completes
   liveInputTokens?: number // coordinator only: live ↑ for THIS segment while it streams (per-message, so concurrent segments don't all read the conv-level overlay — BUG 2). step:done supersedes it with inputTokens.
   liveOutputTokens?: number // coordinator only: live ↓ for THIS segment while it streams
+  liveCachedTokens?: number // cache-read share of liveInputTokens — drives the Codex-style ↑ split (fresh main number + "(+N cached)")
 }
 // A server-side tool the API executed (e.g. OpenAI web_search) — carried as a server block, shown as a
 // faint status row (no expand / result; the API ran it, not the loop).
@@ -102,8 +103,9 @@ export interface ChatState {
   question: Record<string, QuestionPrompt | null> // per-conversation AskUserQuestion prompt
   approvals: Record<string, ApprovalCard[]> // per-conversation coordinator approval cards (yellow notes + red pending)
   contextTokens: Record<string, number> // per-conversation CURRENT context size (count_tokens of the last sent turn) — drives the composer "/ window" indicator
-  liveInput: Record<string, number> // per-conversation REAL CUMULATIVE input tokens, streamed live during a turn (↑ readout) — overwritten by streaming pings; NOT accumulated
+  liveInput: Record<string, number> // per-conversation REAL input tokens of the in-flight request (full prompt incl cache), streamed live (↑ readout) — overwritten by streaming pings; NOT accumulated
   liveOutput: Record<string, number> // per-conversation REAL output tokens, streamed live during a turn (↓ readout) — overwritten by streaming pings; NOT accumulated
+  liveCached: Record<string, number> // per-conversation cache-read share of liveInput — the Codex-style ↑ split renders fresh = liveInput − liveCached as the main number, cached as a "(+N cached)" note
   streamStartedAt: Record<string, number> // per-conversation epoch ms when the current turn started; read only while streaming (Overview "In progress" elapsed). Overwritten each send, left stale after (never read when not streaming)
   retry: Record<string, { attempt: number; max: number; since: number } | null> // per-conversation transient-failure retry status ("retrying (N/M)"); null/absent when not retrying
   loadConversations: () => Promise<void>

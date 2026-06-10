@@ -155,7 +155,7 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
         } else if (ev.type === 'sub_tool_start' || ev.type === 'sub_tool_done') {
           cb.onToolEvent?.(roleId, ev)
         } else if (ev.type === 'usage') {
-          cb.onUsage?.(roleId, ev.inputTokens, ev.outputTokens) // forward the agent loop's live ↑in+↓out to this segment's readout
+          cb.onUsage?.(roleId, ev.inputTokens, ev.outputTokens, ev.cachedTokens) // forward the agent loop's live ↑in+↓out to this segment's readout
         } else if (ev.type === 'turn-final') {
           cb.onTurnFinalUsage?.(ev.usage)
         }
@@ -274,7 +274,7 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
         text += d.text
         cb.onDelta(roleId, d.text)
       }
-      if (d.usage) cb.onUsage?.(roleId, d.usage.inTokens, d.usage.outTokens) // live ↑in+↓out for tool-less steps too
+      if (d.usage) cb.onUsage?.(roleId, d.usage.inTokens, d.usage.outTokens, d.usage.cachedTokens) // live ↑in+↓out for tool-less steps too
       if (d.turnFinalUsage) {
         cb.onTurnFinalUsage?.({
           inputTokens: d.turnFinalUsage.inTokens,
