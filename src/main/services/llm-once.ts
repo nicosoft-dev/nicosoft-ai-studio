@@ -25,11 +25,12 @@ export async function chatOnce(
   key: string,
   model: string,
   messages: ChatMessage[],
-  opts?: { thinking?: ThinkingParam; signal?: AbortSignal }
+  opts?: { thinking?: ThinkingParam; signal?: AbortSignal; cacheEnabled?: boolean }
 ): Promise<string> {
   const req: ChatRequest = { protocol: ep.protocol, baseUrl: ep.baseUrl, apiKey: key, model, messages }
   if (opts?.thinking) req.thinking = opts.thinking
   if (opts?.signal) req.signal = opts.signal
+  if (opts?.cacheEnabled) req.cacheEnabled = opts.cacheEnabled
   const result = await llmChat(req, () => {})
   return result.text
 }
