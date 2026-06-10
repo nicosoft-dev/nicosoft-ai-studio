@@ -480,6 +480,28 @@ function Composer({
     e.target.value = ''
     void addFiles(files)
   }
+  // Drag-and-drop images onto the composer (3rd intake next to paste and the file picker). dragDepth
+  // counts enter/leave because moving across the composer's CHILDREN fires leave on the parent — a
+  // plain boolean would flicker the highlight off mid-drag.
+  const [dragDepth, setDragDepth] = useState(0)
+  const hasFileDrag = (e: React.DragEvent): boolean => Array.from(e.dataTransfer.types).includes('Files')
+  const onDrop = (e: React.DragEvent): void => {
+    e.preventDefault()
+    setDragDepth(0)
+    const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith('image/'))
+    if (files.length) void addFiles(files)
+  }
+  // A drop anywhere OUTSIDE the composer would make Electron navigate the window to the file — kill the
+  // default at the document level so a missed drop is a no-op instead of replacing the app.
+  useEffect(() => {
+    const prevent = (e: DragEvent): void => e.preventDefault()
+    document.addEventListener('dragover', prevent)
+    document.addEventListener('drop', prevent)
+    return () => {
+      document.removeEventListener('dragover', prevent)
+      document.removeEventListener('drop', prevent)
+    }
+  }, [])
 
   const send = (): void => {
     const text = value.trim()
@@ -536,7 +558,22 @@ function Composer({
             dir + restricted-read boundary (required before sending); for chat-only roles it's optional
             and persisted now, taking effect once that role gets an agent. */}
         <PathBar cwd={cwd} onPick={(dir) => setCwd(expert.id, dir)} />
-        <div className={'composer2' + (ready ? '' : ' disabled')}>
+        <div
+          className={'composer2' + (ready ? '' : ' disabled') + (dragDepth > 0 ? ' dragging' : '')}
+          onDragEnter={(e) => {
+            if (hasFileDrag(e)) {
+              e.preventDefault()
+              setDragDepth((d) => d + 1)
+            }
+          }}
+          onDragOver={(e) => {
+            if (hasFileDrag(e)) e.preventDefault()
+          }}
+          onDragLeave={(e) => {
+            if (hasFileDrag(e)) setDragDepth((d) => Math.max(0, d - 1))
+          }}
+          onDrop={onDrop}
+        >
           <div className="cmp-toolbar">
             <ModelPicker models={b.models} value={b.model} onChange={b.onModel} disabled={!ready} />
             {roleHasImageGen(expert.id) ? (

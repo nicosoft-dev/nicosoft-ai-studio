@@ -248,6 +248,8 @@
 }
 .composer2.focused { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .composer2.disabled { opacity: 0.7; }
+/* an image file is being dragged over the composer — light the drop target */
+.composer2.dragging { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); background: color-mix(in oklch, var(--accent) 7%, var(--bg-2)); }
 
 /* slash-command palette (optimization E) — floats just above the composer */
 .cmd-palette {
@@ -1033,6 +1035,22 @@
 .dropdown-item:hover { background: var(--bg-3); color: var(--text-1); }
 .dropdown-item.active { color: var(--text-1); }
 .dropdown-item.active svg { color: var(--accent); }
+/* timezone picker: taller popup + sticky search row + continent group headers */
+.tz-pop { max-height: 380px; padding-top: 0; }
+.tz-search {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 7px;
+  padding: 9px 9px 8px; margin: 0 -4px 4px; background: var(--bg-2); border-bottom: 1px solid var(--border-1);
+  color: var(--text-4);
+}
+.tz-search input {
+  flex: 1; background: none; border: none; outline: none;
+  font-size: 13px; color: var(--text-1); font-family: inherit;
+}
+.tz-search input::placeholder { color: var(--text-4); }
+.tz-group-head {
+  padding: 8px 9px 3px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-4);
+}
 
 /* ============================================================
    Batch: menus · collapsible sidebar · expert detail · memory
