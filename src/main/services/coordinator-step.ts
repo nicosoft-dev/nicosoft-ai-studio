@@ -219,7 +219,12 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
     }
     usageRepo.record({ conversationId: convId, expertId: roleId, model: binding.model, provider: ep.protocol, inTokens: res.inTokens, outTokens: res.outTokens })
     cb.onStepDone(roleId, text, res.contextTokens, res.outTokens)
-    return { text, inputTokens: res.inTokens, outputTokens: res.outTokens, endpointId: binding.endpointId, model: binding.model }
+    // inputTokens returned to the caller = CURRENT context size (last turn's prompt) — same as the persisted
+    // message (line 216), onStepDone, the tool-less return below, and agent.service. It feeds the "/ window"
+    // meter + compression threshold, NOT the cumulative loop total (res.inTokens, already recorded for billing
+    // above). Returning the cumulative made a multi-expert turn's contextTokens read as millions instead of
+    // the real ~window-bounded size (Gate B summed implementer + verifier cumulative → 10.99M).
+    return { text, inputTokens: res.contextTokens, outputTokens: res.outTokens, endpointId: binding.endpointId, model: binding.model }
   }
 
   // --- Tool-less path: coordinator-self synthesis/direct + designer/translator/editor → one llmChat turn ---

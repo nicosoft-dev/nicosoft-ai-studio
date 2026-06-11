@@ -482,11 +482,17 @@ export const useChat = create<ChatState>((set, get) => {
           if (cur.inputTokens === undefined && typeof d.inputTokens === 'number') cur.inputTokens = d.inputTokens
           if (cur.outputTokens === undefined && typeof d.outputTokens === 'number') cur.outputTokens = d.outputTokens
         }
+        // The "/ window" meter wants the CURRENT context size — the last step's prompt tokens, which
+        // step:done already stored per-message (res.contextTokens). NOT d.inputTokens: for a gated /
+        // multi-expert turn that is the AGGREGATE input (Gate B sums implementer + verifier cumulative →
+        // run-stats `inTokens`, e.g. 10.99M) — a billing total, not window occupancy.
+        const lastCtx = [...msgs]
+          .reverse()
+          .find((m) => m.role === 'assistant' && typeof m.inputTokens === 'number' && m.inputTokens > 0)?.inputTokens
         return {
           byConversation: { ...s.byConversation, [meta.convId]: msgs },
           streaming: { ...s.streaming, [meta.convId]: false },
-          contextTokens:
-            typeof d.inputTokens === 'number' ? { ...s.contextTokens, [meta.convId]: d.inputTokens } : s.contextTokens
+          contextTokens: typeof lastCtx === 'number' ? { ...s.contextTokens, [meta.convId]: lastCtx } : s.contextTokens
         }
       })
       void get().loadConversations() // bump title / updated_at
