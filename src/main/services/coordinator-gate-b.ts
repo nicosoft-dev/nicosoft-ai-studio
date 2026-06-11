@@ -5,7 +5,7 @@
 
 import * as rolesService from './roles.service'
 import * as agentService from './agent-dispatch'
-import { COORDINATOR_VERIFIER_PROMPT } from '../agent/roles/prompts'
+import { COORDINATOR_VERIFIER_PROMPT, displayName } from '../agent/roles/prompts'
 import { route } from './coordinator-route'
 import { runRoleStep, type RunStepOptions } from './coordinator-step'
 
@@ -74,7 +74,7 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
     outputTokens,
     gateOutcome,
     gateEvidence,
-    text: `${result.text}\n\n[Gate B independent verification did not pass — ${verdict.feedback}]\n\n[Gate B FAIL routed to ${followUp.handlerRoleId} for closure]\n${followUp.text}`
+    text: `${result.text}\n\n[Independent verification did not pass — ${verdict.feedback}]\n\n[Routed to ${displayName(followUp.handlerRoleId)} for rework]\n${followUp.text}`
   }
 }
 
@@ -84,9 +84,9 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
 // usable (e.g. it answered 'direct' or picked an unbound role).
 async function chooseFailHandler(feedback: string, gate: { originalPrompt: string }, implementerRoleId: string, signal?: AbortSignal): Promise<string> {
   const ask = [
-    'A quality gate (Gate B) FAILED a code change. Pick the ONE expert who should OWN the failure — fix the real defect, or prove it is a false positive — chosen by the domain the failure actually involves.',
+    'An independent quality check FAILED a code change. Pick the ONE expert who should OWN the failure — fix the real defect, or prove it is a false positive — chosen by the domain the failure actually involves.',
     `Original task:\n${gate.originalPrompt}`,
-    `Gate B failure evidence:\n${feedback}`
+    `Verification failure evidence:\n${feedback}`
   ].join('\n\n')
   try {
     const decision = await route(ask, [], signal)
@@ -114,8 +114,8 @@ async function runGateBFailFollowUp(
   const toolId = `gate-b-followup-${Date.now()}`
   opts.cb.onToolEvent?.(implementerRoleId, { type: 'sub_tool_start', toolUseId: toolId, parentToolId: 'coordinator-gate-b', name: 'GateBFailHandler', input: { handlerRoleId } })
   const handlerPrompt = [
-    'Gate B (independent quality verification) returned FAIL on the change below. As the responsible expert, CLOSE this out — never leave the FAIL dangling.',
-    `Gate B verdict + evidence:\n${feedback}`,
+    'Independent quality verification returned FAIL on the change below. As the responsible expert, CLOSE this out — never leave the FAIL dangling.',
+    `Verification verdict + evidence:\n${feedback}`,
     `Original task:\n${gate.originalPrompt}`,
     gate.approvedPlan ? `Plan the change was meant to follow:\n${gate.approvedPlan}` : '',
     `Implementation summary under review:\n${implementationText}`,
@@ -154,7 +154,7 @@ async function runVerifierStep(implementerRoleId: string, opts: RunStepOptions, 
   const verifierRoleId = chooseVerifierRole(implementerRoleId)
   // No independent agent role is bound besides the implementer → there's no one to verify. Don't FAIL/throw
   // the turn over a config gap; deliver the result unverified with a note (synthesis surfaces it).
-  if (verifierRoleId === implementerRoleId) return { passed: true, feedback: 'Gate B skipped: no independent verifier role bound (only the implementer is available); result delivered unverified.', inputTokens: 0, outputTokens: 0 }
+  if (verifierRoleId === implementerRoleId) return { passed: true, feedback: 'Independent verification skipped: no independent verifier role bound (only the implementer is available); result delivered unverified.', inputTokens: 0, outputTokens: 0 }
   const toolId = `gate-b-verifier-${Date.now()}`
   opts.cb.onToolEvent?.(implementerRoleId, { type: 'sub_tool_start', toolUseId: toolId, parentToolId: 'coordinator-gate-b', name: 'IndependentVerifier', input: { verifierRoleId } })
   // Persona + how-to-verify live in COORDINATOR_VERIFIER_PROMPT (systemPromptOverride); this user message
@@ -162,7 +162,7 @@ async function runVerifierStep(implementerRoleId: string, opts: RunStepOptions, 
   // Stack-agnostic on purpose: the verifier must detect the project's own toolchain — a hard-coded npm
   // command sent a Go-repo verifier chasing a nonexistent package.json (dogfood 2026-06-11).
   const verifierPrompt = [
-    'Verify the change below as Gate B. Inspect the diff (Bash `git diff`, Read the touched files), detect the project\'s own toolchain (go.mod → `go build ./...` + `go vet ./...`; package.json → `npm run typecheck`/`npm run build`; Cargo.toml → `cargo check`; etc.), run the relevant build/checks and the tests the task demands, then return a verdict line starting with PASS or FAIL plus evidence.',
+    'Verify the change below as an independent reviewer. Inspect the diff (Bash `git diff`, Read the touched files), detect the project\'s own toolchain (go.mod → `go build ./...` + `go vet ./...`; package.json → `npm run typecheck`/`npm run build`; Cargo.toml → `cargo check`; etc.), run the relevant build/checks and the tests the task demands, then return a verdict line starting with PASS or FAIL plus evidence.',
     `Original task:\n${gate.originalPrompt}`,
     gate.approvedPlan ? `Approved plan the change must match:\n${gate.approvedPlan}` : '',
     `Implementer role (do NOT defer to them): ${implementerRoleId}`,

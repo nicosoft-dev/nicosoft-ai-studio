@@ -122,7 +122,7 @@ async function runE2EVerify(convId: string, prompt: string, cwd: string | undefi
   const verifierRoleId = chooseVerifierRole('shuri')
   const forwardCb = makeE2EForwardCb(convId, round, cb, shots)
   const verifierPrompt = [
-    `Gate C end-to-end verification, round ${round}. Actually run the product and verify the task below — do not trust any written summary.`,
+    `End-to-end verification, round ${round}. Actually run the product and verify the task below — do not trust any written summary.`,
     'Use e2e_browser (UI/Electron) and/or e2e_request (HTTP API) to launch and drive the app, run the asserted checks, then end with ONE verdict line starting with PASS, FAIL, BLOCKED, or SKIP plus evidence.',
     `Original task:\n${prompt}`
   ].join('\n\n')
@@ -175,10 +175,10 @@ async function runE2EImplementerFix(
 ): Promise<void> {
   const forwardCb = makeE2EForwardCb(convId, round, cb, shots)
   const fixPrompt = [
-    `Gate C end-to-end verification FAILED (round ${round - 1}). Fix the implementation so the task below passes — do not argue with the verdict, fix the code.`,
+    `End-to-end verification FAILED (round ${round - 1}). Fix the implementation so the task below passes — do not argue with the verdict, fix the code.`,
     `Verifier verdict + evidence:\n${failDetail}`,
     `Original task:\n${prompt}`,
-    'Make the smallest change that makes the failing checks pass, then stop. Gate C will re-verify automatically.'
+    'Make the smallest change that makes the failing checks pass, then stop. Verification will re-run automatically.'
   ].join('\n\n')
   await runRoleStep({
     convId,
