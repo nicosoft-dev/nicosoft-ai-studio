@@ -56,6 +56,13 @@ const NET_EGRESS = /\b(scp|sftp|rsync|ssh|nc|ncat|telnet|ftp)\b|\b(curl|wget)\b[
 const OUT_OF_CWD_WRITE = /(^|\s)>>?\s*(\/(etc|usr|bin|sbin|var|boot|sys|proc|dev|Library|System|Applications)\b|~|\$HOME)/i
 // chmod/chown with a recursive or world-writable bit on something broad — privilege/permission tampering.
 const PERM_TAMPER = /\b(chmod|chown|chgrp)\b[^\n|;&]*(-R\b|\s777\b|\sa\+|\/(etc|usr|bin|var)\b)/i
+// Git commands that DISCARD uncommitted work or rewrite history — never safe to run unattended (dogfood
+// 2026-06-11: a bypass agent ran `git restore`/`checkout` and wiped a user's uncommitted changes; git
+// status was clean + reflog showed no HEAD move = silent loss). reset --hard, checkout/restore of paths
+// (discard working-tree edits), clean -f (deletes untracked files), stash drop/clear, branch -D, and
+// force-push (history loss) → red, surfaced for approval. Plain `git checkout <branch>` / `-b` / status /
+// log / diff are NOT matched (git refuses a branch switch that would lose changes anyway).
+const DESTRUCTIVE_GIT = /\bgit\b[^\n|;&]*\b(reset\s+--hard|checkout\s+(--|\.|-f\b)|restore\b|clean\s+-[a-z]*f|stash\s+(drop|clear)|branch\s+-D|push\b[^\n|;&]*(--force|-f\b))/i
 
 // Classify a Bash command. Read-only (proven by the quote-aware classifier) → green. Anything matching a
 // dangerous pattern → red (hard floor). Everything else is an in-cwd mutating command → yellow (allow+log).
@@ -68,6 +75,7 @@ function classifyBashCommand(command: string): ApprovalVerdict {
     return { zone: 'red', reason: 'network egress (upload / remote shell / transfer)' }
   if (OUT_OF_CWD_WRITE.test(command)) return { zone: 'red', reason: 'write to a system path outside the project' }
   if (PERM_TAMPER.test(command)) return { zone: 'red', reason: 'permission/ownership tampering' }
+  if (DESTRUCTIVE_GIT.test(command)) return { zone: 'red', reason: 'destructive git — discards uncommitted work / rewrites history' }
   // Read-only check last: a dangerous flag wouldn't be read-only anyway, but this keeps the green path tight.
   if (isReadOnlyCommand(command)) return { zone: 'green', reason: 'read-only command' }
   return { zone: 'yellow', reason: 'in-cwd mutating command' }

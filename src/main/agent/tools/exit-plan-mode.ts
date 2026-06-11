@@ -24,6 +24,12 @@ export const exitPlanModeTool = buildTool<typeof inputSchema, { approved: boolea
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
   async call(input, ctx) {
+    // Not in plan mode → there is nothing to exit. Don't pop the plan-approval UI; tell the agent it is
+    // already executing so it just proceeds (guards a spurious approval when ExitPlanMode is called out of
+    // context — Claude Code rejects this outright; a guiding no-op is gentler than a hard tool error).
+    if (ctx.permissionMode !== 'plan') {
+      return { data: { approved: true } }
+    }
     const decision = await ctx.requestPermission(
       { toolName: 'ExitPlanMode', input: { plan: input.plan, steps: input.steps ?? [] }, reason: input.plan },
       ctx.signal

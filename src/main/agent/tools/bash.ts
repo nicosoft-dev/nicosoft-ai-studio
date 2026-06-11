@@ -5,14 +5,16 @@
 
 import { spawn } from 'node:child_process'
 import { z } from 'zod'
-import { semanticNumber } from './semantic'
+import { semanticNumber, semanticBoolean } from './semantic'
 import { buildTool } from '../tool'
 import type { ToolResultBlock } from '../types'
 import { isReadOnlyCommand } from './bash-classifier'
 
 const inputSchema = z.object({
   command: z.string().describe('The shell command to run'),
-  timeout_ms: semanticNumber(z.number().int().positive().optional()).describe('Timeout in ms (default 120000)'),
+  timeout_ms: semanticNumber(z.number().int().positive().optional()).describe('Timeout in ms (default 120000, clamped to 600000 max)'),
+  timeout: semanticNumber(z.number().int().positive().optional()).describe('Alias for timeout_ms (milliseconds)'),
+  run_in_background: semanticBoolean(z.boolean().optional()).describe('Ignored — Bash runs synchronously; use start_service for a long-running background process'),
   description: z
     .string()
     .optional()
@@ -20,6 +22,7 @@ const inputSchema = z.object({
 })
 
 const DEFAULT_TIMEOUT = 120_000
+const MAX_TIMEOUT = 600_000 // upper clamp — a runaway timeout would hang the turn indefinitely
 const KILL_GRACE = 5_000
 const MAX_OUTPUT = 64 * 1024
 
@@ -60,7 +63,7 @@ export const bashTool = buildTool<typeof inputSchema, BashOutput>({
         }
         return (buf + chunk.toString()).slice(0, MAX_OUTPUT)
       }
-      const timeout = input.timeout_ms ?? DEFAULT_TIMEOUT
+      const timeout = Math.min(input.timeout_ms ?? input.timeout ?? DEFAULT_TIMEOUT, MAX_TIMEOUT)
       const termTimer = setTimeout(() => {
         timedOut = true
         child.kill('SIGTERM')
