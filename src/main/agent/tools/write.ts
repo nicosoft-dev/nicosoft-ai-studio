@@ -24,7 +24,9 @@ export const writeTool = buildTool<typeof inputSchema, WriteOutput>({
   name: 'Write',
   inputSchema,
   prompt: () =>
-    'Write a file (create or overwrite). Overwriting an existing file requires having Read it first.',
+    'Write a file (create or overwrite). For an EXISTING file prefer Edit/MultiEdit for a targeted ' +
+    'change — use Write only to create a new file or fully replace one. Overwriting requires having Read ' +
+    'it first.',
   checkPermissions: async (input) => ({ behavior: 'ask', message: `Write ${input.file_path}` }),
   async call(input, ctx) {
     const abs = await confineReal(ctx.cwd, input.file_path)

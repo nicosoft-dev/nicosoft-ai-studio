@@ -21,9 +21,11 @@ export const taskTool = buildTool<typeof inputSchema, string>({
   prompt: () =>
     'Delegate an isolated subtask to a sub-agent (e.g. a focused multi-file search, or a self-' +
     'contained change). The sub-agent has the same tools except Task, its own context, and returns ' +
-    'only a final summary — use it for work that would otherwise clutter your context. Multiple Task ' +
-    'calls in one turn run in parallel; give each a non-overlapping set of files. Do NOT Read or act ' +
-    'on a file a Task is creating in the same turn — wait for the Task result in a later turn.',
+    'only a final summary — use it for work that would otherwise clutter your context. Write `prompt` as ' +
+    'a COMPLETE standalone brief: the sub-agent sees ONLY it, not this conversation — state the goal, the ' +
+    'exact files/area, what to return, and any constraints. Multiple Task calls in one turn run in ' +
+    'parallel; give each a non-overlapping set of files. Do NOT Read or act on a file a Task is creating ' +
+    'in the same turn — wait for the Task result in a later turn.',
   isReadOnly: () => true, // permission delegated to sub-tools; multiple Tasks parallelize
   isConcurrencySafe: () => true,
   async call(input, ctx) {

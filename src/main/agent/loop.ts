@@ -459,7 +459,32 @@ export async function* runAgent(
     }
     // Anthropic rejects an empty-content assistant message — if the turn produced nothing usable,
     // end rather than push it (which would 400 the next request).
-    if (assistant.content.length === 0) return { reason: 'completed', messages, turns, compactions }
+    if (assistant.content.length === 0) {
+      // A refusal (stop_reason: 'refusal') with no content would otherwise end on a silent empty turn that
+      // reads as a successful "done". Surface it so the user sees the model declined (audit F20).
+      if (assistant.stopReason === 'refusal') {
+        const note: AgentMessage = { role: 'assistant', content: [{ type: 'text', text: 'The model declined to respond to this request (refusal).' }] }
+        messages.push(note)
+        yield { type: 'assistant', message: note, usage: assistant.usage }
+      }
+      return { reason: 'completed', messages, turns, compactions }
+    }
+
+    // Loop continues iff the assistant requested ≥1 tool — NOT based on stop_reason (§2.1). Compute this
+    // BEFORE committing the turn so a withheld (escalated) attempt is never pushed or yielded.
+    const toolUses = assistant.content.filter((b): b is ToolUseBlock => b.type === 'tool_use')
+    // max_tokens truncation (F15): incomplete tool_use blocks were already dropped by the llm layer, so a
+    // cut-off turn that intended tools lands here tool-less. Tier 1 — re-send the SAME request at the
+    // escalated ceiling (Claude Code style). WITHHELD from history + the UI (audit F21): a fresh retry
+    // replaces it wholesale, so pushing/yielding the partial would stream text the retry then overwrites
+    // — a double-show, and the same input counted twice. The continue-in-pieces retry below is different
+    // (it KEEPS the partial for the model to continue from), so only this escalate branch is withheld.
+    if (toolUses.length === 0 && assistant.stopReason === 'max_tokens' && !maxTokensEscalated && maxTokens < ESCALATED_MAX_TOKENS) {
+      maxTokensEscalated = true
+      maxTokens = ESCALATED_MAX_TOKENS
+      console.warn(`[agent] max_tokens escalate to ${ESCALATED_MAX_TOKENS} run=${ctx.runId} turn=${turns}`)
+      continue
+    }
 
     const assistantMsg: AgentMessage = { role: 'assistant', content: assistant.content }
     messages.push(assistantMsg)
@@ -467,34 +492,21 @@ export async function* runAgent(
     lastUsageAt = messages.length // after the assistant push → slice(lastUsageAt) = tool_results below
     yield { type: 'assistant', message: assistantMsg, usage: assistant.usage }
 
-    // Loop continues iff the assistant requested ≥1 tool — NOT based on stop_reason (§2.1).
-    const toolUses = assistant.content.filter((b): b is ToolUseBlock => b.type === 'tool_use')
     if (toolUses.some((t) => FILE_CHANGE_TOOLS.has(t.name))) sawFileChange = true
     if (toolUses.length === 0) {
-      // max_tokens truncation (F15): incomplete tool_use blocks were already dropped by the llm layer,
-      // so a cut-off turn that intended tools lands here tool-less. Quiescing on it would deliver a
-      // half answer (or, pre-fix, poison the history). Tier 1 — Claude Code style: re-send the SAME
-      // request at the escalated ceiling, no extra conversation turn. Tier 2 — recovery prompts.
-      if (assistant.stopReason === 'max_tokens') {
-        if (!maxTokensEscalated && maxTokens < ESCALATED_MAX_TOKENS) {
-          maxTokensEscalated = true
-          maxTokens = ESCALATED_MAX_TOKENS
-          messages.pop() // drop the truncated assistant turn — the retry replaces it wholesale
-          console.warn(`[agent] max_tokens escalate to ${ESCALATED_MAX_TOKENS} run=${ctx.runId} turn=${turns}`)
-          continue
-        }
-        if (truncationRetries < MAX_TRUNCATION_RETRIES) {
-          truncationRetries++
-          console.warn(`[agent] max_tokens truncation retry ${truncationRetries}/${MAX_TRUNCATION_RETRIES} run=${ctx.runId} turn=${turns}`)
-          messages.push({
-            role: 'user',
-            content: [{
-              type: 'text',
-              text: 'Your previous response hit the output-token limit and was cut off — any tool call in it was discarded. Continue in SMALLER pieces: keep thinking brief, and split large file writes into a skeleton Write followed by incremental Edits.',
-            }],
-          })
-          continue
-        }
+      // Escalation ceiling already spent (or N/A) and the turn is STILL tool-less + cut off: Tier 2 —
+      // keep the partial (pushed/yielded above) and nudge the model to continue in smaller pieces.
+      if (assistant.stopReason === 'max_tokens' && truncationRetries < MAX_TRUNCATION_RETRIES) {
+        truncationRetries++
+        console.warn(`[agent] max_tokens truncation retry ${truncationRetries}/${MAX_TRUNCATION_RETRIES} run=${ctx.runId} turn=${turns}`)
+        messages.push({
+          role: 'user',
+          content: [{
+            type: 'text',
+            text: 'Your previous response hit the output-token limit and was cut off — any tool call in it was discarded. Continue in SMALLER pieces: keep thinking brief, and split large file writes into a skeleton Write followed by incremental Edits.',
+          }],
+        })
+        continue
       }
       if (params.expectsFileChanges && !sawFileChange && !nudgedForFileChanges) {
         nudgedForFileChanges = true

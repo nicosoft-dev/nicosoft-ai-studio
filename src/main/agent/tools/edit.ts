@@ -25,8 +25,11 @@ export const editTool = buildTool<typeof inputSchema, EditOutput>({
   name: 'Edit',
   inputSchema,
   prompt: () =>
-    'Replace old_string with new_string in a file (Read it first). old_string must match exactly and ' +
-    'be unique unless replace_all is set.',
+    'Replace old_string with new_string in a file (Read it first). old_string must match the file ' +
+    'EXACTLY — whitespace and indentation included — and be unique unless replace_all is set. Do NOT ' +
+    'include the line-number gutter from Read output (the "   123\\t" prefix) — match the raw file text ' +
+    'only. If old_string is reported "not found", re-Read the exact current text and copy it verbatim ' +
+    'instead of retrying the same string.',
   checkPermissions: async (input) => ({ behavior: 'ask', message: `Edit ${input.file_path}` }),
   async call(input, ctx) {
     const abs = await confineReal(ctx.cwd, input.file_path)

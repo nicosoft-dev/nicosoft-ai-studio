@@ -27,8 +27,12 @@ export const todoTool = buildTool<typeof inputSchema, TodoOutput>({
   name: 'TodoWrite',
   inputSchema,
   prompt: () =>
-    'Track multi-step work. Pass the FULL todo list each call (it replaces the previous). Mark items ' +
-    'pending / in_progress / completed as you go; keep exactly one in_progress at a time.',
+    'Track multi-step work so you and the user can see progress. USE it for tasks with 3+ distinct ' +
+    'steps, multi-file work, or when the user gives several tasks; SKIP it for a single trivial step or ' +
+    'pure conversation. Pass the FULL list each call (it replaces the previous). Set a task in_progress ' +
+    'BEFORE starting it and completed the moment it is done — keep EXACTLY one in_progress at a time, and ' +
+    'do not batch completions. Never mark something completed while its tests fail or the work is partial; ' +
+    'leave it in_progress and add a new item for what is blocking.',
   isReadOnly: () => true, // no filesystem write → no approval needed
   isConcurrencySafe: () => false, // mutates shared ctx.todos → serialize
   async call(input, ctx) {

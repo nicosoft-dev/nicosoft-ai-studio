@@ -41,8 +41,10 @@ export const readTool = buildTool<typeof inputSchema, string>({
   name: 'Read',
   inputSchema,
   prompt: () =>
-    'Read a file from the project. Returns contents with 1-based line numbers (cat -n style). ' +
-    'Use offset+limit for large files. Paths resolve under the project root.',
+    'Read a file from the project. Returns contents with 1-based line numbers (cat -n style). Use ' +
+    'offset+limit for large files. Paths resolve under the project root — you can read files WITHIN the ' +
+    'project folder (plus session files the app explicitly hands you), NOT arbitrary paths elsewhere on ' +
+    'the machine.',
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
   maxResultSizeChars: Infinity, // Read self-bounds (256KB file cap); its output must never be persisted
