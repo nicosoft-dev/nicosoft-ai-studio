@@ -17,6 +17,9 @@ const inputSchema = z.object({
 
 const MAX_BYTES = 256 * 1024
 const PDF_MAX_BYTES = 20 * 1024 * 1024 // PDFs are binary + larger than text; cap higher than the utf-8 cap
+const DEFAULT_LINE_LIMIT = 2000 // default slice when no limit given (Claude Code parity) — a large file isn't dumped whole
+const MAX_LINE_CHARS = 2000 // truncate a single very long line (minified bundles) so one line can't flood the context
+const PDF_TEXT_MAX_CHARS = 100_000 // ~25K tokens — cap extracted PDF text instead of injecting a whole book
 
 export const readTool = buildTool<typeof inputSchema, string>({
   name: 'Read',
@@ -38,7 +41,14 @@ export const readTool = buildTool<typeof inputSchema, string>({
       const parser = new PDFParse({ data: new Uint8Array(await readFile(abs)) })
       try {
         const { text } = await parser.getText()
-        return { data: text?.trim() || '(no extractable text in this PDF)' }
+        const t = text?.trim() || ''
+        if (!t) return { data: '(no extractable text in this PDF)' }
+        return {
+          data:
+            t.length > PDF_TEXT_MAX_CHARS
+              ? `${t.slice(0, PDF_TEXT_MAX_CHARS)}\n\n[PDF text truncated at ${PDF_TEXT_MAX_CHARS} of ${t.length} chars — extract a later section another way for the rest]`
+              : t,
+        }
       } finally {
         await parser.destroy()
       }
@@ -51,12 +61,17 @@ export const readTool = buildTool<typeof inputSchema, string>({
 
     const lines = raw.split('\n')
     const start = input.offset ? input.offset - 1 : 0
-    const end = input.limit ? start + input.limit : lines.length
+    const end = input.limit ? start + input.limit : Math.min(start + DEFAULT_LINE_LIMIT, lines.length)
     const numbered = lines
       .slice(start, end)
-      .map((l, i) => `${String(start + i + 1).padStart(6)}\t${l}`)
+      .map((l, i) => {
+        const text = l.length > MAX_LINE_CHARS ? `${l.slice(0, MAX_LINE_CHARS)}… [line truncated at ${MAX_LINE_CHARS} chars]` : l
+        return `${String(start + i + 1).padStart(6)}\t${text}`
+      })
       .join('\n')
-    return { data: numbered }
+    // Signal there's more below the default slice so the model reads on with offset rather than assuming EOF.
+    const more = !input.limit && lines.length > end ? `\n\n[${lines.length - end} more lines — continue with offset=${end + 1}]` : ''
+    return { data: numbered + more }
   },
   mapResult(out, toolUseId): ToolResultBlock {
     return { type: 'tool_result', tool_use_id: toolUseId, content: out || '(empty file)' }

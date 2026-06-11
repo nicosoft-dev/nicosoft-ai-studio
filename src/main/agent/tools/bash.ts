@@ -24,7 +24,10 @@ const inputSchema = z.object({
 const DEFAULT_TIMEOUT = 120_000
 const MAX_TIMEOUT = 600_000 // upper clamp — a runaway timeout would hang the turn indefinitely
 const KILL_GRACE = 5_000
-const MAX_OUTPUT = 64 * 1024
+// Capture cap — generous so the verdict (usually at the END of test/build output) survives. The result
+// layer (persistLargeResult, maxResultSizeChars below) then stores the full output to disk and shows a
+// head+TAIL preview. A small head-only cap here would amputate the tail before that ever ran.
+const MAX_OUTPUT = 2 * 1024 * 1024
 
 interface BashOutput {
   stdout: string
@@ -87,7 +90,7 @@ export const bashTool = buildTool<typeof inputSchema, BashOutput>({
       })
       child.on('close', (code, signal) => {
         cleanup()
-        if (truncated) stdout += '\n[output truncated at 64KiB]'
+        if (truncated) stdout += '\n[output truncated at 2MB — re-run narrowed (head/tail/grep) to see more]'
         resolve({ data: { stdout, stderr, code: code ?? -1, timedOut, signal: signal ?? null } })
       })
     })
