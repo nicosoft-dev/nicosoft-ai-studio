@@ -10,12 +10,13 @@ import { mkdtempSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'n
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
+import { semanticNumber } from './semantic'
 import { buildTool } from '../tool'
 import type { ImageBlock, TextBlock, ToolResultBlock } from '../types'
 
 const inputSchema = z.object({
   code: z.string().describe('Python source to execute'),
-  timeout_ms: z.number().int().positive().optional().describe('Timeout in ms (default 120000)'),
+  timeout_ms: semanticNumber(z.number().int().positive().optional()).describe('Timeout in ms (default 120000)'),
 })
 
 const DEFAULT_TIMEOUT = 120_000

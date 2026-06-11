@@ -3,6 +3,7 @@
 
 import { stat, writeFile } from 'node:fs/promises'
 import { z } from 'zod'
+import { semanticBoolean } from './semantic'
 import { confineReal } from '../confine'
 import { buildTool } from '../tool'
 import type { ToolResultBlock } from '../types'
@@ -15,7 +16,7 @@ const inputSchema = z.strictObject({
       z.strictObject({
         old_string: z.string(),
         new_string: z.string(),
-        replace_all: z.boolean().optional(),
+        replace_all: semanticBoolean(z.boolean().optional()),
       }),
     )
     .min(1)

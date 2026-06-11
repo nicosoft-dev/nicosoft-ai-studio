@@ -4,6 +4,7 @@
 // language-server). Read-only + concurrency-safe — queries never mutate. Positions are 1-based.
 
 import { z } from 'zod'
+import { semanticNumber } from './semantic'
 import { extname } from 'node:path'
 import { buildTool } from '../tool'
 import type { ToolResultBlock } from '../types'
@@ -13,8 +14,8 @@ import { LSP_EXTS, type LspLocation, type LspDiagnostic } from '../lsp/manager'
 const inputSchema = z.strictObject({
   action: z.enum(['definition', 'references', 'hover', 'diagnostics']),
   file: z.string().describe('Path to a .ts/.tsx/.js/.jsx file (relative to cwd or absolute)'),
-  line: z.number().int().min(1).optional().describe('1-based line — required for definition/references/hover'),
-  col: z.number().int().min(1).optional().describe('1-based column — required for definition/references/hover'),
+  line: semanticNumber(z.number().int().min(1).optional()).describe('1-based line — required for definition/references/hover'),
+  col: semanticNumber(z.number().int().min(1).optional()).describe('1-based column — required for definition/references/hover'),
 })
 
 export const lspTool = buildTool({

@@ -4,14 +4,15 @@
 import { readFile, stat } from 'node:fs/promises'
 import { PDFParse } from 'pdf-parse'
 import { z } from 'zod'
+import { semanticNumber } from './semantic'
 import { confineReal } from '../confine'
 import { buildTool } from '../tool'
 import type { ToolResultBlock } from '../types'
 
 const inputSchema = z.object({
   file_path: z.string().describe('Path to the file, relative to the project root or absolute'),
-  offset: z.number().int().positive().optional().describe('1-based line number to start reading from'),
-  limit: z.number().int().positive().optional().describe('Maximum number of lines to read'),
+  offset: semanticNumber(z.number().int().min(0).optional()).describe('1-based line number to start reading from (0 = start of file)'),
+  limit: semanticNumber(z.number().int().positive().optional()).describe('Maximum number of lines to read'),
 })
 
 const MAX_BYTES = 256 * 1024

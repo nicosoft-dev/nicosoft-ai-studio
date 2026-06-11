@@ -8,6 +8,10 @@ import type { ToolResultBlock } from '../types'
 const todoSchema = z.strictObject({
   content: z.string(),
   status: z.enum(['pending', 'in_progress', 'completed']),
+  // Accepted (optional): Claude Code's TodoWrite makes activeForm (present-continuous, e.g. "Running
+  // tests") a REQUIRED field, so models trained on it send it on every item — a strictObject rejection
+  // would fail the whole list. Accept it; the UI renders `content`, activeForm is a tolerated extra.
+  activeForm: z.string().optional(),
 })
 
 const inputSchema = z.strictObject({

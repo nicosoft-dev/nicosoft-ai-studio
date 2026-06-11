@@ -4,6 +4,7 @@
 
 import { glob, readFile, stat } from 'node:fs/promises'
 import { z } from 'zod'
+import { semanticBoolean } from './semantic'
 import { confineReal } from '../confine'
 import { buildTool } from '../tool'
 import type { ToolResultBlock } from '../types'
@@ -11,7 +12,7 @@ import type { ToolResultBlock } from '../types'
 const inputSchema = z.object({
   pattern: z.string().describe('Regular expression to search file contents for'),
   glob: z.string().optional().describe('File glob to limit the search (default **/*)'),
-  ignore_case: z.boolean().optional().describe('Case-insensitive match'),
+  ignore_case: semanticBoolean(z.boolean().optional()).describe('Case-insensitive match'),
 })
 
 const MAX_MATCHES = 200

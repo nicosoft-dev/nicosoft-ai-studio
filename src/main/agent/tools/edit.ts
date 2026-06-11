@@ -3,6 +3,7 @@
 
 import { stat, writeFile } from 'node:fs/promises'
 import { z } from 'zod'
+import { semanticBoolean } from './semantic'
 import { confineReal } from '../confine'
 import { buildTool } from '../tool'
 import type { ToolResultBlock } from '../types'
@@ -12,7 +13,7 @@ const inputSchema = z.strictObject({
   file_path: z.string().describe('Path to the file to edit'),
   old_string: z.string().describe('The exact text to replace'),
   new_string: z.string().describe('The replacement text'),
-  replace_all: z.boolean().optional().describe('Replace every occurrence (default false)'),
+  replace_all: semanticBoolean(z.boolean().optional()).describe('Replace every occurrence (default false)'),
 })
 
 interface EditOutput {

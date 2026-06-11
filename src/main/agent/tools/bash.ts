@@ -5,13 +5,14 @@
 
 import { spawn } from 'node:child_process'
 import { z } from 'zod'
+import { semanticNumber } from './semantic'
 import { buildTool } from '../tool'
 import type { ToolResultBlock } from '../types'
 import { isReadOnlyCommand } from './bash-classifier'
 
 const inputSchema = z.object({
   command: z.string().describe('The shell command to run'),
-  timeout_ms: z.number().int().positive().optional().describe('Timeout in ms (default 120000)'),
+  timeout_ms: semanticNumber(z.number().int().positive().optional()).describe('Timeout in ms (default 120000)'),
   description: z
     .string()
     .optional()
