@@ -30,9 +30,15 @@ export interface MicrocompactResult {
 
 export function microcompact(messages: AgentMessage[], keepRecent = KEEP_RECENT_RESULTS): MicrocompactResult {
   const toolNameById = new Map<string, string>()
+  const readPathById = new Map<string, string>()
   for (const m of messages) {
     if (m.role === 'assistant') {
-      for (const b of m.content) if (isContentBlock(b) && b.type === 'tool_use') toolNameById.set(b.id, b.name)
+      for (const b of m.content)
+        if (isContentBlock(b) && b.type === 'tool_use') {
+          toolNameById.set(b.id, b.name)
+          const fp = b.name === 'Read' ? (b.input as { file_path?: unknown } | undefined)?.file_path : undefined
+          if (typeof fp === 'string') readPathById.set(b.id, fp)
+        }
     }
   }
   const compactable: ToolResultBlock[] = []
@@ -46,7 +52,21 @@ export function microcompact(messages: AgentMessage[], keepRecent = KEEP_RECENT_
     }
   }
   if (compactable.length <= keepRecent) return { messages, freedChars: 0 }
-  const clear = new Set(compactable.slice(0, compactable.length - keepRecent))
+  // Pinned-on-reread: a file Read ≥2 times this run is a task-critical reference the model keeps coming
+  // back to (dogfood: a spec doc was read 6× — cleared, re-read, cleared again, burning a full re-read
+  // each cycle). Keep the LATEST still-present result of any such file out of the clear set; older
+  // duplicates of the same file still clear. Counted over ALL Read tool_uses (including already-cleared
+  // ones), so the signal survives earlier microcompact passes.
+  const readCount = new Map<string, number>()
+  for (const p of readPathById.values()) readCount.set(p, (readCount.get(p) ?? 0) + 1)
+  const latestByPath = new Map<string, ToolResultBlock>()
+  for (const b of compactable) {
+    const p = readPathById.get(b.tool_use_id)
+    if (p && (readCount.get(p) ?? 0) >= 2) latestByPath.set(p, b) // message order → last wins
+  }
+  const pinned = new Set(latestByPath.values())
+  const clear = new Set(compactable.slice(0, compactable.length - keepRecent).filter((b) => !pinned.has(b)))
+  if (clear.size === 0) return { messages, freedChars: 0 }
   let freedChars = 0
   for (const b of clear) freedChars += typeof b.content === 'string' ? b.content.length : 0
   const next = messages.map((m) =>

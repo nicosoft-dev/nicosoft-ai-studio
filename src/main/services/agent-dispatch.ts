@@ -68,6 +68,7 @@ export interface AgentLoopInput {
   imageModel?: string // image backend slug for ns_generate_image (designer); Gemini only
   initialTodos?: AgentContext['todos'] // seed the run's todos from the shared conv-level list (pipeline continuity)
   onTodosChange?: AgentContext['setTodos'] // TodoWrite writes back here → the shared conv-level list
+  expectsFileChanges?: boolean // implementation-gated run: quiescing with zero file edits triggers one nudge turn (loop.ts)
 }
 
 // Generic tool→image surfacing. A tool that produces an image (ns_generate_image, code_execution charts,
@@ -151,6 +152,7 @@ export async function runAgentLoop(
     serverTools: loop.serverTools,
     ctx,
     contextWindow: loop.contextWindow ?? 200_000,
+    expectsFileChanges: loop.expectsFileChanges,
     thinking: loop.thinking,
     imageModel: loop.imageModel,
     onStream: cb.onStream,
@@ -290,6 +292,7 @@ export interface DispatchedAgentInput {
   // Mirrors runRoleStep: true for single / first-pipeline-step (replay history; the trailing user turn IS
   // the request) — false for pipeline step 2+ / panel (seed = the constructed `prompt`, not a user turn).
   includeHistory: boolean
+  expectsFileChanges?: boolean // implementation-gated dispatch → loop nudges once on a zero-edit quiesce
   memories: MemoryRow[]
   summary: string | null
   imageModel?: string // image backend slug for ns_generate_image (dispatched designer / Georgia); Gemini only
@@ -329,10 +332,24 @@ export async function runDispatchedAgent(
   if (d.includeHistory) {
     const history = convRepo.listByConversation(d.convId)
     const summary = summaryRepo.getLatest(d.convId)
-    const recent = summary?.coveredUpTo != null ? history.filter((m) => m.id > summary.coveredUpTo!) : history
+    let recent = summary?.coveredUpTo != null ? history.filter((m) => m.id > summary.coveredUpTo!) : history
+    // Coordinator hand-off notes are USER-facing narration, not expert instructions — yet replayed as
+    // the latest assistant turn they re-frame the task ("Flynn will first produce a plan, then…") and
+    // the dispatched expert dutifully delivers the first stage and stops (3× in dogfood 2026-06-11:
+    // research+plan, zero edits). Drop Danny's lines from the expert's view; the user's own words and
+    // other experts' outputs remain.
+    recent = recent.filter((m) => !(m.author === 'expert' && m.expertId === 'coordinator'))
     const mapped = conversationToAgentMessages(recent)
     const firstUser = mapped.findIndex((m) => m.role === 'user')
     seed = firstUser > 0 ? mapped.slice(firstUser) : mapped
+    // Upstreams differ on assistant prefill: the native Anthropic API accepts a conversation ending on
+    // an assistant turn, Claude-OAuth-routed channels hard-400 it ("This model does not support
+    // assistant message prefill"). The coordinator intro persists AFTER the user's request, so a
+    // dispatched step's replayed history routinely ends on assistant — close it with the actual
+    // request as a user turn (also keeps the task explicit instead of leaning on prefill semantics).
+    if (seed.length && seed[seed.length - 1].role === 'assistant') {
+      seed = [...seed, { role: 'user', content: [{ type: 'text', text: d.prompt }] }]
+    }
   } else {
     seed = [{ role: 'user', content: [{ type: 'text', text: d.prompt }] }]
   }
@@ -357,6 +374,7 @@ export async function runDispatchedAgent(
       thinking: d.thinking,
       contextWindow: d.contextWindow,
       permissionMode: d.permissionMode ?? 'default',
+      expectsFileChanges: d.expectsFileChanges,
       imageModel: d.imageModel,
       initialTodos: d.initialTodos,
       onTodosChange: d.onTodosChange,

@@ -95,11 +95,20 @@ async function* callWithToolsAnthropic(
   onEvent?: (e: AgentLlmEvent) => void,
 ): AsyncGenerator<ToolUseBlock, AssistantTurn, void> {
   const url = `${trimBase(req.baseUrl)}/v1/messages`
+  // Last-line defense: a user message with EMPTY content hard-400s strict upstreams ("user messages
+  // must have non-empty content") and poisons every subsequent request. No known path produces one
+  // anymore (truncated tool_use blocks are dropped, empty drains are back-filled), but the cost of a
+  // poisoned history is the whole run — patch a placeholder instead of trusting every future path.
+  const safeMessages = req.messages.map((m) =>
+    m.role === 'user' && Array.isArray(m.content) && m.content.length === 0
+      ? { ...m, content: [{ type: 'text' as const, text: '(empty)' }] }
+      : m,
+  )
   const body: AgentMessagesBody = {
     model: req.model,
     max_tokens: req.maxTokens,
     system: req.system,
-    messages: req.messages,
+    messages: safeMessages,
     tools: req.tools,
     stream: true,
   }
@@ -217,12 +226,22 @@ async function* callWithToolsAnthropic(
 
   // Assemble the full turn in index order. Server blocks are pushed verbatim (round-tripped, never
   // executed) so the next request carries the model's own server-tool calls + results.
+  // A tool_use that never reached content_block_stop (b.input unset — the stream was cut by
+  // max_tokens mid-json) is DROPPED: it was never yielded/executed, carrying it forward poisons the
+  // history (an unpaired empty-input tool_use → an empty tool_results user turn → strict upstreams
+  // 400 the whole conversation; observed in dogfood 2026-06-11 as "messages.N: user messages must
+  // have non-empty content"). The loop sees stopReason and retries the turn cleanly.
   const content: Array<TextBlock | ToolUseBlock | ServerBlock> = []
   for (const b of blocks) {
     if (!b) continue
     if (b.type === 'text') content.push({ type: 'text', text: b.text })
-    else if (b.type === 'tool_use') content.push({ type: 'tool_use', id: b.id, name: b.name, input: b.input ?? {} })
-    else content.push(b.raw as ServerBlock)
+    else if (b.type === 'tool_use') {
+      if (b.input === undefined) {
+        console.warn(`[agent] dropping truncated tool_use ${b.name} (stream ended mid-input, stop=${stopReason})`)
+        continue
+      }
+      content.push({ type: 'tool_use', id: b.id, name: b.name, input: b.input })
+    } else content.push(b.raw as ServerBlock)
   }
   onEvent?.({
     type: 'turn-final',

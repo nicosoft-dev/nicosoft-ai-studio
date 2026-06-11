@@ -102,6 +102,10 @@ function verbDone(t: ToolCall): string {
     case 'WebSearch': return 'Searched the web for'
     case 'Task': return 'Ran agent'
     case 'TodoWrite': return 'Updated todos'
+    // Coordination internals — never leak the mechanism name (IndependentVerifier/GateBFailHandler/…)
+    case 'IndependentVerifier': return 'Verified independently'
+    case 'GateBFailHandler': return 'Reworked after failed verification'
+    case 'DannyPlanReview': return 'Reviewed the plan'
     default: return t.name
   }
 }
@@ -121,6 +125,10 @@ function verbLive(t: ToolCall): string {
     case 'WebSearch': return 'Searching the web for'
     case 'Task': return 'Running agent'
     case 'TodoWrite': return 'Updating todos'
+    // Coordination internals — never leak the mechanism name as "Running GateBFailHandler"
+    case 'IndependentVerifier': return 'Verifying independently'
+    case 'GateBFailHandler': return 'Reworking after failed verification'
+    case 'DannyPlanReview': return 'Reviewing the plan'
     default: return `Running ${t.name}`
   }
 }
@@ -241,6 +249,10 @@ export function ToolRun({ tools, live = false }: { tools: ToolCall[]; live?: boo
   const [open, setOpen] = useState(false)
   const running = tools.filter((t) => t.status === 'running')
   const done = tools.filter((t) => t.status !== 'running')
+  // The BREATHING live row belongs to a segment that is itself alive (`live`). A closed segment can
+  // still carry a running sub-tool — Gate B attaches its verifier/fail-handler to the finished
+  // implementer step — so a running tool alone renders the same row in a SETTLED (pulse-free) state:
+  // the activity stays visible without making a finished segment look live again (dogfood 2026-06-11).
   const isLive = live || running.length > 0
 
   if (isLive) {
@@ -251,7 +263,7 @@ export function ToolRun({ tools, live = false }: { tools: ToolCall[]; live?: boo
     // multi-line collapse.
     const current = running[running.length - 1]
     return (
-      <div className="tool-run live">
+      <div className={'tool-run live' + (live ? '' : ' settled')}>
         {current ? (
           <LiveLine tool={current} />
         ) : (

@@ -90,7 +90,13 @@ export async function run(
   const system = buildAgentSystem(roleId, memories, summary?.content ?? null, skillManager.listingForRole(roleId), input.cwd)
   const mapped = conversationToAgentMessages(recent)
   const firstUser = mapped.findIndex((m) => m.role === 'user')
-  const seed = firstUser > 0 ? mapped.slice(firstUser) : mapped
+  let seed = firstUser > 0 ? mapped.slice(firstUser) : mapped
+  // Claude-OAuth-routed upstreams reject assistant prefill ("the conversation must end with a user
+  // message"); the native API tolerates it. History normally ends on the just-persisted user prompt,
+  // but guard the invariant here too so a persistence-order change can't reintroduce a routed 400.
+  if (seed.length && seed[seed.length - 1].role === 'assistant') {
+    seed = [...seed, { role: 'user', content: [{ type: 'text', text: input.prompt }] }]
+  }
 
   // Exact prompt tokens for this turn (system + seed + tool schemas) — free via count_tokens, falls
   // back to a small-model probe then chars/4. Drives the composer readout + the compression threshold.

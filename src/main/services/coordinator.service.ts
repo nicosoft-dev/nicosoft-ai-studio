@@ -52,6 +52,7 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
   resetPipelineTodos(input.convId) // a new coordinator turn = a new pipeline → start its shared todo list fresh
   const history = convRepo.listByConversation(input.convId)
   const decision = await route(input.prompt, history, signal)
+  console.log(`[coordinator] route ${JSON.stringify({ mode: decision.mode, role: (decision as { role?: string }).role, roles: (decision as { roles?: string[] }).roles, reason: decision.reason, needsPlan: decision.needsPlan })}`)
   if (signal.aborted) throw new LlmError('network', 'aborted before dispatch')
 
   // Gate C (Block 2): the e2e signal is INDEPENDENT — it depends only on what the user explicitly asked
@@ -100,6 +101,23 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
       cb,
       signal
     }, { enabled: gateEnabled, originalPrompt: input.prompt }, signal)
+    // A gated step that ended UNRESOLVED must close on an explicit coordinator verdict, never on the
+    // handler's last working note (dogfood 2026-06-11: the turn ended mid-sentence and the user had no
+    // way to tell the task had failed). Emitted as Coordinator's own closing beat, like the intro.
+    if (out.gateOutcome === 'unresolved') {
+      emitCoordinatorIntro(
+        input.convId,
+        [
+          '**Task NOT delivered — quality verification did not pass and the follow-up did not resolve it.**',
+          '',
+          'Verifier evidence:',
+          (out.gateEvidence ?? 'no evidence captured').slice(0, 1500),
+          '',
+          'The requested change has not been completed. Review the evidence above, then retry or adjust the task.'
+        ].join('\n'),
+        cb
+      )
+    }
     fireSideEffects(input.convId, decision.role, out.endpointId, out.model, out.inputTokens)
     return { inputTokens: out.inputTokens, outputTokens: out.outputTokens }
   }

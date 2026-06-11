@@ -131,6 +131,19 @@
   max-height: 320px;
   overflow: auto;
 }
+/* Failed tool result — the wire <tool_use_error> wrapper is stripped in ResultBody; the message body
+   gets the error treatment so a failure reads as one at a glance instead of leaking raw markup. */
+.tb-result-error {
+  color: var(--error);
+  background: color-mix(in oklab, var(--error) 7%, transparent);
+  border-left: 2px solid color-mix(in oklab, var(--error) 55%, transparent);
+}
+/* A running sub-tool attached to a FINISHED segment (Gate B verifier/fail-handler): keep the activity
+   row visible but pulse-free — a closed segment must not look live again. */
+.tool-run.settled .tr-dot {
+  animation: none;
+  opacity: 0.45;
+}
 /* Agent-authored Markdown result rendered inside the tool card — pad it like .tb-result and cap height
    so long verdicts scroll instead of stretching the card. */
 .tb-md {

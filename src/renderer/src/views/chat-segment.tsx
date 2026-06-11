@@ -247,8 +247,13 @@ export function ChatSegment({
   // direct, intro, and synthesis never fold (foldable already excludes them).
   const windowed = foldable && !expanded
   // Live while the run's newest turn still streams, any tool executes, or (pendingLive) the conversation is
-  // about to continue this run — drives the readout, the avatar pulse, and keeping a tail fold open.
+  // about to continue this run — keeps a tail fold open and the tool cards' live rows rendering.
   const runLive = pendingLive || msgs.some((m) => m.streaming || m.tools?.some((tl) => tl.status === 'running'))
+  // The TIMED readout and the pulsing avatar belong to a segment that is ITSELF streaming. A closed
+  // segment can still carry a running sub-tool — Gate B's verifier/fail-handler attach to the
+  // implementer's FINISHED step — and resurrecting the timer/token readout off that made two segments
+  // look simultaneously live (dogfood 2026-06-11). The sub-tool card still shows its own activity.
+  const segStreaming = pendingLive || msgs.some((m) => m.streaming)
   useEffect(() => {
     if (windowed && bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight
   }, [last.text, last.tools?.length, last.servers?.length, last.streaming, msgs.length, windowed])
@@ -259,7 +264,7 @@ export function ChatSegment({
   return (
     <div className={'segment' + (isUser ? ' user' : '')} style={{ '--seg-color': segColor } as CSSProperties}>
       <div className="seg-head">
-        <Avatar expert={isUser ? null : renderExpert} you={isUser} size={28} streaming={!isUser && runLive} />
+        <Avatar expert={isUser ? null : renderExpert} you={isUser} size={28} streaming={!isUser && segStreaming} />
         <div className="seg-meta">
           <NameChip expert={isUser ? null : renderExpert} neutral={isUser} />
           {synthesis ? <span className="synthesis-tag">{t('conv.synthesis')}</span> : null}
@@ -287,11 +292,11 @@ export function ChatSegment({
             ) : null}
           </>
         ) : (
-          <RunBody msgs={msgs} onOpenImage={onOpenImage} live={runLive} />
+          <RunBody msgs={msgs} onOpenImage={onOpenImage} live={segStreaming} />
         )}
         {/* ONE live readout for the whole run (pulsing dot · elapsed · ↑↓ tokens), gone the moment the run
             finishes; then the run-total token summary takes its place. */}
-        {runLive ? (
+        {segStreaming ? (
           // Coordinator segments carry their own live ↑/↓ (per-message) so concurrent segments don't all show
           // the conv-level total; single chat/agent turns have no per-message live → fall back to the conv prop.
           <ThinkingReadout chars={last.text.length} inputTokens={last.liveInputTokens ?? inputTokens} outputTokens={last.liveOutputTokens ?? outputTokens} cachedTokens={last.liveInputTokens !== undefined ? (last.liveCachedTokens ?? 0) : cachedTokens} activity={segmentActivity(last.tools)} />

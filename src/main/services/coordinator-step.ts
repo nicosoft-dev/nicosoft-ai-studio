@@ -91,6 +91,9 @@ export interface RunStepOptions {
   // Full system-prompt override (verbatim, instead of buildAgentSystem). Gate B's verifier passes its own
   // adversarial verifier persona here so it isn't bound by a borrowed role's "don't touch code" persona.
   systemPromptOverride?: string
+  // Implementation-gated step (Gate B implementer / fail handler): the agent loop nudges once when the
+  // run quiesces with zero file-editing tool calls (action-displacement guard).
+  expectsFileChanges?: boolean
 }
 
 // Coordinator's system = a base prompt section (direct / synthesis) + his recalled memories + the running
@@ -184,6 +187,7 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
         summary: summaryContent,
         permissionMode: opts.permissionMode,
         toolNames: opts.toolNames,
+        expectsFileChanges: opts.expectsFileChanges,
         imageModel: binding.imageModel ?? undefined,
         // DIRECT: run the loop with Danny's front-door persona + his recalled context, not the
         // dispatched-expert coding system. Gate B's verifier passes its own persona via opts.systemPromptOverride.

@@ -84,7 +84,8 @@ function buildBody(req: ChatRequest): ResponsesBody {
   // carry no system at all. Fall back to the shared neutral prompt so those calls aren't 400'd.
   const instructions = toInstructions(req.messages)
   body.instructions = instructions ?? DEFAULT_INSTRUCTIONS
-  if (req.thinking?.effort) body.reasoning = { effort: req.thinking.effort }
+  // OpenAI Responses has no 'max' tier — clamp Anthropic's top tier to the highest OpenAI accepts.
+  if (req.thinking?.effort) body.reasoning = { effort: req.thinking.effort === 'max' ? 'xhigh' : req.thinking.effort }
   if (req.cacheEnabled) body.prompt_cache_key = stablePromptCacheKey(req)
   return body
 }

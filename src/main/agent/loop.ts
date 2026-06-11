@@ -53,6 +53,10 @@ export interface RunAgentParams {
   roleId?: string
   maxTurns?: number
   contextWindow?: number // model's context window, drives the autocompact threshold (default 200K)
+  // The task is expected to produce actual file modifications (implementation-gated dispatch). When the
+  // run quiesces with ZERO file-editing tool calls, the loop injects ONE nudge turn pushing it from
+  // planning into acting (action-displacement guard) instead of ending on an analysis-only result.
+  expectsFileChanges?: boolean
   thinking?: ThinkingParam // extended thinking (budgetTokens), forwarded to every model call this run
   smallModel?: string // model for WebFetch extraction; defaults to the main model
   searchModel?: string // model for WebSearch's server web_search call; defaults to the main model
@@ -77,6 +81,16 @@ export interface AgentResult {
 const SUBAGENT_SYSTEM =
   'You are a sub-agent spawned to complete a focused subtask. Use the tools to do it, then give a ' +
   'concise summary of what you found or did as your final message — that summary is all the parent sees.'
+
+// Action-displacement guard (see expectsFileChanges). NotebookEdit intentionally included for parity
+// with the full kit even though most dispatched roles don't carry it.
+const FILE_CHANGE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
+const FILE_CHANGE_NUDGE =
+  'Reminder: this task requires ACTUAL file modifications (a real diff), and so far you have not called ' +
+  'any editing tool (Write/Edit/MultiEdit). Analysis and plans are not the deliverable. Continue now: ' +
+  'implement the changes with the editing tools, run the required checks, and stop only when the work is ' +
+  'done or genuinely blocked. If you already applied the changes some other way (e.g. via Bash), state ' +
+  'exactly which files changed and verify with `git status` before finishing.'
 
 // tool_search variant used when tools opt into deferral. Regex flavour (the model builds a Python
 // regex over tool names/descriptions); bm25 is the alternative.
@@ -120,7 +134,14 @@ export async function* runAgent(
   params: RunAgentParams,
 ): AsyncGenerator<AgentEvent, AgentResult, void> {
   const { baseUrl, apiKey, model, system, tools } = params
-  const maxTokens = params.maxTokens ?? 8192
+  // Claude Code's three-tier strategy (query.ts, tengu_otk_slot): a SMALL default — Anthropic rate
+  // limiting pre-reserves OTPM by max_tokens, so a big standing value wastes quota under concurrency —
+  // escalated to 64K on the FIRST max_tokens cut (same request, no extra turn), then multi-turn
+  // recovery prompts. 16K (not CC's 8K) because effort-tier thinking shares this budget with tool json
+  // (a ~17KB file Write is ~5K tokens of input json alone; 8K squeezed both — the F15 cascade).
+  let maxTokens = params.maxTokens ?? 16384
+  const ESCALATED_MAX_TOKENS = 65536
+  let maxTokensEscalated = false
   // Tools that call a model (WebFetch extraction, WebSearch's secondary request) default to the MAIN
   // model — always available and protocol-compatible — so the agent isn't pinned to any provider's
   // model slugs and works against a raw Anthropic endpoint too. The caller can pass smallModel /
@@ -206,6 +227,19 @@ export async function* runAgent(
   // abort (ctx.signal) is excluded. Capped so a persistently-dead upstream still ends after 10 attempts.
   let requestRetries = 0
   const MAX_REQUEST_RETRIES = 10
+  // Action-displacement guard (dogfood 2026-06-11): an implementation-gated run twice quiesced after
+  // research + a plan with ZERO file edits. Track whether any file-modifying tool ran; on quiesce
+  // without one, inject a single nudge turn (never a loop) pushing the model from planning into acting.
+  // Bash intentionally not counted: it can modify files, but counting it would also count read-only
+  // usage (git status, go build) and mask the displacement. A false nudge after Bash-only edits costs
+  // one confirmation turn — acceptable.
+  let sawFileChange = false
+  let nudgedForFileChanges = false
+  // max_tokens truncation retries (F15): a turn cut mid-output gets its incomplete tool_use blocks
+  // dropped (llm layer) and ONE of these per occurrence, bounded so a model that can't fit its output
+  // ends the run instead of looping.
+  let truncationRetries = 0
+  const MAX_TRUNCATION_RETRIES = 2
 
   // Sub-agent spawner factory for the Task tool. Builds an isolated inner loop with the same LLM
   // config but no Task tool (recursion bounded to one level) and a fresh readFileState/todos,
@@ -317,6 +351,7 @@ export async function* runAgent(
         autoFloorHit = true
         console.warn(`[agent] autocompact floor: estimate ${estimate} still over threshold ${threshold} right after compacting — proactive compaction disabled for this run`)
       } else if (messages.length >= 4) { // fewer = just the summary + the current turn, nothing to fold
+        console.log(`[agent] proactive autocompact run=${ctx.runId} turn=${turns} estimate=${estimate} threshold=${threshold} msgs=${messages.length}`)
         const compacted = await autocompact(messages, compactConfig)
         if (compacted !== messages) {
           messages = compacted
@@ -397,12 +432,19 @@ export async function* runAgent(
         }
         continue
       }
-      // Reactive compaction: an overflow status (400/413) that slipped past the proactive check →
-      // compact once and retry. Gate on STATUS + a "haven't already compacted for this send" guard,
-      // NOT on the error message (a proxy may reshape it). If it overflows again right after a reactive
-      // compact, fail cleanly instead of looping.
-      const overflow = err instanceof LlmError && (err.status === 400 || err.status === 413)
+      // Reactive compaction: an overflow that slipped past the proactive check → compact once and retry.
+      // 413 is unambiguous. A bare 400 is NOT proof of overflow — upstream channel faults, bad params and
+      // proxy-reshaped errors all ride 400 (observed in dogfood: a routed-channel 400 triggered a pointless
+      // autocompact that folded the task spec away mid-run). Treat 400 as overflow only when the running
+      // estimate says the prompt is actually near the window, OR the error body carries an overflow
+      // signature (kept as a fallback for proxies that reshape status but not wording).
+      const nearWindow = estimate > threshold * 0.8
+      const overflow =
+        err instanceof LlmError &&
+        (err.status === 413 ||
+          (err.status === 400 && (nearWindow || /context|too.?long|token|length|exceed/i.test(err.message))))
       if (overflow && !reactiveCompacted) {
+        console.warn(`[agent] reactive autocompact run=${ctx.runId} turn=${turns} status=${err.status} estimate=${estimate} threshold=${threshold}`)
         const compacted = await autocompact(messages, compactConfig)
         if (compacted !== messages) {
           messages = compacted
@@ -427,11 +469,58 @@ export async function* runAgent(
 
     // Loop continues iff the assistant requested ≥1 tool — NOT based on stop_reason (§2.1).
     const toolUses = assistant.content.filter((b): b is ToolUseBlock => b.type === 'tool_use')
-    if (toolUses.length === 0) return { reason: 'completed', messages, turns, compactions }
+    if (toolUses.some((t) => FILE_CHANGE_TOOLS.has(t.name))) sawFileChange = true
+    if (toolUses.length === 0) {
+      // max_tokens truncation (F15): incomplete tool_use blocks were already dropped by the llm layer,
+      // so a cut-off turn that intended tools lands here tool-less. Quiescing on it would deliver a
+      // half answer (or, pre-fix, poison the history). Tier 1 — Claude Code style: re-send the SAME
+      // request at the escalated ceiling, no extra conversation turn. Tier 2 — recovery prompts.
+      if (assistant.stopReason === 'max_tokens') {
+        if (!maxTokensEscalated && maxTokens < ESCALATED_MAX_TOKENS) {
+          maxTokensEscalated = true
+          maxTokens = ESCALATED_MAX_TOKENS
+          messages.pop() // drop the truncated assistant turn — the retry replaces it wholesale
+          console.warn(`[agent] max_tokens escalate to ${ESCALATED_MAX_TOKENS} run=${ctx.runId} turn=${turns}`)
+          continue
+        }
+        if (truncationRetries < MAX_TRUNCATION_RETRIES) {
+          truncationRetries++
+          console.warn(`[agent] max_tokens truncation retry ${truncationRetries}/${MAX_TRUNCATION_RETRIES} run=${ctx.runId} turn=${turns}`)
+          messages.push({
+            role: 'user',
+            content: [{
+              type: 'text',
+              text: 'Your previous response hit the output-token limit and was cut off — any tool call in it was discarded. Continue in SMALLER pieces: keep thinking brief, and split large file writes into a skeleton Write followed by incremental Edits.',
+            }],
+          })
+          continue
+        }
+      }
+      if (params.expectsFileChanges && !sawFileChange && !nudgedForFileChanges) {
+        nudgedForFileChanges = true
+        console.warn(`[agent] action-displacement nudge run=${ctx.runId} turn=${turns} — implementation-gated run quiesced with zero file edits`)
+        messages.push({ role: 'user', content: [{ type: 'text', text: FILE_CHANGE_NUDGE }] })
+        continue
+      }
+      return { reason: 'completed', messages, turns, compactions }
+    }
 
     // The tools were already executing as they streamed in (StreamingToolExecutor); drain for results
     // in original order. Pairing holds by construction (one result per tool_use, same id, in order).
     const results = await streamExec.drain()
+    // Pairing back-fill: Anthropic requires one tool_result per tool_use, and an EMPTY user message
+    // poisons the conversation for strict upstreams. If the executor came back short (aborted teardown
+    // and similar edge paths), synthesize an error result for each missing id instead of pushing a
+    // hole into the history.
+    if (results.length < toolUses.length) {
+      const have = new Set(results.map((r) => r.tool_use_id))
+      for (const t of toolUses) {
+        if (!have.has(t.id)) {
+          console.warn(`[agent] back-filling missing tool_result for ${t.name} run=${ctx.runId} turn=${turns}`)
+          results.push({ type: 'tool_result', tool_use_id: t.id, content: '<tool_use_error>tool execution produced no result (aborted)</tool_use_error>', is_error: true })
+        }
+      }
+    }
     const userMsg: AgentMessage = { role: 'user', content: results }
     messages.push(userMsg)
     yield { type: 'tool_results', message: userMsg }

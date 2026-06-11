@@ -30,7 +30,10 @@ export function streamIdleGuard(runSignal: AbortSignal | undefined, idleMs: numb
   let timer: ReturnType<typeof setTimeout> | undefined
   const reset = (): void => {
     if (timer) clearTimeout(timer)
-    timer = setTimeout(() => ctrl.abort(new Error(`LLM stream idle for ${idleMs}ms — aborting hung upstream`)), idleMs)
+    timer = setTimeout(() => {
+      console.warn(`[agent] llm stream idle ${idleMs}ms — aborting hung upstream`)
+      ctrl.abort(new Error(`LLM stream idle for ${idleMs}ms — aborting hung upstream`))
+    }, idleMs)
   }
   const dispose = (): void => {
     if (timer) clearTimeout(timer)

@@ -1,6 +1,6 @@
 // Pure type definitions for the chat store — no runtime code, no store state. chat.ts re-exports the
 // public ones so consumers keep importing them from '@/stores/chat' (the store's API face).
-import type { EffortLevel } from '@/lib/thinking'
+import type { ThinkingParam } from '@/lib/thinking'
 import type { AgentMode } from '@/lib/agent-mode'
 
 export type ConversationDto = Awaited<ReturnType<typeof window.api.conversations.list>>[number]
@@ -84,7 +84,7 @@ export interface SendOpts {
   expertId: string
   endpointId: string
   model: string
-  thinking?: { effort?: EffortLevel; budgetTokens?: number }
+  thinking?: ThinkingParam // single source @shared/thinking — an inline copy here drifted when 'max'/adaptive landed
   text: string
   images?: { dataUrl: string; mime: string; name: string }[]
   cwd?: string // the project dir — required for agent roles, ignored for plain chat

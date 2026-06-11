@@ -76,6 +76,8 @@ export function toolSummary(name: string, input: Record<string, unknown>): strin
       return 'Danny independent plan review'
     case 'IndependentVerifier':
       return `verifier ${String(input.verifierRoleId ?? '')}${input.attempt ? ` · attempt ${String(input.attempt)}` : ''}`
+    case 'GateBFailHandler':
+      return `rework by ${String(input.handlerRoleId ?? '')}`
     default:
       return ''
   }
@@ -85,6 +87,12 @@ export function toolSummary(name: string, input: Record<string, unknown>): strin
 // for git-diff Bash output, and plain monospace text otherwise.
 function ResultBody({ tool }: { tool: ToolCall }): ReactElement {
   const text = tool.result!
+  // Failed tool results arrive wrapped in the wire-protocol <tool_use_error> tag (execution.ts) — strip
+  // the tag and render the message in the error treatment instead of leaking raw markup to the user.
+  // status==='error' without the wrapper (other failure shapes) gets the same treatment on the raw text.
+  const errBody = text.match(/^\s*<tool_use_error>([\s\S]*?)<\/tool_use_error>\s*$/)?.[1]?.trim()
+    ?? (tool.status === 'error' ? text : undefined)
+  if (errBody !== undefined) return <pre className="tb-result tb-result-error">{errBody.slice(0, 6000)}</pre>
   if (MARKDOWN_TOOLS.has(tool.name)) {
     return (
       <div className="tb-md">
@@ -107,9 +115,13 @@ function ResultBody({ tool }: { tool: ToolCall }): ReactElement {
 // lives in tool-run.tsx; this is only what opens UNDER a line.
 export function ToolDetail({ tool }: { tool: ToolCall }): ReactElement | null {
   const input = (tool.input ?? {}) as Record<string, unknown>
-  const isDiff = DIFF_TOOLS.has(tool.name)
   const hasResult = !!tool.result && tool.status !== 'running'
-  const isReadResult = tool.name === 'Read' && hasResult
+  // A failed call renders its error body FIRST — otherwise a failed Read would syntax-highlight the
+  // error string as source code, and a failed Edit would show only its intended diff with the error
+  // hidden entirely (dogfood 2026-06-11: raw <tool_use_error> markup reached the user).
+  const isError = hasResult && (tool.status === 'error' || /^\s*<tool_use_error>/.test(tool.result!))
+  const isDiff = DIFF_TOOLS.has(tool.name) && !isError
+  const isReadResult = tool.name === 'Read' && hasResult && !isError
   const e2e = e2eMeta(tool)
   if (!isDiff && !hasResult && !e2e?.screenshotPath) return null
   return (
@@ -120,7 +132,9 @@ export function ToolDetail({ tool }: { tool: ToolCall }): ReactElement | null {
         </div>
       ) : null}
       {isDiff ? <DiffView name={tool.name} input={input} /> : null}
-      {isReadResult ? (
+      {isError ? (
+        <ResultBody tool={tool} />
+      ) : isReadResult ? (
         <div className="tb-code">
           <CodeBlock lang={extToLang(String(input.file_path ?? ''))} code={stripLineNumbers(tool.result!).slice(0, 50000)} bare />
         </div>

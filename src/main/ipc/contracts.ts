@@ -1,4 +1,5 @@
 import type { ModelInfo, Protocol } from '../domain'
+import type { ThinkingParam } from '../../shared/thinking'
 
 // DTOs crossing the IPC boundary (handlers ↔ preload ↔ renderer). The renderer-facing Endpoint
 // view carries `keyState` but never the key itself — secrets stay in the keychain.
@@ -41,9 +42,9 @@ export interface ChatSendInput {
   endpointId: string
   model: string
   systemPrompt: string // the role's system prompt; backend layers memories/summary/history beneath it
-  // Resolved by the renderer's thinking engine; one of effort (OpenAI/Gemini-3) or budgetTokens
-  // (Anthropic/Gemini-2.5). Omitted when the model can't think.
-  thinking?: { effort?: 'minimal' | 'none' | 'low' | 'medium' | 'high' | 'xhigh'; budgetTokens?: number }
+  // Resolved by the renderer's thinking engine. Single source @shared/thinking — inline copies of this
+  // type drifted when the effort rework added 'max' + adaptive. Omitted when the model can't think.
+  thinking?: ThinkingParam
 }
 
 // Context-compression trigger — fired by the renderer after each assistant reply.
@@ -95,8 +96,9 @@ export interface AgentRunInput {
   // Initial permission mode (default 'default'); the model may still switch it at runtime.
   permissionMode?: AgentPermissionMode
   contextWindow?: number // model context window, drives compaction threshold (default 200K)
-  // Resolved thinking directive (Anthropic extended thinking); budgetTokens drives the thinking budget.
-  thinking?: { effort?: 'minimal' | 'none' | 'low' | 'medium' | 'high' | 'xhigh'; budgetTokens?: number }
+  // Resolved thinking directive — single source @shared/thinking (an inline copy here drifted when the
+  // effort rework added 'max' + adaptive, silently narrowing the contract).
+  thinking?: ThinkingParam
   // Pasted/attached images as data URLs (base64); sent as Anthropic image blocks in the seed user turn.
   images?: { dataUrl: string; mime: string }[]
   // Image backend slug for the ns_generate_image tool (designer / Georgia). Gemini only; undefined for

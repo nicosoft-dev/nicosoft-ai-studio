@@ -9,7 +9,16 @@ import { COORDINATOR_VERIFIER_PROMPT } from '../agent/roles/prompts'
 import { route } from './coordinator-route'
 import { runRoleStep, type RunStepOptions } from './coordinator-step'
 
-export async function runGatedRoleStep(roleId: string, prompt: string, opts: RunStepOptions, gate: { enabled: boolean; originalPrompt: string; approvedPlan?: string }, signal?: AbortSignal): Promise<Awaited<ReturnType<typeof runRoleStep>>> {
+// How the gated step ended. 'pass' = verifier approved the implementer's change directly. 'fixed' =
+// verifier FAILed, the fail handler claimed a fix AND a re-verification confirmed it. 'false-positive' =
+// the handler proved the verifier misjudged (carries its own evidence; not re-verified). 'unresolved' =
+// everything else — handler produced no closure, or its claimed fix failed re-verification. The caller
+// (coordinator.service) MUST surface 'unresolved' as an explicit failure, never a silent done (dogfood
+// 2026-06-11: a zero-work handler sailed through and the turn ended on a mid-investigation note).
+export type GateOutcome = 'pass' | 'fixed' | 'false-positive' | 'unresolved'
+export type GatedStepResult = Awaited<ReturnType<typeof runRoleStep>> & { gateOutcome?: GateOutcome; gateEvidence?: string }
+
+export async function runGatedRoleStep(roleId: string, prompt: string, opts: RunStepOptions, gate: { enabled: boolean; originalPrompt: string; approvedPlan?: string }, signal?: AbortSignal): Promise<GatedStepResult> {
   const baseOpts: RunStepOptions = { ...opts, roleId, prompt, signal: signal ?? opts.signal }
   if (!gate.enabled) return runRoleStep(baseOpts)
 
@@ -17,28 +26,54 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
   // directly. Danny's oversight is the adversarial Gate B verification of the RESULT, not a plan-mode pre-check —
   // plan review only makes sense with an approver, and bypass has none (forcing plan + Gate A here was the
   // deadlock). Non-bypass keeps the plan stage so its ExitPlanMode still goes through Gate A review.
+  // expectsFileChanges only on the bypass (executing) path — a plan-mode step's deliverable IS the plan.
   let result: Awaited<ReturnType<typeof runRoleStep>>
   if (opts.permissionMode === 'bypass') {
-    result = await runRoleStep(baseOpts)
+    result = await runRoleStep({ ...baseOpts, expectsFileChanges: true })
   } else {
     result = await runRoleStep({ ...baseOpts, permissionMode: 'plan' })
   }
   gate.approvedPlan = result.text
 
-  // Gate B is an INDEPENDENT quality check, not a coordinator-driven fix loop. Run the verifier ONCE: the
-  // implementer already self-tests inside its own agent loop (bypass gives it Bash), so a hard-coded "retry
-  // N times" here would be the coordinator overriding the agent's own judgment. Pass → deliver. Fail → attach
-  // the evidence and let synthesis (Danny, the main agent) report it honestly (never round an unverified
-  // result up to done); automatic re-work is Gate C's (e2e) job, not a fixed retry count baked in here.
+  // Gate B is an INDEPENDENT quality check, not a coordinator-driven fix loop: the implementer already
+  // self-tests inside its own agent loop, so no blanket "retry N times" here. One verification of the
+  // implementer's result; on FAIL, one fail-handler closure; the ONLY extra verifier pass is checking a
+  // handler's "已修复/fixed" CLAIM — validating closure, not looping rework (rework loops are Gate C's job).
   const verdict = await runVerifierStep(roleId, opts, gate, result.text, signal)
-  if (verdict.passed) return result
-  // Gate B FAILED → close the loop (don't leave the FAIL dangling): the verdict+evidence goes back to Danny,
-  // who routes it to the expert who OWNS the failing domain; that expert either fixes the real defect or proves
-  // it's a false positive, ending with an explicit conclusion. Reuses the router (route) + the agent-loop
-  // dispatch (runRoleStep). Runs ONCE — automatic re-work loops are Gate C's job — and the verifier is untouched.
+  let inputTokens = result.inputTokens + verdict.inputTokens
+  let outputTokens = result.outputTokens + verdict.outputTokens
+  if (verdict.passed) return { ...result, inputTokens, outputTokens, gateOutcome: 'pass' }
+
+  // Gate B FAILED → close the loop (don't leave the FAIL dangling): the verdict+evidence is routed to the
+  // expert who OWNS the failing domain; that expert fixes the real defect or proves a false positive.
   const followUp = await runGateBFailFollowUp(roleId, opts, gate, result.text, verdict.feedback, signal)
+  inputTokens += followUp.inputTokens
+  outputTokens += followUp.outputTokens
+
+  // Closure validation (dogfood 2026-06-11: the handler itself quiesced with zero work and the FAIL
+  // sailed through as a normal done). The handler prompt contracts ONE closure line — hold it to that:
+  //   claimed false positive → carries its own evidence, accept as closure;
+  //   claimed fix → must survive ONE re-verification;
+  //   anything else → unresolved.
+  let gateOutcome: GateOutcome = 'unresolved'
+  let gateEvidence = verdict.feedback
+  if (/误报|false.?positive/i.test(followUp.text)) {
+    gateOutcome = 'false-positive'
+    gateEvidence = followUp.text
+  } else if (/已修复|fixed/i.test(followUp.text)) {
+    const reVerdict = await runVerifierStep(roleId, opts, gate, followUp.text, signal)
+    inputTokens += reVerdict.inputTokens
+    outputTokens += reVerdict.outputTokens
+    gateOutcome = reVerdict.passed ? 'fixed' : 'unresolved'
+    gateEvidence = reVerdict.feedback
+  }
+  console.log(`[coordinator] gate-b closure outcome=${gateOutcome} handler=${followUp.handlerRoleId}`)
   return {
     ...result,
+    inputTokens,
+    outputTokens,
+    gateOutcome,
+    gateEvidence,
     text: `${result.text}\n\n[Gate B independent verification did not pass — ${verdict.feedback}]\n\n[Gate B FAIL routed to ${followUp.handlerRoleId} for closure]\n${followUp.text}`
   }
 }
@@ -74,7 +109,7 @@ async function runGateBFailFollowUp(
   implementationText: string,
   feedback: string,
   signal?: AbortSignal
-): Promise<{ handlerRoleId: string; text: string }> {
+): Promise<{ handlerRoleId: string; text: string; inputTokens: number; outputTokens: number }> {
   const handlerRoleId = await chooseFailHandler(feedback, gate, implementerRoleId, signal)
   const toolId = `gate-b-followup-${Date.now()}`
   opts.cb.onToolEvent?.(implementerRoleId, { type: 'sub_tool_start', toolUseId: toolId, parentToolId: 'coordinator-gate-b', name: 'GateBFailHandler', input: { handlerRoleId } })
@@ -95,10 +130,13 @@ async function runGateBFailFollowUp(
     prompt: handlerPrompt,
     dispatch: [...(opts.dispatch ?? []), handlerRoleId],
     includeHistory: false,
+    // The closure handler is expected to actually fix code on a real defect (a false positive is the
+    // exception it must prove) — same action-displacement guard as the implementer.
+    expectsFileChanges: true,
     signal: signal ?? opts.signal
   })
   opts.cb.onToolEvent?.(implementerRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: 'coordinator-gate-b', name: 'GateBFailHandler', isError: false, result: handler.text || 'no output' })
-  return { handlerRoleId, text: handler.text }
+  return { handlerRoleId, text: handler.text, inputTokens: handler.inputTokens, outputTokens: handler.outputTokens }
 }
 
 export function chooseVerifierRole(implementerRoleId: string): string {
@@ -112,17 +150,19 @@ export function chooseVerifierRole(implementerRoleId: string): string {
   )
 }
 
-async function runVerifierStep(implementerRoleId: string, opts: RunStepOptions, gate: { originalPrompt: string; approvedPlan?: string }, implementationText: string, signal?: AbortSignal): Promise<{ passed: boolean; feedback: string }> {
+async function runVerifierStep(implementerRoleId: string, opts: RunStepOptions, gate: { originalPrompt: string; approvedPlan?: string }, implementationText: string, signal?: AbortSignal): Promise<{ passed: boolean; feedback: string; inputTokens: number; outputTokens: number }> {
   const verifierRoleId = chooseVerifierRole(implementerRoleId)
   // No independent agent role is bound besides the implementer → there's no one to verify. Don't FAIL/throw
   // the turn over a config gap; deliver the result unverified with a note (synthesis surfaces it).
-  if (verifierRoleId === implementerRoleId) return { passed: true, feedback: 'Gate B skipped: no independent verifier role bound (only the implementer is available); result delivered unverified.' }
+  if (verifierRoleId === implementerRoleId) return { passed: true, feedback: 'Gate B skipped: no independent verifier role bound (only the implementer is available); result delivered unverified.', inputTokens: 0, outputTokens: 0 }
   const toolId = `gate-b-verifier-${Date.now()}`
   opts.cb.onToolEvent?.(implementerRoleId, { type: 'sub_tool_start', toolUseId: toolId, parentToolId: 'coordinator-gate-b', name: 'IndependentVerifier', input: { verifierRoleId } })
   // Persona + how-to-verify live in COORDINATOR_VERIFIER_PROMPT (systemPromptOverride); this user message
   // carries only the case to judge. The implementer's summary is a CLAIM to check by running the real checks.
+  // Stack-agnostic on purpose: the verifier must detect the project's own toolchain — a hard-coded npm
+  // command sent a Go-repo verifier chasing a nonexistent package.json (dogfood 2026-06-11).
   const verifierPrompt = [
-    'Verify the change below as Gate B. Inspect the diff (Bash `git diff`, Read), run `npm run typecheck && npm run build`, then return a verdict line starting with PASS or FAIL plus evidence.',
+    'Verify the change below as Gate B. Inspect the diff (Bash `git diff`, Read the touched files), detect the project\'s own toolchain (go.mod → `go build ./...` + `go vet ./...`; package.json → `npm run typecheck`/`npm run build`; Cargo.toml → `cargo check`; etc.), run the relevant build/checks and the tests the task demands, then return a verdict line starting with PASS or FAIL plus evidence.',
     `Original task:\n${gate.originalPrompt}`,
     gate.approvedPlan ? `Approved plan the change must match:\n${gate.approvedPlan}` : '',
     `Implementer role (do NOT defer to them): ${implementerRoleId}`,
@@ -142,7 +182,10 @@ async function runVerifierStep(implementerRoleId: string, opts: RunStepOptions, 
     signal: signal ?? opts.signal
   })
   const text = verifier.text.trim()
-  const passed = /^\s*PASS\b/i.test(text) && !/^\s*FAIL\b/i.test(text)
+  // First PASS/FAIL token wins. An ^-anchored match silently failed on markdown verdicts ("## Verdict\n\n
+  // **FAIL** — …"), which would have judged every markdown-styled PASS as FAIL.
+  const verdictToken = text.match(/\b(PASS|FAIL)\b/i)
+  const passed = verdictToken?.[1].toUpperCase() === 'PASS'
   opts.cb.onToolEvent?.(implementerRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: 'coordinator-gate-b', name: 'IndependentVerifier', isError: !passed, result: text })
-  return { passed, feedback: text || 'Verifier returned no verdict.' }
+  return { passed, feedback: text || 'Verifier returned no verdict.', inputTokens: verifier.inputTokens, outputTokens: verifier.outputTokens }
 }
