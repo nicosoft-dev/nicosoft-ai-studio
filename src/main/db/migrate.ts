@@ -26,6 +26,11 @@ export function runMigrations(db: DatabaseSync): void {
   ensureColumn(db, 'projects', 'cwd', 'TEXT')
   ensureColumn(db, 'conversations', 'pinned', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(db, 'conversations', 'archived', 'INTEGER NOT NULL DEFAULT 0')
+  // Memory self-learning upgrades: provenance (which conversation a memory was learned from), decay
+  // bookkeeping (when recall last selected it), and the extractor's incremental watermark.
+  ensureColumn(db, 'memories', 'source_conv_id', 'TEXT')
+  ensureColumn(db, 'memories', 'last_recalled_at', 'TEXT')
+  ensureColumn(db, 'extraction_state', 'last_extracted_id', 'TEXT')
 }
 
 // Add a column only if the table doesn't already have it (SQLite lacks ADD COLUMN IF NOT EXISTS).

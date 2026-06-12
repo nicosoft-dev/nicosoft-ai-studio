@@ -31,6 +31,9 @@ export interface MemoryCreateInput {
   content: string
   source: MemorySource
   tokens: number
+  // Provenance: the conversation this memory was learned from (null for hand-authored entries) — lets
+  // the Memory UI link back to where a fact came from for spot-checking what self-learning picked up.
+  sourceConvId?: string | null
 }
 
 interface MemoryRaw {
@@ -66,8 +69,8 @@ export function create(input: MemoryCreateInput): MemoryRow {
   const now = new Date().toISOString()
   getDb()
     .prepare(
-      `INSERT INTO memories (id, layer, role_id, project_id, type, content, source, tokens, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO memories (id, layer, role_id, project_id, type, content, source, tokens, source_conv_id, last_recalled_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -78,6 +81,8 @@ export function create(input: MemoryCreateInput): MemoryRow {
       input.content,
       input.source,
       input.tokens,
+      input.sourceConvId ?? null,
+      now, // a fresh memory counts as just-needed — pruning measures from here
       now,
       now
     )
@@ -137,6 +142,41 @@ export function listAll(): MemoryRow[] {
 
 export function remove(id: string): void {
   getDb().prepare('DELETE FROM memories WHERE id = ?').run(id)
+}
+
+// Decay bookkeeping: stamp the memories recall actually injected this turn, so pruning can tell a
+// living memory from one nothing has needed for months.
+export function touchRecalled(ids: string[], now: string): void {
+  if (!ids.length) return
+  const ph = ids.map(() => '?').join(',')
+  getDb().prepare(`UPDATE memories SET last_recalled_at = ? WHERE id IN (${ph})`).run(now, ...ids)
+}
+
+// Prune AUTO-extracted memory only (explicit/user entries are the user's own and never auto-deleted):
+// 1) anything recall hasn't selected since `staleBefore` (last_recalled_at NULL → fall back to
+//    updated_at, so pre-upgrade rows aren't all instantly "stale"), then
+// 2) if the pool still exceeds maxPool, the least-recently-recalled auto rows beyond the cap.
+// Returns the number of rows deleted (logged by the caller).
+export function pruneAuto(staleBefore: string, maxPool: number): number {
+  const db = getDb()
+  let n = Number(
+    db
+      .prepare(`DELETE FROM memories WHERE source = 'auto' AND COALESCE(last_recalled_at, updated_at) < ?`)
+      .run(staleBefore).changes
+  )
+  const total = (db.prepare('SELECT COUNT(*) c FROM memories').get() as { c: number }).c
+  if (total > maxPool) {
+    n += Number(
+      db
+        .prepare(
+          `DELETE FROM memories WHERE id IN (
+             SELECT id FROM memories WHERE source = 'auto'
+             ORDER BY COALESCE(last_recalled_at, updated_at) ASC LIMIT ?)`
+        )
+        .run(total - maxPool).changes
+    )
+  }
+  return n
 }
 
 // Delete a role's own role-layer memory (used when the role is deleted). Shared memory is global and

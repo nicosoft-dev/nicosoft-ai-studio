@@ -57,6 +57,21 @@ export function clearIdle(convId: string, before?: string): void {
   }
 }
 
+// Incremental-extraction watermark: the last message id (ULID — lexicographic = chronological) the
+// extractor has already consumed for this conversation. Advancing it after every successful extraction
+// keeps a long conversation from re-feeding the same tail to the extractor every cadence tick.
+export function getLastExtracted(convId: string): string | null {
+  const row = getDb()
+    .prepare('SELECT last_extracted_id FROM extraction_state WHERE conversation_id = ?')
+    .get(convId) as unknown as { last_extracted_id: string | null } | undefined
+  return row?.last_extracted_id ?? null
+}
+
+export function setLastExtracted(convId: string, messageId: string): void {
+  ensure(convId)
+  getDb().prepare('UPDATE extraction_state SET last_extracted_id = ? WHERE conversation_id = ?').run(messageId, convId)
+}
+
 // Conversations whose idle timer has elapsed — the idle sweep extracts for each, then clears the timer.
 export function listDue(now: string): string[] {
   const rows = getDb()

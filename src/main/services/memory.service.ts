@@ -23,6 +23,8 @@ const MAX_TRANSCRIPT_CHARS = 12_000 // feed only the tail of a long conversation
 const MAX_CONTENT_CHARS = 500 // reject a "memory" longer than this (model rambled)
 const RECALL_LLM_THRESHOLD = 15 // ≤ this many memories → inject all; above → LLM-filter for relevance
 const RECALL_TOKEN_BUDGET = 2000 // per-turn cap on injected memory tokens
+const STALE_AUTO_DAYS = 90 // auto memories unrecalled this long are pruned (explicit/user never are)
+const MAX_POOL = 200 // hard pool cap — beyond it the least-recently-recalled auto entries go first
 
 // Sent as a single USER message (prepended to the transcript), NOT a system prompt: when the endpoint
 // routes through an OAuth-backed proxy the caller's system is replaced by the upstream's own identity,
@@ -57,7 +59,13 @@ export async function extract(ctx: ExtractContext, trigger: ExtractTrigger): Pro
   const until = new Date(Date.now() + LOCK_TTL_MS).toISOString()
   if (!extractionRepo.tryLock(ctx.convId, until, now)) return // another extraction already in flight
   try {
-    const messages = convRepo.listByConversation(ctx.convId)
+    const all = convRepo.listByConversation(ctx.convId)
+    // Incremental: only feed messages newer than the watermark (ULID ids are chronological), so a long
+    // conversation doesn't re-feed the same tail every cadence tick. An explicit "remember…" always
+    // re-reads the recent tail — the thing to remember may sit in already-consumed messages.
+    const watermark = extractionRepo.getLastExtracted(ctx.convId)
+    const fresh = watermark && trigger !== 'explicit' ? all.filter((m) => m.id > watermark) : all
+    const messages = fresh.length >= MIN_MESSAGES ? fresh : trigger === 'explicit' ? all : []
     if (messages.length < MIN_MESSAGES) return
     const target = endpointWithKey(ctx.endpointId)
     if (!target) return
@@ -72,6 +80,9 @@ export async function extract(ctx: ExtractContext, trigger: ExtractTrigger): Pro
       { role: 'user', content: `${EXTRACT_INSTRUCTION}\n\nConversation:\n${transcript}` }
     ])
 
+    // The LLM call succeeded: everything up to the last message fed is now consumed, even when zero
+    // items came back (an empty result still means "this span held nothing durable").
+    extractionRepo.setLastExtracted(ctx.convId, all[all.length - 1].id)
     const items = parseExtracted(text)
     if (!items.length) return
     const source: MemorySource = trigger === 'explicit' ? 'explicit' : trigger === 'user' ? 'user' : 'auto'
@@ -91,7 +102,7 @@ export async function extract(ctx: ExtractContext, trigger: ExtractTrigger): Pro
           memoryRepo.update(dup.id, { content: it.content, tokens, source: keptSource })
         }
       } else {
-        pool.push(memoryRepo.create({ layer: it.layer, roleId, type: it.type, content: it.content, source, tokens }))
+        pool.push(memoryRepo.create({ layer: it.layer, roleId, type: it.type, content: it.content, source, tokens, sourceConvId: ctx.convId }))
       }
     }
   } catch {
@@ -133,6 +144,16 @@ export async function runIdleSweep(): Promise<void> {
   } finally {
     sweeping = false
   }
+  // Decay pass, piggybacked on the sweep timer: drop AUTO memories nothing has recalled for
+  // STALE_AUTO_DAYS, and keep the whole pool under MAX_POOL (least-recently-recalled auto first).
+  // Explicit/user memories are never auto-deleted.
+  try {
+    const staleBefore = new Date(Date.now() - STALE_AUTO_DAYS * 24 * 3600 * 1000).toISOString()
+    const pruned = memoryRepo.pruneAuto(staleBefore, MAX_POOL)
+    if (pruned > 0) console.log(`[memory] pruned ${pruned} stale auto memories`)
+  } catch {
+    /* best-effort */
+  }
 }
 
 export interface RecallInput {
@@ -149,14 +170,21 @@ export async function recall(input: RecallInput): Promise<MemoryRow[]> {
   const pool = memoryRepo.listForRole(input.roleId) // shared + role, newest first
   if (!pool.length) return []
   const selected = pool.length > RECALL_LLM_THRESHOLD ? ((await llmFilter(input, pool)) ?? pool) : pool
-  return capByBudget(selected)
+  const out = capByBudget(selected)
+  memoryRepo.touchRecalled(out.map((m) => m.id), new Date().toISOString()) // decay bookkeeping for pruneAuto
+  return out
 }
 
 function capByBudget(memories: MemoryRow[]): MemoryRow[] {
+  // Budget priority: explicit > user > auto first (a user's direct "remember this" must never be
+  // squeezed out by auto-extracted chatter), newest first within the same rank (stable sort keeps
+  // the repo's newest-first order). Without this, an over-budget pool dropped whatever was oldest —
+  // including explicit memories.
+  const ordered = [...memories].sort((a, b) => sourceRank(b.source) - sourceRank(a.source))
   const out: MemoryRow[] = []
   let total = 0
-  for (const m of memories) {
-    if (out.length && total + m.tokens > RECALL_TOKEN_BUDGET) break // always keep at least the newest
+  for (const m of ordered) {
+    if (out.length && total + m.tokens > RECALL_TOKEN_BUDGET) continue // keep trying smaller lower-rank items
     out.push(m)
     total += m.tokens
   }
@@ -200,8 +228,10 @@ function parseIndices(raw: string): number[] {
   return (span.match(/\d+/g) ?? []).map(Number)
 }
 
-// Heuristic for the explicit trigger — the user asking to be remembered.
-const EXPLICIT_RE = /\b(remember|note that|keep in mind|for future reference|don't forget|make a note)\b/i
+// Heuristic for the explicit trigger — the user asking to be remembered. CJK phrases carry no word
+// boundaries, so they sit OUTSIDE the \b group (with \b they would never match and a Chinese user's
+// direct "记住…" would silently degrade to the every-N-turns cadence).
+const EXPLICIT_RE = /\b(remember|note that|keep in mind|for future reference|don't forget|make a note)\b|记住|记一下|记下来|帮我记|别忘了|做个备注|以后注意/i
 export function isExplicit(text: string): boolean {
   return EXPLICIT_RE.test(text)
 }
@@ -244,7 +274,10 @@ export function add(input: MemoryAddArgs): MemoryRow {
 
 export function update(input: MemoryUpdateArgs): void {
   const content = input.content.trim().slice(0, MAX_MEMORY_CHARS)
-  return memoryRepo.update(input.id, { content, tokens: estimateTextTokens(content) })
+  // A hand-edited memory is the user's wording now — promote the source to 'user' so a later auto
+  // extraction that dedups onto it can no longer overwrite the edit (sourceRank(auto) < sourceRank(user)
+  // keeps the content; without the promotion an auto-vs-auto tie silently rewrote the user's edit).
+  return memoryRepo.update(input.id, { content, tokens: estimateTextTokens(content), source: 'user' })
 }
 
 export function remove(id: string): void {
@@ -301,13 +334,22 @@ function sourceRank(s: MemorySource): number {
 }
 
 function tokenize(s: string): Set<string> {
-  return new Set(
-    s
-      .toLowerCase()
-      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-      .split(/\s+/)
-      .filter(Boolean)
-  )
+  // CJK runs carry no spaces, so whitespace splitting makes a whole Chinese sentence ONE token and
+  // Jaccard collapses to exact-match — dedup never fires and a Chinese user's memory pool fills with
+  // near-duplicates. Split CJK runs into character bigrams (a standard cheap similarity unit for
+  // unsegmented scripts); non-CJK words stay whole-word tokens.
+  const out = new Set<string>()
+  const norm = s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ')
+  for (const w of norm.split(/\s+/).filter(Boolean)) {
+    const runs = w.match(/[぀-ヿ㐀-鿿가-힯]+|[^぀-ヿ㐀-鿿가-힯]+/gu) ?? []
+    for (const run of runs) {
+      if (/[぀-ヿ㐀-鿿가-힯]/.test(run)) {
+        if (run.length === 1) out.add(run)
+        else for (let i = 0; i < run.length - 1; i++) out.add(run.slice(i, i + 2))
+      } else out.add(run)
+    }
+  }
+  return out
 }
 
 // Jaccard similarity over word sets — cheap, language-agnostic near-duplicate detection.
