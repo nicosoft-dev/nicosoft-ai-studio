@@ -6,8 +6,11 @@
 
 import { Notification } from 'electron'
 import * as convService from './conversation.service'
+import * as memoryService from './memory.service'
+import * as gateOutcomeRepo from '../repos/gate-outcome.repo'
 import { backgroundVerifyQueue, GATE_C_MAX_ROUNDS, type E2ERoundResult, type E2EVerdict } from '../agent/background-verify-queue'
 import { COORDINATOR_E2E_PROMPT } from '../agent/roles/prompts'
+import { describeSnapshot, snapshotWorkspace } from './git-snapshot'
 import { runRoleStep } from './coordinator-step'
 import { chooseVerifierRole } from './coordinator-gate-b'
 import type { CoordinatorCallbacks, CoordinatorRunInput, RouteDecision } from './coordinator-types'
@@ -24,6 +27,9 @@ export function submitGateC(input: CoordinatorRunInput, decision: RouteDecision,
   // Carries the previous round's FAIL verdict + evidence into the next round so the implementer fix is
   // grounded in what actually broke (spec §20: "verdict + 证据拼 fixPrompt").
   let lastFailDetail = ''
+  // Every FAIL verdict across the rounds, kept for the closure lesson: a run that FAILed then PASSed
+  // is grounded "e2e caught X, fix was Y" experience worth distilling into collab memory.
+  const failHistory: string[] = []
   // Every screenshot the verifier captured across all rounds, in order — handed to the renderer on the
   // final verdict so the toast can show the run's evidence thumbnails.
   const e2eScreenshots: string[] = []
@@ -39,9 +45,14 @@ export function submitGateC(input: CoordinatorRunInput, decision: RouteDecision,
       // tool events arrive. A fix round shows phase 'fix' (implementer re-runs first, then re-verify).
       cb.onE2EProgress?.({ convId: input.convId, round, maxRounds: GATE_C_MAX_ROUNDS, phase: isFix ? 'fix' : 'verify' })
       if (isFix) {
+        // Rollback point before the autonomous fix leg edits the user's real working tree (manual
+        // recovery only — see git-snapshot.ts). Logged per round so a multi-round run keeps every step.
+        const snap = await snapshotWorkspace(e2eCwd)
+        if (snap) console.warn(`[gate-c] pre-fix workspace snapshot (round ${round}): ${describeSnapshot(snap)}`)
         await runE2EImplementerFix(input.convId, input.prompt, e2eCwd, implementerRoleId, round, lastFailDetail, gateCAbort.signal, cb, e2eScreenshots)
       }
       const r = await runE2EVerify(input.convId, input.prompt, e2eCwd, round, gateCAbort.signal, cb, e2eScreenshots)
+      if (r.kind === 'FAIL') failHistory.push(r.detail)
       lastFailDetail = r.kind === 'FAIL' ? r.detail : ''
       return r
     },
@@ -55,6 +66,12 @@ export function submitGateC(input: CoordinatorRunInput, decision: RouteDecision,
       console.warn(
         `[gate-c] e2e verdict for conv=${input.convId}: ${verdict.kind} (rounds=${verdict.rounds}${verdict.needsUser ? ', needsUser' : ''}) — ${verdict.detail}`
       )
+      // Measurement: persist the run's final verdict (best-effort — stats must never break the verdict flow).
+      try {
+        gateOutcomeRepo.record({ convId: input.convId, gate: 'C', roleId: implementerRoleId, outcome: verdict.kind, rounds: verdict.rounds, evidence: verdict.detail })
+      } catch (e) {
+        console.warn('[gate-c] gate outcome record failed:', e instanceof Error ? e.message : e)
+      }
       const needsUser = verdict.needsUser ?? false
       cb.onE2EVerdict?.({
         convId: input.convId,
@@ -69,6 +86,19 @@ export function submitGateC(input: CoordinatorRunInput, decision: RouteDecision,
       reinjectE2EVerdict(input.convId, verdict).catch((err) => {
         console.error('[gate-c] verdict re-injection failed:', err)
       })
+      // Learning closure: a FAIL→fix→PASS run carries grounded "e2e caught X, fix made it pass"
+      // experience — distill it into collab memory (fire-and-forget). First-round PASS teaches
+      // nothing new; a final FAIL has no confirmed root cause yet (the user steps in) — both skipped.
+      if (verdict.kind === 'PASS' && verdict.rounds > 1 && failHistory.length) {
+        void memoryService.learnFromGateClosure({
+          convId: input.convId,
+          roleId: implementerRoleId,
+          task: input.prompt,
+          verdict: failHistory.join('\n---\n').slice(0, 4000),
+          closure: `e2e verification passed after ${verdict.rounds} rounds; final verdict: ${verdict.detail}`,
+          kind: 'e2e-fixed'
+        })
+      }
     }
   })
 }
@@ -123,7 +153,7 @@ async function runE2EVerify(convId: string, prompt: string, cwd: string | undefi
   const forwardCb = makeE2EForwardCb(convId, round, cb, shots)
   const verifierPrompt = [
     `End-to-end verification, round ${round}. Actually run the product and verify the task below — do not trust any written summary.`,
-    'Use e2e_browser (UI/Electron) and/or e2e_request (HTTP API) to launch and drive the app, run the asserted checks, then end with ONE verdict line starting with PASS, FAIL, BLOCKED, or SKIP plus evidence.',
+    'Use e2e_browser (UI/Electron) and/or e2e_request (HTTP API) to launch and drive the app, run the asserted checks, report your evidence, then END your message with exactly one final line `VERDICT: PASS|FAIL|BLOCKED|SKIP` — the classifier reads only that line.',
     `Original task:\n${prompt}`
   ].join('\n\n')
   const verifier = await runRoleStep({
@@ -143,16 +173,21 @@ async function runE2EVerify(convId: string, prompt: string, cwd: string | undefi
   })
   const text = verifier.text.trim()
   const detail = text || 'Verifier returned no verdict.'
-  // Classify the verifier's trailing verdict into EXACTLY one of the four values. Order matters: BLOCKED and
-  // SKIP are checked before the generic PASS/FAIL so an explicit "BLOCKED"/"SKIP" line wins. Unrecognized
-  // output is treated as FAIL (fail-closed) so a malformed verdict loops back rather than silently passing.
-  const kind: E2ERoundResult['kind'] = /\bBLOCKED\b/i.test(text)
-    ? 'BLOCKED'
-    : /\bSKIP\b/i.test(text)
-      ? 'SKIP'
-      : /\bPASS\b/i.test(text) && !/\bFAIL\b/i.test(text)
-        ? 'PASS'
-        : 'FAIL'
+  // Contracted verdict line first (persona + user message demand a FINAL `VERDICT: …` line; last match
+  // wins), then the token-scan fallback for non-compliant replies. Fallback order matters: BLOCKED and
+  // SKIP before the generic PASS/FAIL so an explicit "BLOCKED"/"SKIP" wins; unrecognized output is FAIL
+  // (fail-closed) so a malformed verdict loops back rather than silently passing. Token scanning must
+  // never be primary — evidence prose containing verdict words misclassified two PASSes on Gate B
+  // (dogfood 2026-06-12, the brief's own "fail-open" term).
+  const contracted = [...text.matchAll(/^\s*[#*>•-]*\s*VERDICT:\s*(PASS|FAIL|BLOCKED|SKIP)\b/gim)].pop()?.[1]?.toUpperCase() as E2ERoundResult['kind'] | undefined
+  const kind: E2ERoundResult['kind'] = contracted
+    ?? (/\bBLOCKED\b/i.test(text)
+      ? 'BLOCKED'
+      : /\bSKIP\b/i.test(text)
+        ? 'SKIP'
+        : /\bPASS\b/i.test(text) && !/\bFAIL\b/i.test(text)
+          ? 'PASS'
+          : 'FAIL')
   return { kind, detail }
 }
 

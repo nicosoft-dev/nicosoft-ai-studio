@@ -18,6 +18,21 @@ const FAMILY_COLOR: Record<string, string> = {
   gemini: "oklch(0.74 0.10 250)",
 };
 
+// Verification-gate outcome colors (same restrained oklch family as FAMILY_COLOR): verified-good in
+// green, recovered (fixed after a FAIL) in amber, a misjudging verifier in neutral, unresolved in red,
+// unverified (infra) in dim.
+const GATE_COLOR: Record<string, string> = {
+  pass: "oklch(0.75 0.10 158)",
+  fixed: "oklch(0.76 0.10 50)",
+  "false-positive": "var(--text-3)",
+  unresolved: "oklch(0.68 0.12 25)",
+  unverified: "var(--text-4)",
+  PASS: "oklch(0.75 0.10 158)",
+  FAIL: "oklch(0.68 0.12 25)",
+  BLOCKED: "oklch(0.76 0.10 50)",
+  SKIP: "var(--text-4)",
+};
+
 // model slug → provider family, for the by-model bar colors (messages/usage_events store the slug).
 function providerOf(model: string): string {
   const m = model.toLowerCase()
@@ -132,6 +147,16 @@ export function StatsPage(): ReactElement {
   const memRows = a.memory.perExpert.map((r) => { const e = expertMeta(r.id); return { name: e.name, v: r.v, val: String(r.v), color: e.color } })
   const ma = expertMeta(a.activity.mostActive.id)
   const layerMax = a.memory.layers.reduce((s, l) => s + l.v, 0) || 1
+  // Verification: gated-step closures (Gate B) + background e2e verdicts (Gate C). Hide zero rows —
+  // the fixed-order lists arrive zeros-included for stability, but an all-zero bar is noise.
+  const gateBTotal = a.verification.gateB.reduce((s, r) => s + r.v, 0)
+  const gateCTotal = a.verification.gateC.reduce((s, r) => s + r.v, 0)
+  const gateBRows = a.verification.gateB.filter((r) => r.v > 0).map((r) => ({ name: r.outcome, v: r.v, val: String(r.v), color: GATE_COLOR[r.outcome] ?? 'var(--text-3)' }))
+  const gateCRows = a.verification.gateC.filter((r) => r.v > 0).map((r) => ({ name: r.outcome.toLowerCase(), v: r.v, val: String(r.v), color: GATE_COLOR[r.outcome] ?? 'var(--text-3)' }))
+  const verifRows = a.verification.byExpert.map((r) => {
+    const e = expertMeta(r.id)
+    return { name: e.name, v: r.total ? r.ok / r.total : 0, val: `${r.ok}/${r.total}`, color: e.color }
+  })
   const total = a.usage.conversationsTotal
   const inProgress = Math.min(streamingCount, total)
   const inPct = a.usage.tokensToday > 0 ? Math.round((a.usage.tokensIn / a.usage.tokensToday) * 100) : 0
@@ -212,6 +237,27 @@ export function StatsPage(): ReactElement {
             <div className="an-divider" />
             <div className="an-mini-label">Learning events · last 4 weeks</div>
             <LineTrend data={a.memory.learning.byWeek} color="var(--exp-editor)" height={52} labels={["W1", "W2", "W3", "W4"]} />
+          </AnCard>
+        </div>
+      </div>
+
+      {/* ——— VERIFICATION ——— */}
+      <div className="an-section">
+        <div className="an-section-head">Verification <span className="an-section-note">— does the work hold up</span></div>
+        <div className="an-grid">
+          <AnCard title="Gated steps" sub={gateBTotal + " verified"}>
+            {gateBRows.length ? <BarList rows={gateBRows} /> : <div className="an-mini-label">No gated runs yet — dispatch a code-change task to see verification outcomes.</div>}
+            {gateCTotal > 0 && (
+              <>
+                <div className="an-divider" />
+                <div className="an-mini-label">e2e runs · {gateCTotal}</div>
+                <BarList rows={gateCRows} />
+              </>
+            )}
+          </AnCard>
+
+          <AnCard title="Pass rate by expert" sub="verified-good / gated">
+            {verifRows.length ? <BarList rows={verifRows} max={1} /> : <div className="an-mini-label">No gated runs yet.</div>}
           </AnCard>
         </div>
       </div>

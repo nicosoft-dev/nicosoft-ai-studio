@@ -2,9 +2,9 @@ import { ulid } from '../db/id'
 import { getDb } from '../db/connection'
 
 // memories + memory_versions tables. Pure SQL. A memory is a durable fact/preference/learning, tagged
-// with a layer: `shared` (global, role_id NULL) or `role` (specific to one role). `collab` is reserved
-// for multi-role work and unused this version. Every content change snapshots the prior text into
-// memory_versions before overwriting.
+// with a layer: `shared` (global, role_id NULL), `role` (specific to one role), or `collab` (role_id
+// NULL — lessons learned across hand-offs, written by the gate-closure extractor and recalled by every
+// role). Every content change snapshots the prior text into memory_versions before overwriting.
 
 export type MemoryLayer = 'shared' | 'role' | 'collab'
 export type MemoryType = 'fact' | 'preference' | 'learning'
@@ -126,11 +126,13 @@ export function getById(id: string): MemoryRow | null {
   return row ? mapRow(row) : null
 }
 
-// Recall pool for a role: global shared memory + that role's own role-layer memory.
+// Recall pool for a role: global shared memory + that role's own role-layer memory + cross-role collab
+// lessons (verification-gate failures distilled into "don't repeat this" entries — relevant to every
+// role precisely because they were learned across a hand-off, not inside one role's domain).
 export function listForRole(roleId: string): MemoryRow[] {
   const rows = getDb()
     .prepare(
-      `SELECT * FROM memories WHERE layer = 'shared' OR (layer = 'role' AND role_id = ?) ORDER BY updated_at DESC, id DESC`
+      `SELECT * FROM memories WHERE layer IN ('shared', 'collab') OR (layer = 'role' AND role_id = ?) ORDER BY updated_at DESC, id DESC`
     )
     .all(roleId) as unknown as MemoryRaw[]
   return rows.map(mapRow)

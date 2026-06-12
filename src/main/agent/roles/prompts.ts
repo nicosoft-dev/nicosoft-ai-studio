@@ -75,7 +75,11 @@ Your kit is read-only plus a shell: Read / Grep / Glob to inspect the change, an
 
 FIRST decide the task KIND from the original task, and do NOT assume there is a code change. A CODE-CHANGE task (implement / build / fix / refactor — asked to modify files) is judged by the diff + checks above. A READ-ONLY task (read / summarize / analyze / explain / answer — NO file change asked) has an EMPTY diff BY DESIGN (there is nothing to typecheck/build); judge it by whether the implementer read the right sources and the ANSWER is accurate + complete. Do NOT fail a read-only task for "no changes" or "didn't touch code".
 
-Return a verdict line that STARTS with the single word PASS or FAIL, followed by concrete evidence. PASS a code-change task only when the checks are genuinely green AND the change matches the task; PASS a read-only task when its answer is accurate + complete (an empty diff is expected, not a failure).`
+Report your evidence first, then end your message with EXACTLY ONE final line in this machine-parsed format — nothing after it:
+VERDICT: PASS
+or
+VERDICT: FAIL
+The classifier reads ONLY that line; words like "fail" appearing in your evidence prose (e.g. "fail-open", test names, quoted logs) are ignored, so write evidence freely. PASS a code-change task only when the checks are genuinely green AND the change matches the task; PASS a read-only task when its answer is accurate + complete (an empty diff is expected, not a failure).`
 
 export const COORDINATOR_E2E_PROMPT = `${COMMON_PREAMBLE}
 
@@ -87,12 +91,12 @@ Your kit: the e2e drivers \`e2e_browser\` (drive a real Chromium page or the Ele
 3. Drive it adversarially. Use \`e2e_browser\` (launch → goto → click / fill → assert / screenshot) for a UI/Electron surface, or \`e2e_request\` (get / post → assert status / jsonPath) for an API. Run the asserted checks the task implies and actively probe edge cases to break it.
 4. Decide on DETERMINISTIC signals only — the assert results and exit codes the tools return, NOT your reading of the logs. Every PASS claim must rest on a concrete assertion / command output / screenshot.
 
-End your message with EXACTLY ONE verdict line that STARTS with one of these four words, followed by concrete evidence:
-- PASS — the asserted checks genuinely passed (cite the assertions).
-- FAIL — a check failed or the task isn't satisfied (cite exactly what broke).
-- BLOCKED — the app / environment could not be launched, so nothing could be verified.
-- SKIP — there is nothing to verify (no UI or API surface).
-No partial pass. If in doubt, FAIL.`
+Report your evidence first, then end your message with EXACTLY ONE final line in this machine-parsed format — nothing after it:
+VERDICT: PASS — the asserted checks genuinely passed (cite the assertions in the evidence above).
+VERDICT: FAIL — a check failed or the task isn't satisfied (cite exactly what broke).
+VERDICT: BLOCKED — the app / environment could not be launched, so nothing could be verified.
+VERDICT: SKIP — there is nothing to verify (no UI or API surface).
+The classifier reads ONLY the final VERDICT: line; verdict words inside your evidence prose are ignored. No partial pass. If in doubt, FAIL.`
 
 export const COORDINATOR_SYNTHESIS_PROMPT = `${COMMON_PREAMBLE}
 

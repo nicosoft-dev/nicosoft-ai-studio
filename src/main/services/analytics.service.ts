@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import type { AnalyticsSummary, AppInfo } from '../ipc/contracts'
 import * as analyticsRepo from '../repos/analytics.repo'
 import * as convRepo from '../repos/conversation.repo'
+import * as gateOutcomeRepo from '../repos/gate-outcome.repo'
 import * as memoryRepo from '../repos/memory.repo'
 
 // created_at is stored as UTC ISO (new Date().toISOString()); local-midnight N days ago as that same UTC ISO.
@@ -84,6 +85,23 @@ export function getSummary(): AnalyticsSummary {
     byWeek[3 - wk]++ // index 0 = oldest week, 3 = current
   }
 
+  // Verification gates — the self-check loop's measurement layer. Outcome lists keep a fixed order
+  // (zeros included) for a stable renderer; per-expert rows are Gate B only, ok = the closures that
+  // ended verified-good (pass, fixed, or proven false positive).
+  const outcomeRows = gateOutcomeRepo.countByOutcome()
+  const gateCount = (gate: 'B' | 'C', outcome: string): number => outcomeRows.find((r) => r.gate === gate && r.outcome === outcome)?.v ?? 0
+  const gateB = ['pass', 'fixed', 'false-positive', 'unresolved', 'unverified'].map((o) => ({ outcome: o, v: gateCount('B', o) }))
+  const gateC = ['PASS', 'FAIL', 'BLOCKED', 'SKIP'].map((o) => ({ outcome: o, v: gateCount('C', o) }))
+  const OK_OUTCOMES = new Set(['pass', 'fixed', 'false-positive'])
+  const byRoleMap = new Map<string, { total: number; ok: number }>()
+  for (const r of gateOutcomeRepo.countByRole()) {
+    const e = byRoleMap.get(r.roleId) ?? { total: 0, ok: 0 }
+    e.total += r.v
+    if (OK_OUTCOMES.has(r.outcome)) e.ok += r.v
+    byRoleMap.set(r.roleId, e)
+  }
+  const verifByExpert = [...byRoleMap.entries()].map(([id, e]) => ({ id, ...e })).sort((a, b) => b.total - a.total)
+
   return {
     usage: {
       tokensToday: tToday.i + tToday.o,
@@ -97,7 +115,8 @@ export function getSummary(): AnalyticsSummary {
       byProvider: byProvider.map((r) => ({ label: r.provider, v: r.v }))
     },
     memory: { total: memTotal, perExpert, layers, learning: { approved, corrected, byWeek } },
-    activity: { byDay: actByDay, mostActive, tools: scanToolsToday(), peakHours }
+    activity: { byDay: actByDay, mostActive, tools: scanToolsToday(), peakHours },
+    verification: { gateB, gateC, byExpert: verifByExpert }
   }
 }
 

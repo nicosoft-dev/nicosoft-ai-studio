@@ -101,9 +101,15 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
       cb,
       signal
     }, { enabled: gateEnabled, originalPrompt: input.prompt }, signal)
-    // A gated step that ended UNRESOLVED must close on an explicit coordinator verdict, never on the
-    // handler's last working note (dogfood 2026-06-11: the turn ended mid-sentence and the user had no
-    // way to tell the task had failed). Emitted as Coordinator's own closing beat, like the intro.
+    // Closing-voice invariant (see GateOutcome): a gated conversation must END on the verifier's own
+    // report ('pass'/'fixed' — the analyst message is naturally last) or an explicit coordinator
+    // verdict — NEVER on the implementer/handler's note, which reads as a normal done and hides the
+    // verification state. Three outcomes need the coordinator beat:
+    //   unresolved     → explicit failure (dogfood 2026-06-11: the turn ended mid-sentence otherwise);
+    //   false-positive → handler's proof would otherwise close the turn with no delivery verdict;
+    //   unverified     → verification never ran (infra failure / no verifier bound) — the UNVERIFIED
+    //                    label lived only in the returned text, which single mode discards (dogfood
+    //                    2026-06-12: invisible to the user, indistinguishable from a verified done).
     if (out.gateOutcome === 'unresolved') {
       emitCoordinatorIntro(
         input.convId,
@@ -114,6 +120,29 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
           (out.gateEvidence ?? 'no evidence captured').slice(0, 1500),
           '',
           'The requested change has not been completed. Review the evidence above, then retry or adjust the task.'
+        ].join('\n'),
+        cb
+      )
+    } else if (out.gateOutcome === 'false-positive') {
+      emitCoordinatorIntro(
+        input.convId,
+        [
+          '**Delivered — verification raised a FAIL that was proven a false positive.**',
+          '',
+          'The handler\'s evidence:',
+          (out.gateEvidence ?? 'no evidence captured').slice(0, 1500)
+        ].join('\n'),
+        cb
+      )
+    } else if (out.gateOutcome === 'unverified') {
+      emitCoordinatorIntro(
+        input.convId,
+        [
+          '**Delivered UNVERIFIED — independent verification could not run.**',
+          '',
+          (out.gateEvidence ?? 'no detail captured').slice(0, 1500),
+          '',
+          'Treat the result as unreviewed: spot-check the change or re-run the task to get a verified verdict.'
         ].join('\n'),
         cb
       )
@@ -357,6 +386,9 @@ async function facilitate(question: string, positions: { role: string; text: str
 // don't delay the IPC done event.
 function fireSideEffects(convId: string, roleId: string, endpointId: string, model: string, inputTokens: number): void {
   if (!endpointId || !model) return
-  void memoryService.onTurn({ convId, roleId, endpointId, model }).catch(() => {})
+  // cadence 1: a coordinator turn is heavyweight (a dispatched run can be a multi-expert hour), so
+  // extract after EVERY turn — the every-3 chat cadence left whole runs unextracted when the app
+  // closed before the idle sweep. The watermark keeps repeat extraction incremental and cheap.
+  void memoryService.onTurn({ convId, roleId, endpointId, model }, 1).catch(() => {})
   void compressionService.maybeCompress({ convId, roleId, endpointId, model, currentTokens: inputTokens }).catch(() => {})
 }

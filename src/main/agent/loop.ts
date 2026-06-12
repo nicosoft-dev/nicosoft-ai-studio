@@ -19,6 +19,7 @@ import type { AgentContext, PermissionMode, SpawnSubAgent } from './context'
 import { AsyncSubAgentPool, type RunChild } from './sub-agent-pool'
 import { StreamingToolExecutor } from './execution'
 import { abortableDelay, isRetryableLlmError, retryBackoffMs } from './retry'
+import { bashRanClean, isVerifyCommand, ThrashTracker, thrashSteerText, thrashStopText, THRASH_STOP_AT, VERIFY_NUDGE } from './loop-guards'
 import { callWithTools, type AgentLlmEvent } from './llm'
 import type { Tool } from './tool'
 import { isContentBlock } from './types'
@@ -70,7 +71,10 @@ export type AgentEvent =
   | { type: 'tool_results'; message: AgentMessage }
 
 export interface AgentResult {
-  reason: 'completed' | 'max_turns' | 'aborted'
+  // 'thrash_stop' = the repeated-failure loop guard wound the run down (same failure fingerprint hit
+  // THRASH_STOP_AT); the model got a final wrap-up window, so messages still end with its own state
+  // report — but the result must never be presented as a clean completion.
+  reason: 'completed' | 'max_turns' | 'aborted' | 'thrash_stop'
   messages: AgentMessage[]
   turns: number
   // Compaction firings this run (layer 2 / layer 3) — surfaced into run-stats so long-run behavior
@@ -235,6 +239,18 @@ export async function* runAgent(
   // one confirmation turn — acceptable.
   let sawFileChange = false
   let nudgedForFileChanges = false
+  // Verify-before-done guard (loop-guards.ts): true while there's nothing unverified — flips false on
+  // every successful file edit, back to true when a recognized verification command completes cleanly
+  // AFTER it. On quiesce with it still false, inject ONE nudge (the deterministic backstop behind
+  // CODING_DISCIPLINE's "verify before you report done" — which is prompt-only and covers nothing on
+  // direct chats). Only meaningful when the kit can actually run checks (hasBashTool).
+  let verifiedSinceLastEdit = true
+  let nudgedForVerify = false
+  const hasBashTool = tools.some((t) => t.name === 'Bash')
+  // Thrash guard (loop-guards.ts): same failure fingerprint 3× → steer note; 6× → wind-down note now,
+  // forced end two turns later (the model gets a wrap-up window, then the run stops burning turns).
+  const thrash = new ThrashTracker()
+  let thrashStopAtTurn: number | undefined
   // max_tokens truncation retries (F15): a turn cut mid-output gets its incomplete tool_use blocks
   // dropped (llm layer) and ONE of these per occurrence, bounded so a model that can't fit its output
   // ends the run instead of looping.
@@ -307,6 +323,9 @@ export async function* runAgent(
       }
       if (result?.reason === 'aborted') {
         return `${last ? `${last}\n\n` : ''}(Note: sub-agent was aborted before completing.)`
+      }
+      if (result?.reason === 'thrash_stop') {
+        return `${last ? `${last}\n\n` : ''}(Note: sub-agent was stopped by the repeated-failure loop guard; result may be incomplete.)`
       }
       return last
     }
@@ -556,6 +575,15 @@ export async function* runAgent(
         messages.push({ role: 'user', content: [{ type: 'text', text: FILE_CHANGE_NUDGE }] })
         continue
       }
+      // Verify-before-done (mirror of the guard above, opposite gap): files WERE changed but no
+      // verification command ran after the last edit. One nudge, then accept the model's answer —
+      // a docs-only change legitimately ends with "nothing runnable, here's why".
+      if (sawFileChange && !verifiedSinceLastEdit && !nudgedForVerify && hasBashTool) {
+        nudgedForVerify = true
+        console.warn(`[agent] verify-before-done nudge run=${ctx.runId} turn=${turns} — files changed, no verification command ran after the last edit`)
+        messages.push({ role: 'user', content: [{ type: 'text', text: VERIFY_NUDGE }] })
+        continue
+      }
       return { reason: 'completed', messages, turns, compactions }
     }
 
@@ -575,12 +603,47 @@ export async function* runAgent(
         }
       }
     }
-    const userMsg: AgentMessage = { role: 'user', content: results }
+    // ── Run guards (loop-guards.ts): walk this turn's tool outcomes IN ORDER ──
+    // Order matters for verify-before-done ([Edit, go test] is verified; [go test, Edit] is not).
+    // Guard notes ride as text blocks INSIDE the tool_results user message — a separate user message
+    // would break strict role alternation on Anthropic upstreams (same constraint as appendTodoSnapshot).
+    const resultById = new Map(results.map((r) => [r.tool_use_id, r]))
+    const guardNotes: string[] = []
+    for (const t of toolUses) {
+      const r = resultById.get(t.id)
+      if (!r) continue
+      const command = t.name === 'Bash' ? (t.input as { command?: unknown }).command : undefined
+      // A failure for thrash purposes = an errored result (any tool), or a Bash non-zero exit (which
+      // bash.ts reports as is_error:false with an `[exit code: N]` marker — the dominant coding-agent
+      // thrash signal: the same failing test/build re-run unchanged).
+      const failed = r.is_error === true || (t.name === 'Bash' && !bashRanClean(r.content))
+      if (failed) {
+        const action = thrash.record(t.name, r.content, command)
+        if (action?.kind === 'steer') {
+          console.warn(`[agent] thrash steer run=${ctx.runId} turn=${turns} count=${action.count} fp=${action.fingerprint.slice(0, 120)}`)
+          guardNotes.push(thrashSteerText(action.count))
+        } else if (action?.kind === 'stop') {
+          console.warn(`[agent] thrash stop armed run=${ctx.runId} turn=${turns} count=${action.count} fp=${action.fingerprint.slice(0, 120)}`)
+          guardNotes.push(thrashStopText(action.count))
+          thrashStopAtTurn = turns + 2 // one wrap-up turn + slack, then the forced end below
+        }
+      }
+      if (FILE_CHANGE_TOOLS.has(t.name) && r.is_error !== true) verifiedSinceLastEdit = false
+      else if (t.name === 'Bash' && r.is_error !== true && isVerifyCommand(command) && bashRanClean(r.content)) verifiedSinceLastEdit = true
+    }
+    const userMsg: AgentMessage = {
+      role: 'user',
+      content: guardNotes.length ? [...results, { type: 'text', text: guardNotes.join('\n\n') }] : results,
+    }
     messages.push(userMsg)
     yield { type: 'tool_results', message: userMsg }
 
     turns += 1
     if (ctx.signal.aborted) return { reason: 'aborted', messages, turns, compactions }
+    if (thrashStopAtTurn !== undefined && turns >= thrashStopAtTurn) {
+      console.warn(`[agent] thrash stop run=${ctx.runId} turn=${turns} — same failure ${THRASH_STOP_AT}×, wrap-up window spent`)
+      return { reason: 'thrash_stop', messages, turns, compactions }
+    }
     if (maxTurns !== undefined && turns >= maxTurns) return { reason: 'max_turns', messages, turns, compactions }
   }
 }

@@ -152,6 +152,47 @@ export function parseRouteDecision(raw: string, enabled: readonly string[]): Rou
   return { mode: 'single', role: hit ?? enabled[0] ?? 'generalist', reason: 'lenient parse', needsPlan: false }
 }
 
+// Acceptance criteria for a gated (code-change) step, derived ONCE at dispatch and handed verbatim to
+// BOTH the implementer (definition of done) and the Gate B verifier (what to check first). Without
+// this the verifier re-derives "what correct means" from the raw task every time — which is where
+// verification goes soft on tasks without an obvious test oracle (it re-reads the code and nods).
+// Best-effort: any failure returns [] and the gate runs exactly as before.
+const ACCEPTANCE_INSTRUCTION = `Given a coding task, write the MACHINE-CHECKABLE acceptance criteria an independent verifier will run against the finished change. Return a JSON array of 2-4 strings. Each: one concrete check — a command and what it must show, a behavior that must be observable, or an error that must no longer occur. Rules:
+- Only criteria checkable from the repository (commands, file contents, observable behavior) — never vague qualities ("clean code", "good UX").
+- Include the project's own checks (build / type check / tests) when relevant.
+- Prefer criteria that PROVE the main path executed — not just "no errors appear".
+- Output ONLY the JSON array — no preamble, no markdown fence.`
+
+const CRITERION_MAX_CHARS = 240
+
+export async function deriveAcceptanceCriteria(task: string, signal?: AbortSignal): Promise<string[]> {
+  const binding = rolesService.getBinding('coordinator')
+  if (!binding?.endpointId || !binding.model) return []
+  const ep = endpointRepo.getById(binding.endpointId)
+  if (!ep || !ep.enabled) return []
+  const apiKey = keychain.getApiKey(binding.endpointId)
+  if (!apiKey) return []
+  try {
+    const text = await chatOnce(ep, apiKey, binding.model, [
+      { role: 'user', content: `${ACCEPTANCE_INSTRUCTION}\n\nTask:\n${task.slice(0, 3000)}` }
+    ], { signal })
+    const start = text.indexOf('[')
+    const end = text.lastIndexOf(']')
+    if (start < 0 || end <= start) return []
+    const arr = JSON.parse(text.slice(start, end + 1)) as unknown
+    if (!Array.isArray(arr)) return []
+    const out = arr
+      .filter((c): c is string => typeof c === 'string' && !!c.trim())
+      .map((c) => c.trim().slice(0, CRITERION_MAX_CHARS))
+      .slice(0, 4)
+    if (out.length) console.log(`[coordinator] acceptance criteria derived (${out.length}): ${out.join(' | ').slice(0, 300)}`)
+    return out
+  } catch (e) {
+    console.warn('[coordinator] acceptance-criteria derivation failed (gate runs without criteria):', e instanceof Error ? e.message : e)
+    return []
+  }
+}
+
 export function isNonTrivialTask(prompt: string): boolean {
   const text = prompt.trim()
   if (!text) return false

@@ -42,6 +42,18 @@ And the type: "fact" | "preference" | "learning".
 
 Return a JSON array (possibly empty). Each element: {"layer": "shared"|"role", "type": "fact"|"preference"|"learning", "content": "<one concise sentence>"}. Output ONLY the JSON array — no preamble, no explanation, no markdown code fence.`
 
+// Targeted extractor for verification-gate closures — the highest-signal learning moment the system
+// has: a failure was independently confirmed AND closed out (fixed, or proven a false positive), so
+// "what went wrong + how to avoid it" is grounded, not speculative. Generic cadence extraction never
+// sees this framing; without it the lesson evaporates and the same class of mistake recurs.
+const GATE_LESSON_INSTRUCTION = `An independent verification gate FAILED a code change, and the failure was then closed out (fixed, or proven a false positive). Distill the REUSABLE lesson so the same class of mistake is not repeated in future work.
+
+Return a JSON array of 0-2 items. Each element: {"content": "<one concise sentence: the mistake class + how to avoid or check it>"}. Rules:
+- Only patterns that will recur (a check that was skipped, a wrong assumption, a verifier misjudgment pattern). Skip one-off facts tied to this task only.
+- No file paths or line numbers unless essential to the lesson.
+- If nothing generalizes, return [].
+- Output ONLY the JSON array — no preamble, no explanation, no markdown code fence.`
+
 // Module-level guard so the 60s idle-sweep timer can't stack a new sweep on a still-running one.
 let sweeping = false
 
@@ -113,15 +125,93 @@ export async function extract(ctx: ExtractContext, trigger: ExtractTrigger): Pro
   }
 }
 
+export interface GateLessonInput {
+  convId: string
+  roleId: string // implementer — its binding supplies the LLM endpoint, its self-learning switch gates the write
+  task: string // original task the gated step was dispatched for
+  verdict: string // verifier feedback / evidence
+  closure: string // how the FAIL was closed: the handler's fix report, or the e2e fix-round summary
+  kind: 'fixed' | 'false-positive' | 'e2e-fixed'
+}
+
+// Learn from a verification-gate closure: distill the failure + closure into 0-2 collab-layer lessons
+// (role_id NULL — recalled by EVERY role via listForRole, because a lesson learned across a hand-off
+// isn't owned by one domain). source 'auto' so an unused lesson decays on the normal prune path;
+// sourceConvId links the Memory UI back to the conversation. Fire-and-forget from the gates: never
+// throws, and a held extraction lock just skips (gate closures are rare; losing one to a coinciding
+// cadence extraction is acceptable, blocking the turn on it is not).
+export async function learnFromGateClosure(input: GateLessonInput): Promise<void> {
+  const now = new Date().toISOString()
+  const until = new Date(Date.now() + LOCK_TTL_MS).toISOString()
+  if (!extractionRepo.tryLock(input.convId, until, now)) return
+  try {
+    if (!(roleRepo.getState(input.roleId)?.selfLearningEnabled ?? true)) return // user turned learning off for this expert
+    const binding = roleRepo.getBinding(input.roleId)
+    if (!binding?.endpointId || !binding.model) return
+    const target = endpointWithKey(binding.endpointId)
+    if (!target) return
+    const model = pickSmallModel(target.ep.protocol, target.ep.availableModels, binding.model)
+    const caseText = [
+      `Outcome: ${input.kind}`,
+      `Task:\n${input.task.slice(0, 1500)}`,
+      `Verification verdict + evidence:\n${input.verdict.slice(0, 2000)}`,
+      `Closure:\n${input.closure.slice(0, 2000)}`
+    ].join('\n\n')
+    const text = await chatOnce(target.ep, target.key, model, [
+      { role: 'user', content: `${GATE_LESSON_INSTRUCTION}\n\nCase:\n${caseText}` }
+    ])
+    const items = parseLessons(text)
+    if (!items.length) return
+    const pool = memoryRepo.listForRole(input.roleId) // includes collab — the dedup target layer
+    for (const content of items) {
+      if (findDup(content, pool, 'collab', null)) continue // same lesson already learned — keep the original
+      pool.push(
+        memoryRepo.create({
+          layer: 'collab',
+          roleId: null,
+          type: 'learning',
+          content,
+          source: 'auto',
+          tokens: estimateTextTokens(content),
+          sourceConvId: input.convId
+        })
+      )
+      console.log(`[memory] gate lesson (${input.kind}): ${content.slice(0, 120)}`)
+    }
+  } catch {
+    // best-effort: a failed lesson extraction must never affect the gate flow
+  } finally {
+    extractionRepo.unlock(input.convId)
+  }
+}
+
+// Lesson replies are {"content": "..."} only — layer/type are fixed by the caller (collab/learning),
+// so parseExtracted's layer gate would drop every item; this parser only validates content.
+function parseLessons(raw: string): string[] {
+  const arr = extractJsonArray(raw)
+  if (!Array.isArray(arr)) return []
+  const out: string[] = []
+  for (const e of arr.slice(0, 2)) {
+    const content = e && typeof e === 'object' ? (e as Record<string, unknown>).content : null
+    if (typeof content === 'string' && content.trim() && content.length <= MAX_CONTENT_CHARS) out.push(content.trim())
+  }
+  return out
+}
+
 // Called after each assistant turn. Bumps the turn counter, (re)schedules the idle trigger, and fires
-// an extraction immediately on an explicit "remember…" cue, else every POST_TURN_EVERY turns.
-export async function onTurn(ctx: ExtractContext): Promise<void> {
+// an extraction immediately on an explicit "remember…" cue, else every `cadence` turns. Direct chat
+// keeps the default (turns are cheap and chatty); the coordinator passes cadence=1 — a single
+// coordinator turn can be a 90-minute multi-expert run whose conversation content far exceeds three
+// chat turns, and waiting for turn%3 left whole dogfood runs with zero extraction (the idle sweep
+// can't cover it either when the app closes before idle_due). The incremental watermark makes
+// per-turn extraction cheap: each call only feeds messages newer than the last consumed one.
+export async function onTurn(ctx: ExtractContext, cadence: number = POST_TURN_EVERY): Promise<void> {
   const turn = extractionRepo.incrTurn(ctx.convId)
   extractionRepo.setIdleDue(ctx.convId, new Date(Date.now() + IDLE_DELAY_MS).toISOString())
   const messages = convRepo.listByConversation(ctx.convId)
   const lastUser = [...messages].reverse().find((m) => m.author === 'user')
   if (lastUser && isExplicit(lastUser.content)) await extract(ctx, 'explicit')
-  else if (turn % POST_TURN_EVERY === 0) await extract(ctx, 'auto')
+  else if (turn % Math.max(1, cadence) === 0) await extract(ctx, 'auto')
 }
 
 // Idle sweep: extract for every conversation whose idle timer elapsed. Self-resolves each

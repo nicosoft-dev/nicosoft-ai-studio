@@ -194,6 +194,13 @@ export interface AnalyticsSummary {
     tools: { label: string; v: number }[] // tool calls today, by tool, desc
     peakHours: number[] // 24 entries, message counts by local hour today
   }
+  verification: {
+    // Gate B (independent step verify) closure counts, fixed order: pass / fixed / false-positive /
+    // unresolved / unverified — zeros included so the renderer shows a stable list.
+    gateB: { outcome: string; v: number }[]
+    gateC: { outcome: string; v: number }[] // background e2e verdicts: PASS / FAIL / BLOCKED / SKIP
+    byExpert: { id: string; total: number; ok: number }[] // Gate B per implementer; ok = pass+fixed+false-positive
+  }
 }
 // A tool the model just started calling — streamed the moment the call begins, before the turn
 // finishes, so the renderer can show a running tool card immediately instead of waiting. The full

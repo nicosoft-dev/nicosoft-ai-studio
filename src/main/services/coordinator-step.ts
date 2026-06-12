@@ -207,6 +207,12 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
       signal
     )
     text = res.text
+    // The loop guard wound this step down after repeated identical failures (loop.ts thrash guard).
+    // Label the text so every downstream reader — the persisted message, synthesis, Gate B's verifier
+    // reading the implementer summary — sees an incomplete result, not a clean completion.
+    if (res.reason === 'thrash_stop') {
+      text = `${text ? `${text}\n\n` : ''}[Loop guard: this step was wound down after repeated identical failures — treat the result as incomplete.]`
+    }
     // Persist the step + any images its tools generated (Georgia) — text OR an attachment lands the message,
     // so a reopened conversation re-reads the image from the DB. Empty + image-only turns still persist.
     if (text || res.attachments.length) {

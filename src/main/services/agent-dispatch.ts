@@ -323,7 +323,7 @@ export async function runDispatchedAgent(
   d: DispatchedAgentInput,
   cb: AgentCallbacks,
   signal: AbortSignal,
-): Promise<{ text: string; inTokens: number; contextTokens: number; cacheReadTokens: number; outTokens: number; attachments: MessageAttachmentDto[] }> {
+): Promise<{ text: string; inTokens: number; contextTokens: number; cacheReadTokens: number; outTokens: number; reason: string; attachments: MessageAttachmentDto[] }> {
   let tools: Tool[]
   if (d.toolNames) {
     // Fixed-kit dispatch (Gate B verifier): an explicit whitelist instead of the role's default kit — a
@@ -393,7 +393,7 @@ export async function runDispatchedAgent(
     cb,
     signal,
   )
-  return { text: res.text, inTokens: res.inTokens, contextTokens: res.contextTokens, cacheReadTokens: res.cacheReadTokens, outTokens: res.outTokens, attachments: res.attachments }
+  return { text: res.text, inTokens: res.inTokens, contextTokens: res.contextTokens, cacheReadTokens: res.cacheReadTokens, outTokens: res.outTokens, reason: res.reason, attachments: res.attachments }
 }
 
 // Persisted conversation messages → agent seed. Assistant turns are prior runs' FINAL replies (plain
