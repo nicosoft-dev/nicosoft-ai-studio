@@ -20,6 +20,7 @@ export interface MemoryRow {
   source: MemorySource
   tokens: number
   sourceConvId: string | null // conversation this memory was learned from (null = hand-authored)
+  lastRecalledAt: string | null // when recall last injected this memory (null = never since upgrade)
   createdAt: string
   updatedAt: string
 }
@@ -47,6 +48,7 @@ interface MemoryRaw {
   source: string
   tokens: number
   source_conv_id: string | null
+  last_recalled_at: string | null
   created_at: string
   updated_at: string
 }
@@ -62,6 +64,7 @@ function mapRow(raw: MemoryRaw): MemoryRow {
     source: raw.source as MemorySource,
     tokens: raw.tokens,
     sourceConvId: raw.source_conv_id ?? null,
+    lastRecalledAt: raw.last_recalled_at ?? null,
     createdAt: raw.created_at,
     updatedAt: raw.updated_at
   }
@@ -99,6 +102,7 @@ export function create(input: MemoryCreateInput): MemoryRow {
     source: input.source,
     tokens: input.tokens,
     sourceConvId: input.sourceConvId ?? null,
+    lastRecalledAt: now, // matches the INSERT above — a fresh memory counts as just-needed
     createdAt: now,
     updatedAt: now
   }

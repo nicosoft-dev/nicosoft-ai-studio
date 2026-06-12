@@ -1,0 +1,113 @@
+/* ============================================================
+   Memory Live — full-screen 3D holographic-core neural network
+   (views/memory-live.tsx). Deep-space overlay; the UI chrome
+   (close button, stats, legend text) uses the app's neutral
+   tokens and shared .icon-btn so the core itself is the only
+   colored subject. The legend swatches keep the node palette —
+   they label the 3D colors. The hover tooltip stays in the
+   core's orange-gold (it annotates scene content, not chrome).
+   ============================================================ */
+
+.mlv-overlay { position: fixed; inset: 0; z-index: 300; background: #040406; overflow: hidden; }
+.mlv-canvas { position: absolute; inset: 0; }
+.mlv-canvas canvas { display: block; }
+
+/* — header — */
+.mlv-head {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 2;
+  display: flex; align-items: center; justify-content: space-between;
+  /* 78px left inset = the same strip .sidebar-header reserves for the window controls: the overlay
+     is full-screen, so the macOS traffic lights (and the custom Win/Linux buttons, fixed at z 500)
+     float right over this corner — the title must clear them. */
+  padding: 14px 18px 14px 78px;
+  pointer-events: none; /* let orbit-drag start anywhere; only the close button is interactive */
+}
+.mlv-stats { font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+/* Visuals come from the shared .icon-btn; the header swallows pointer events, so re-enable here. */
+.mlv-close { pointer-events: auto; }
+/* Breathing pulse for the Live entry button's dot on the Memory settings page (.mem-live-dot). */
+@keyframes mlv-breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+/* — legend — */
+.mlv-legend {
+  position: absolute; left: 18px; bottom: 16px; z-index: 2;
+  display: flex; align-items: center; gap: 14px;
+  font-size: 11px; color: var(--text-3);
+  pointer-events: none;
+}
+.mlv-leg { display: inline-flex; align-items: center; gap: 6px; }
+.mlv-leg::before { content: ''; width: 7px; height: 7px; border-radius: 50%; }
+.mlv-leg.explicit::before { background: #ffc890; box-shadow: 0 0 8px rgba(255, 200, 144, 0.8); }
+.mlv-leg.user::before { background: #ff9a3c; box-shadow: 0 0 8px rgba(255, 154, 60, 0.8); }
+.mlv-leg.auto::before { background: #c96416; box-shadow: 0 0 8px rgba(201, 100, 22, 0.8); }
+.mlv-leg-hint { color: var(--text-4); }
+
+/* — WebGL-failure state: centered (there is no canvas content behind it) — */
+.mlv-fail {
+  position: absolute; inset: 0; z-index: 2;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-3); font-size: 13px; letter-spacing: 0.02em;
+  pointer-events: none;
+}
+
+/* — empty state: the demo cloud takes the stage; the caption sits small at the bottom center,
+   one line above the legend row — */
+.mlv-empty {
+  position: absolute; left: 0; right: 0; bottom: 46px; z-index: 2;
+  display: flex; justify-content: center;
+  color: var(--text-3); font-size: 12px; letter-spacing: 0.02em;
+  pointer-events: none;
+}
+
+/* — hover tooltip (follows the cursor; never captures the pointer) — */
+.mlv-tip {
+  position: fixed; z-index: 3;
+  max-width: 340px;
+  padding: 10px 12px 9px;
+  border-radius: 11px;
+  background: rgba(12, 9, 6, 0.93);
+  border: 1px solid rgba(255, 154, 60, 0.3);
+  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.55), 0 0 28px rgba(255, 154, 60, 0.1);
+  backdrop-filter: blur(7px);
+  pointer-events: none;
+}
+.mlv-tip-tags { display: flex; gap: 6px; margin-bottom: 7px; flex-wrap: wrap; }
+.mlv-tag {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 999px;
+  background: rgba(255, 154, 60, 0.1);
+  border: 1px solid rgba(255, 154, 60, 0.25);
+  color: rgba(255, 201, 140, 0.85);
+}
+.mlv-tag.src-explicit { color: #ffe1bd; border-color: rgba(255, 200, 144, 0.5); }
+.mlv-tag.src-user { color: #ffb061; }
+.mlv-tag.src-auto { color: rgba(224, 138, 62, 0.8); }
+.mlv-tip-text { font-size: 12.5px; line-height: 1.5; color: #f3e9dc; word-break: break-word; }
+.mlv-tip-meta { margin-top: 7px; font-size: 11px; color: rgba(255, 201, 140, 0.45); }
+.mlv-tip-hint { margin-top: 6px; font-size: 11px; color: #ffb061; }
+
+/* — the Live entry button on the Memory settings page —
+   Sits at the right end of the filter row (.mem-filters), after the result count.
+   .mf-end takes over the count's right alignment (the count's own margin-left: auto
+   resolves to 0 inside this shrink-to-fit container) and keeps a 10px gap to the button. */
+.mf-end { margin-left: auto; display: inline-flex; align-items: center; gap: 10px; }
+.mem-live-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 13px; border-radius: 8px;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.04em;
+  color: #ffb061;
+  background: rgba(255, 154, 60, 0.09);
+  border: 1px solid rgba(255, 154, 60, 0.32);
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+.mem-live-btn:hover { background: rgba(255, 154, 60, 0.17); border-color: rgba(255, 154, 60, 0.55); box-shadow: 0 0 14px rgba(255, 154, 60, 0.22); }
+/* glowing status dot inside the button — breathes via the shared mlv-breathe keyframes */
+.mem-live-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #ff9a3c;
+  box-shadow: 0 0 8px rgba(255, 154, 60, 0.9), 0 0 16px rgba(255, 154, 60, 0.4);
+  animation: mlv-breathe 2.6s ease-in-out infinite;
+}

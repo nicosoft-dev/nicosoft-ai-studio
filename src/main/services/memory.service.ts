@@ -1,3 +1,4 @@
+import { BrowserWindow } from 'electron'
 import * as memoryRepo from '../repos/memory.repo'
 import * as extractionRepo from '../repos/extraction.repo'
 import * as convRepo from '../repos/conversation.repo'
@@ -171,8 +172,25 @@ export async function recall(input: RecallInput): Promise<MemoryRow[]> {
   if (!pool.length) return []
   const selected = pool.length > RECALL_LLM_THRESHOLD ? ((await llmFilter(input, pool)) ?? pool) : pool
   const out = capByBudget(selected)
-  memoryRepo.touchRecalled(out.map((m) => m.id), new Date().toISOString()) // decay bookkeeping for pruneAuto
+  const ids = out.map((m) => m.id)
+  memoryRepo.touchRecalled(ids, new Date().toISOString()) // decay bookkeeping for pruneAuto
+  broadcastRecalled(ids) // light up the Memory Live view, if anyone is watching
   return out
+}
+
+// Best-effort push of the just-recalled ids to every window — drives the Memory Live visualization's
+// real-time node flashes. Recall runs deep in the chat flow with no WebContents at hand, so this goes
+// to all windows rather than threading a sender through every caller; a renderer with no listener
+// simply ignores the channel.
+function broadcastRecalled(ids: string[]): void {
+  if (!ids.length) return
+  try {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) w.webContents.send('memory:recalled', { ids })
+    }
+  } catch {
+    /* visualization only — never let a broadcast failure touch the chat flow */
+  }
 }
 
 function capByBudget(memories: MemoryRow[]): MemoryRow[] {

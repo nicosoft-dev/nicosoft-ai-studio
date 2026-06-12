@@ -590,8 +590,14 @@ export interface MemoryDto {
   source: string // explicit | user | auto
   tokens: number
   sourceConvId: string | null // conversation this memory was learned from (null = hand-authored)
+  lastRecalledAt: string | null // when recall last injected this memory — drives Memory Live heat
   createdAt: string
   updatedAt: string
+}
+// Pushed by the backend the moment recall() injects memories into a turn (channel `memory:recalled`)
+// so the Memory Live visualization can flash the recalled nodes in real time.
+export interface MemoryRecalledEvent {
+  ids: string[]
 }
 export interface MemoryAddInput {
   layer: string // shared | role
