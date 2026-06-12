@@ -3,7 +3,7 @@ import { ulid } from '../db/id'
 import type { PermissionDecision } from '../agent/context'
 import { isContentBlock } from '../agent/types'
 import { LlmError } from '../llm/types'
-import { broadcastConvImage, broadcastUsage } from './usage-broadcast'
+import { broadcastConvImage, broadcastConvTodos, broadcastUsage } from './usage-broadcast'
 import { StreamRegistry } from './stream-lifecycle'
 import * as agentService from '../services/agent.service'
 import * as compressionService from '../services/compression.service'
@@ -107,6 +107,7 @@ export function registerAgentHandlers(): void {
           // The up-front per-turn count is the CURRENT context (count_tokens of what's being sent) → drives
           // the composer's "/ window" indicator.
           onUsage: (inputTokens) => broadcastUsage(sender, input.convId, 'context', inputTokens),
+          onTodos: (todos) => broadcastConvTodos(sender, input.convId, todos),
           onToolImage: (attachment) => broadcastConvImage(sender, input.convId, attachment),
           requestPermission: (req, signal) =>
             new Promise<PermissionDecision>((resolve) => {

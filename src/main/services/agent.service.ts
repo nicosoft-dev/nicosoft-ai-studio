@@ -136,6 +136,7 @@ export async function run(
       contextWindow: input.contextWindow,
       permissionMode: input.permissionMode ?? 'default',
       imageModel: input.imageModel,
+      onTodosChange: cb.onTodos, // TodoWrite executed (mid-turn) → live push to the workspace Tasks panel
     },
     cb,
     signal,

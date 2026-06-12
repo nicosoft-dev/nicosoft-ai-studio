@@ -12,6 +12,7 @@ import type {
   AgentTextDelta,
   ConvUsage,
   ConvImage,
+  ConvTodos,
   AnalyticsSummary,
   AppInfo,
   AgentToolStart,
@@ -109,6 +110,10 @@ const api = {
   // Live per-conversation generated images: an agent tool produced an image (persisted nsai-media:// ref),
   // broadcast so the renderer attaches it to the in-flight assistant bubble without base64 crossing IPC.
   onConvImage: (cb: (d: ConvImage) => void): (() => void) => agentListen('conv:image', cb),
+
+  // Live per-conversation TodoWrite list, pushed the moment the tool executes (mid-turn) — the workspace
+  // Tasks panel tracks real progress instead of waiting for the turn to settle into the transcript.
+  onConvTodos: (cb: (d: ConvTodos) => void): (() => void) => agentListen('conv:todos', cb),
 
   // Reveal a file the agent produced in the OS file manager (Finder / Explorer). cwd resolves relative
   // transcript paths. Returns true if it revealed the file (or its parent dir as a fallback).

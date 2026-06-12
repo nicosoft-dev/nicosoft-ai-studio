@@ -196,8 +196,12 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
         thinking,
         // Pipeline-shared todos: this expert reads + writes the conv's ONE todo list (see pipelineTodos), so
         // Flynn's list carries into Shuri's run and Shuri updates the SAME items — continuous team progress.
+        // Also pushed live to the workspace Tasks panel (cb.onTodos) the moment TodoWrite executes.
         initialTodos: pipelineTodos.get(convId),
-        onTodosChange: (todos) => pipelineTodos.set(convId, todos)
+        onTodosChange: (todos) => {
+          pipelineTodos.set(convId, todos)
+          cb.onTodos?.(todos)
+        }
       },
       agentCb,
       signal

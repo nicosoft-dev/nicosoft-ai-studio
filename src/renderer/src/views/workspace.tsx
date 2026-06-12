@@ -4,7 +4,7 @@
    agent's TodoWrite list). All derived from the active conversation's
    transcript + messages — no mock. Re-derives as the conversation grows.
    ============================================================ */
-import { useEffect, useState, type ReactElement } from 'react'
+import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { Icons } from '@/components/icons'
 import { ImageViewer, type ViewerImage } from '@/components/image-viewer'
 import { useChat } from '@/stores/chat'
@@ -62,6 +62,22 @@ export function WorkspaceDrawer({ onClose, activeConv }: { onClose: () => void; 
     return () => clearInterval(id)
   }, [streaming])
 
+  // Real-time Tasks: main pushes the todo list the MOMENT TodoWrite executes (conv:todos), mid-turn. The
+  // transcript-derived path below only sees todos after the whole turn settles — minutes behind on a long
+  // (e.g. 64K-escalated) turn. Once a live push lands for this conversation, it owns the Tasks section and
+  // the derive keeps its hands off (liveTasksRef); switching conversations re-arms the derived fallback so
+  // reopening an old chat still restores its list from the transcript.
+  const liveTasksRef = useRef(false)
+  useEffect(() => {
+    liveTasksRef.current = false
+    if (!activeConv) return
+    return window.api.onConvTodos((d) => {
+      if (d.convId !== activeConv) return
+      liveTasksRef.current = true
+      setTasks(d.todos)
+    })
+  }, [activeConv])
+
   useEffect(() => {
     if (!activeConv) {
       setFiles([])
@@ -90,7 +106,7 @@ export function WorkspaceDrawer({ onClose, activeConv }: { onClose: () => void; 
         }
       }
       setFiles([...fileMap.values()])
-      setTasks(latestTodos ?? [])
+      if (!liveTasksRef.current) setTasks(latestTodos ?? []) // live push owns Tasks once it has fired (it is fresher than the settled transcript)
       setImages(
         msgs
           .filter((m) => m.author !== 'user')

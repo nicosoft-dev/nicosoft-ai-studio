@@ -13,7 +13,7 @@ import type { PermissionDecision } from '../agent/context'
 import { isContentBlock } from '../agent/types'
 import * as coordinatorService from '../services/coordinator.service'
 import { LlmError } from '../llm/types'
-import { broadcastConvImage, broadcastUsage } from './usage-broadcast'
+import { broadcastConvImage, broadcastConvTodos, broadcastUsage } from './usage-broadcast'
 import { StreamRegistry } from './stream-lifecycle'
 import type {
   CoordinatorRunInputDto,
@@ -97,6 +97,7 @@ export function registerCoordinatorHandlers(): void {
               usage.cacheCreationInputTokens,
             ),
           onToolImage: (attachment) => broadcastConvImage(sender, input.convId, attachment),
+          onTodos: (todos) => broadcastConvTodos(sender, input.convId, todos),
           // Agent-dispatched experts run a tool-using loop — forward their tool activity + approvals,
           // tagged with roleId, to the coordinator UI (doc 19 §11 phase 2). Mirrors agent.handler's bridge.
           onToolStart: (roleId, id, name) => {

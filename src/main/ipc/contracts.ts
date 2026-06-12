@@ -140,6 +140,13 @@ export interface ConvUsage {
   // step must not shrink it — BUG 1). Absent on chat/agent single paths → conv-level behaviour, unchanged.
   roleId?: string
 }
+// The agent's live TodoWrite list, broadcast the moment the tool executes (mid-turn) so the workspace
+// Tasks panel tracks real progress instead of waiting for the whole turn to settle into the transcript
+// (a 64K-escalated turn keeps the panel frozen for minutes otherwise — dogfood round11).
+export interface ConvTodos {
+  convId: string
+  todos: { content: string; status: string }[]
+}
 // A generated image surfaced live from an in-flight agent turn, keyed by convId (like ConvUsage). An agent
 // tool (ns_generate_image, code_execution charts, view_image) returned an image; the loop persisted it to
 // the media store (nsai-media:// ref) and broadcasts it here so the renderer attaches it to the streaming

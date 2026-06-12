@@ -37,6 +37,7 @@ export interface AgentCallbacks {
   onEvent: (e: AgentEvent) => void // completed assistant turns + tool_results
   onRetry?: (info: { attempt: number; max: number; code: string; waitMs: number }) => void // transient failure → retrying status
   onUsage?: (inputTokens: number) => void // live ↑ input-token readout: initial count up front, then per turn
+  onTodos?: (todos: { content: string; status: string }[]) => void // TodoWrite executed (mid-turn) → live push to the workspace Tasks panel
   onToolImage?: (attachment: MessageAttachmentDto) => void // a tool produced an image (persisted nsai-media:// ref) → surface it live
   requestPermission: RequestPermission // bridged to the renderer (req, optional cancel signal)
   askUser?: AskUser // AskUserQuestion: bridged to the renderer; undefined headless (the tool then errors)

@@ -340,8 +340,14 @@ export const useChat = create<ChatState>((set, get) => {
           streaming: { ...s.streaming, [meta.convId]: false },
           permission: { ...s.permission, [meta.convId]: null },
           retry: { ...s.retry, [meta.convId]: null },
+          // The "/ window" meter keeps the value the live usage stream maintained during the run.
+          // d.inputTokens here is the LAST turn's actual prompt (agent-dispatch lastContext) — after a
+          // long run microcompact has cleared most tool results, so it can be a fraction of the
+          // conversation's real occupancy (round11: 279K during the run → 17.9K the moment it ended,
+          // a visible jump). The next send re-measures via countContext anyway; only fill when the
+          // live stream never produced a value (degenerate short runs).
           contextTokens:
-            typeof d.inputTokens === 'number'
+            typeof d.inputTokens === 'number' && s.contextTokens[meta.convId] === undefined
               ? { ...s.contextTokens, [meta.convId]: d.inputTokens }
               : s.contextTokens
         }

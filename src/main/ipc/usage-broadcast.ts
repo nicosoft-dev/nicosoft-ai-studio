@@ -8,7 +8,7 @@
 // request doing right now"), not because either accumulates. Keyed by convId — every path knows its
 // convId, so we skip the streamId→conv indirection the done events use.
 import type { WebContents } from 'electron'
-import type { ConvUsage, MessageAttachmentDto } from './contracts'
+import type { ConvTodos, ConvUsage, MessageAttachmentDto } from './contracts'
 
 export function broadcastUsage(
   sender: WebContents,
@@ -40,4 +40,14 @@ export function broadcastUsage(
 export function broadcastConvImage(sender: WebContents, convId: string, attachment: MessageAttachmentDto): void {
   if (sender.isDestroyed()) return
   sender.send('conv:image', { convId, attachment })
+}
+
+// The agent's TodoWrite list, pushed the MOMENT the tool executes (mid-turn). Without this the workspace
+// Tasks panel only sees todos after the whole turn settles into the transcript — on a long turn (a 64K
+// max_tokens escalation, a big multi-file edit) that's minutes of a frozen panel while the agent has
+// already moved items to completed (dogfood round11).
+export function broadcastConvTodos(sender: WebContents, convId: string, todos: ConvTodos['todos']): void {
+  if (sender.isDestroyed()) return
+  const ev: ConvTodos = { convId, todos }
+  sender.send('conv:todos', ev)
 }
