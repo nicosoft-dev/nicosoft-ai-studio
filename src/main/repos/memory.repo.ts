@@ -19,6 +19,7 @@ export interface MemoryRow {
   content: string
   source: MemorySource
   tokens: number
+  sourceConvId: string | null // conversation this memory was learned from (null = hand-authored)
   createdAt: string
   updatedAt: string
 }
@@ -45,6 +46,7 @@ interface MemoryRaw {
   content: string
   source: string
   tokens: number
+  source_conv_id: string | null
   created_at: string
   updated_at: string
 }
@@ -59,6 +61,7 @@ function mapRow(raw: MemoryRaw): MemoryRow {
     content: raw.content,
     source: raw.source as MemorySource,
     tokens: raw.tokens,
+    sourceConvId: raw.source_conv_id ?? null,
     createdAt: raw.created_at,
     updatedAt: raw.updated_at
   }
@@ -95,6 +98,7 @@ export function create(input: MemoryCreateInput): MemoryRow {
     content: input.content,
     source: input.source,
     tokens: input.tokens,
+    sourceConvId: input.sourceConvId ?? null,
     createdAt: now,
     updatedAt: now
   }

@@ -374,5 +374,6 @@
   "scope.specific": "Specific",
   "scope.noAgent": "no agent",
   "scope.agentScopeNote": "Only experts with an agent run extensions today (currently Engineer). Others are saved but stay inactive until they get an agent.",
-  "common.addEndpoint": "Add endpoint"
+  "common.addEndpoint": "Add endpoint",
+  "mem.source": "Open source conversation"
 }

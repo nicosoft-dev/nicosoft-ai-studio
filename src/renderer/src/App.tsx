@@ -139,6 +139,18 @@ export default function App(): ReactElement {
     setView('app')
     setCmdk(false)
   }
+  // Memory provenance jump (settings › memory "learned from" button) — the memory list lives deep in
+  // the settings tree, so it dispatches a window event instead of threading a callback through every
+  // layer. Re-subscribed each render so the handler always closes over the latest selectConv state.
+  useEffect(() => {
+    const h = (e: Event): void => {
+      const convId = (e as CustomEvent<{ convId?: string }>).detail?.convId
+      if (convId) selectConv(convId)
+    }
+    window.addEventListener('nsai:open-conversation', h)
+    return () => window.removeEventListener('nsai:open-conversation', h)
+  })
+
   const selectConv = (id: string): void => {
     const conv = chat.conversations.find((c) => c.id === id)
     void chat.openConversation(id)

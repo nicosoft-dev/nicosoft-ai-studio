@@ -589,6 +589,7 @@ export interface MemoryDto {
   content: string
   source: string // explicit | user | auto
   tokens: number
+  sourceConvId: string | null // conversation this memory was learned from (null = hand-authored)
   createdAt: string
   updatedAt: string
 }

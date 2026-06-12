@@ -36,6 +36,7 @@ interface FlatEntry {
   scope: string
   layer: LayerKey
   text: string
+  sourceConvId: string | null // provenance — jump back to the conversation this was learned from
 }
 
 /* — one editable memory item — */
@@ -132,7 +133,8 @@ function toEntries(memories: MemoryDto[]): FlatEntry[] {
     uid: m.id,
     scope: m.layer === 'shared' ? 'shared' : (m.roleId ?? 'shared'),
     layer: m.layer === 'shared' ? 'SHARED' : m.layer === 'collab' ? 'COLLAB' : 'ROLE',
-    text: m.content
+    text: m.content,
+    sourceConvId: m.sourceConvId ?? null
   }))
 }
 
@@ -186,6 +188,17 @@ function GlobalMemRow({
         <span className="mem-text">{text}</span>
       )}
       <div className="mem-actions">
+        {entry.sourceConvId ? (
+          // Provenance: jump to the conversation this memory was learned from (spot-check what
+          // self-learning picked up). App.tsx listens for the event and routes via selectConv.
+          <button
+            className="icon-btn sm"
+            title={t('mem.source')}
+            onClick={() => window.dispatchEvent(new CustomEvent('nsai:open-conversation', { detail: { convId: entry.sourceConvId } }))}
+          >
+            <Icons.arrowRight size={13} />
+          </button>
+        ) : null}
         <button className="icon-btn sm" title={t('mem.edit')} onClick={() => setEditing(true)}>
           <Icons.edit size={13} />
         </button>
