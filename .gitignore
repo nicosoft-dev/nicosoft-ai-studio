@@ -223,6 +223,7 @@ Desktop.ini
 tmp/
 .tmp/
 
-# Dogfood archives & temp specs — contain Electron user-data caches + credentials.json; never commit
-docs/dogfood-archive-*/
+# Internal docs — design docs / L4 notes / dogfood specs are kept LOCAL, never committed.
+# (Dogfood archives also contain Electron user-data caches + credentials.json.)
+docs/
 .dogfood-e2e-spec.md
