@@ -14,9 +14,10 @@
 
 | Track | 端 | 解决 | 规模 | 状态 |
 |---|---|---|---|---|
-| **A** per-module 验收 | 生产 | 验收粒度太粗 → 漏测不被点名 | 小(prompt + 三处 cap 改) | **要做** |
+| **A** per-module 验收 | 生产 | 验收粒度太粗 → 漏测不被点名 | 小(prompt + 三处 cap 改) | **✅ 已做**(`1a8d0ac`;measure 验证 criteria 24 条破上限) |
 | **B** fresh-context 分批 | 生产 | 单 context 负载/丢记忆 | 大 | **降级**(未证;留给 compaction regime) |
-| **C-base** 补 assumption/direction 维 | 验证 | 绿 build 但解错问题/重复造轮子 | **极小(一处 prompt)** | **要做** |
+| **C-base** 补 assumption/direction 维 | 验证 | 绿 build 但解错问题/重复造轮子 | **极小(一处 prompt)** | **✅ 已做**(`51897c2`;measure: Gate B FAIL→fixed + 2 lesson) |
+| **Bash 超时** | 工具 | hang 命令逃逸/卡死整个 build(measure 发现) | 小(一处) | **✅ 已做**(`2d74f28` + 单测;见 §6b) |
 | 按需补单维 | 验证 | C-base 实测某维反复漏 | 数据驱动,单维单个 | **休眠护栏**(触发需先建 miss 追踪 + surface;非预建,见 §5.2) |
 | ~~多 lens 面板~~ | 验证 | (menu/自动sizing/fan-out/合并)| — | **非目标**(四轮对抗审打穿) |
 
@@ -31,6 +32,7 @@
 - `acceptanceOverride` 参数**归 Track B**(Track A 无 caller 传它)。
 
 **Measure**:dogfood 重跑 nspay 类任务 → per-module 验收使 slip 消失则根因已治。
+**✅ 已实施(`1a8d0ac`)+ nspay 重跑验证**:criteria 单次派 **24 条**(破旧 4 上限,`warns=0`);verifier 据此查 per-module 测试覆盖(见 §6c collab lesson「枚举 mandated test cases vs 真实 inventory」)。内容是否每条精确对应一模块未逐条核(criteria 偏 build/test 命令型),但放开 cap 的机制确认生效。
 
 ## 4. Track B — fresh-context 分批（生产端,降级:未证赌注）
 
@@ -69,6 +71,7 @@ decompose(宏观:做哪些模块 / 什么顺序 / 什么接口)   ← coordinato
   - **主观留 NOTE**:纯"感觉过度设计 / 路子可能不优"无具体可指缺陷 → evidence 里 **NOTE 不 FAIL**(防 taste-based over-block)。NOTE 必须**锚在 evidence prose 内**,不得产生独立的 `VERDICT:` 行(`gate-b.ts:283` last-match 正则会误读,重蹈 fail-open 那次回归)。
   - correctness(build/diff)+ 现有 over-reach 仍硬 FAIL,不动。
 - **诚实标注(自主模式)**:NOTE 在 **PASS 路径 write-only**(进 `gate_outcomes.evidence` 500 字截断、渲染成计数、无文本呈现,`gate-b.ts:72`/`gate-outcome.repo.ts`/`analytics.service.ts`)→ **NOTE 只在交互模式(人读 verdict 文本)有用**,自主模式要可见需先建 §5.2 的 surface。**窄硬 FAIL 不受此限**(FAIL 走 closure,有呈现)——所以 C-base 的**真增量主要在那条窄硬 FAIL**,NOTE 是交互模式的附加。
+- **✅ 已实施(`51897c2`)+ nspay 重跑验证**:Gate B verifier 查得明显更深 —— evidence 查到 SSRF 多层防御具体到 `sender.go:69/:42` 行号、并核「测试是否 vacuous/SKIP」;**Gate B FAIL→fixed(rounds 2)**,产 2 条 collab lesson(见 §6c)。截图 verifier「what tests actually exist and what they cover」即此。
 
 ### 5.2 按需补单维（休眠护栏,数据驱动,非预建面板）
 多 agent verifier **不预建**。仅当 C-base 实测暴露具体缺口才按需补,三条写紧防口子膨胀:
@@ -88,11 +91,35 @@ decompose(宏观:做哪些模块 / 什么顺序 / 什么接口)   ← coordinato
 | 闭环/呈现 | FAIL → `chooseFailHandler`(单 feedback,会 `route()` 重路由);**PASS 路径** feedback 只进 `gate_outcomes.evidence`(`gate-b.ts:72`,500 字截断,`analytics.service.ts` 渲染成计数);coordinator beat 仅 unresolved/false-positive/unverified 有文本([coordinator.service.ts:113](../src/main/services/coordinator.service.ts)),**PASS 无文本呈现通道**;误判 PASS→FAIL 有真实先例(`gate-b.ts:280`) |
 | run/task + 结果 | `projects`+`project_tasks`([schema.ts:107](../src/main/db/schema.ts));`gate_outcomes` 表**已存在**(`schema.ts:269`) |
 
+## 6b. Bash 工具超时:进程组 kill（measure 副产物,已修 `2d74f28`）
+
+nspay 首跑(measure)engineer 跑 `find / -name go.mod -path *nspay*`(全盘 find)**卡死整个 build 17min**,暴露 Bash 工具一个真实缺口。
+
+- **诊断(读真码)**:[bash.ts](../src/main/agent/tools/bash.ts) **已有** 120s 默认 / 600s max timeout + SIGTERM→5s→SIGKILL(值与 Claude Code 一致),但 `child.kill()` **只杀 shell**;带 glob/管道/复合的命令 shell 会 fork 子进程,杀 shell 后子进程**逃逸成孤儿继续跑** → 超时形同虚设。idle/envelope guard 只管 LLM stream,不管工具执行 hang。
+- **修复**:`spawn(detached:true)`(child 成进程组 leader)+ `process.kill(-pid)` 杀**整个进程组**(SIGTERM→grace→SIGKILL),group send 失败 fallback `child.kill`;caller abort 也 reap 整树。
+- **借鉴超时值(扒 CCB/Codex 源码)**:CCB 默认 **120s** / max **600s** / `tree-kill`;Codex 默认 **10s** / 无 max / `setsid`+`killpg` + 50ms grace + 2s IO drain。Studio 采 CCB 量级(120s/600s,本就是),只补进程组 kill。
+- **验证**:真实 `bashTool.call` 单测 —— `timeout_ms=1500` + 前台阻塞 + 后台逃逸子进程 → **1505ms settle + timedOut + 逃逸子进程也被杀**(timer 正常、根因确为子进程逃逸)。重跑实战未撞 hang 命令(engineer 改用 `start_service` 启 server、未跑 `find /`),fix 作待命安全网。
+
+## 6c. nspay measure 重跑结果（验证 + 发现）
+
+从 0 重跑(全死角监控:动态订阅 **42 channel** + **tool ledger** 700 工具全捕获命令 + 5 DB 表 + wire + 专项观测):
+
+- **DONE 2.5h**,112 files / **105 go / 10184 LOC**,**build=OK vet=OK test=OK**;架构纪律全绿(`service_gin=1` 是 `ports.go:3` 注释「never receive *gin.Context」假阳性)。
+- **700 工具,0 never-returned**(无 hang;最慢 `start_service` 30s 正常)。
+- **Track A ✅**:criteria 24 条破上限。**C-base ✅**:Gate B 查深(SSRF 多层防御到行号、测试 vacuous/SKIP),FAIL→fixed(rounds 2)。
+- **C 格再点亮,2 collab lesson(测试质量,比首跑更具体)**:① *"tests exist ≠ done:枚举 mandated test cases vs 真实 inventory,确认默认运行(非 skip/vacuous)"* ② *"spec 要求模块单测 → 写 hermetic 测试(miniredis/sqlite/纯函数)默认 `go test` 能跑,别 DB-gated silently SKIP"*。这是 Track A(per-module 验收)+ C-base(查测试真跑吗)合力的产物。
+- **发现(转待办,见 §7)**:bypass 下 engineer 又 `brew install postgresql@16 redis`,装本地 PG/Redis 自起、**绕过 SPEC 指定的树莓派**(清空的 db 这次没被用到)。
+
 ## 7. 非目标 / 后续
 
 - **预建多 lens 面板**(menu / 自动 sizing / adjudicator / fan-out / 机械合并)——非目标;只在 C-base 实测某维反复漏时,按 §5.2 补那一维(且 §5.2 现为休眠护栏)。
 - **维度级 miss 追踪 + PASS-path advisory surface** —— §5.2 的两个前置基建,未建;要激活 §5.2 须先单独 justify 建它们。
 - collaborate-mode 分批 / 运行时动态再拆 / 自定义角色进编排。
 
+**measure 转出的待办(待处理)**
+- **Track B**(fresh-context 分批):仍降级,等真正大项目(会 compaction、丢记忆)再规划;nspay 仍 0 compact 不属此类。
+- **bypass 拦截系统软件安装 + 缺工具用项目语言临时实现**:measure 实证 engineer 反复 `brew install postgresql@16 redis` 绕过用户、且绕过 SPEC 指定环境。bypass 拦 `brew/apt/-g/pip/cargo install` 等系统安装(**放行**项目本地依赖 `go mod`/项目内 `npm i`);缺工具用**项目实际语言**(不写死 go/java/c++)写临时后端实现;临时文件 agent 自判复用(复用留、项目结束清、不复用即删)。
+- **segment token 显示口径统一**:↑input(current context)与 ↓output(cumulative)口径不一致(measure 截图 ↑119.3k ↓474.2k),每轮结束应显示该轮总数(且避免多 expert 累积成 millions 的老问题,见 `360c2fe`)。
+
 ---
-*修订记录:v1 捆验收+分批 → v2/v3 把 Track C 做成无cap/8-lens/adjudicator/机械合并,被三轮对抗审打穿 → v4 advisory 多 agent,第四轮证自主模式无呈现通道、菜单 ②③ 被 base 覆盖、解错变量 → v5 收为 C-base 扩 persona(observational)+ 按需补单维。**v6(本版)**:第五轮纠正诊断——verifier **已** FAIL on over-reach,真缺口只有"green-diff 上方向/假设错"一维;C-base 改为 **具体可指缺陷硬 FAIL(重复造轮子/行为不符任务)+ 主观留 NOTE + 诚实标注 NOTE 自主模式 write-only**;§5.2 标为休眠护栏(触发需先建维度级 miss 追踪 + surface);Track A 三处 cap 主路径、per-module 枚举降为未证选项。*
+*修订记录:v1 捆验收+分批 → v2/v3 把 Track C 做成无cap/8-lens/adjudicator/机械合并,被三轮对抗审打穿 → v4 advisory 多 agent,第四轮证自主模式无呈现通道、菜单 ②③ 被 base 覆盖、解错变量 → v5 收为 C-base 扩 persona(observational)+ 按需补单维。**v6(本版)**:第五轮纠正诊断——verifier **已** FAIL on over-reach,真缺口只有"green-diff 上方向/假设错"一维;C-base 改为 **具体可指缺陷硬 FAIL(重复造轮子/行为不符任务)+ 主观留 NOTE + 诚实标注 NOTE 自主模式 write-only**;§5.2 标为休眠护栏(触发需先建维度级 miss 追踪 + surface);Track A 三处 cap 主路径、per-module 枚举降为未证选项。 **v7**:实现并 commit Track A(`1a8d0ac`)+ C-base(`51897c2`)+ Bash 超时进程组 kill(`2d74f28`,measure 副产物);nspay measure 重跑(DONE/build 绿/0 hang)验证 Track A(criteria 24 破上限)+ C-base(Gate B 查深→FAIL→fixed→2 测试质量 collab lesson)实战生效;新增 §6b(Bash fix,借 CCB 120s/600s + Codex killpg)、§6c(measure 结果);转出待办:bypass 系统安装拦截(实证 brew install 绕过)+ token 显示口径。*
