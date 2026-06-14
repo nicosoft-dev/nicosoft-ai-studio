@@ -53,7 +53,12 @@ export const bashTool = buildTool<typeof inputSchema, BashOutput>({
   maxResultSizeChars: 30_000,
   call(input, ctx) {
     return new Promise<{ data: BashOutput }>((resolve, reject) => {
-      const child = spawn(input.command, { shell: true, cwd: ctx.cwd, signal: ctx.signal })
+      // detached: the child becomes its own process-group leader, so a timeout/abort can kill the WHOLE
+      // tree (the shell + every grandchild it forked) via process.kill(-pgid). Plain child.kill() signals
+      // only the shell — a command that forks (globs, pipes, a background server) leaves the real worker
+      // orphaned and still running. That is exactly how `find /` survived the 120s timeout and hung a
+      // build for 17min: the timeout killed the shell while the find kept scanning the whole disk.
+      const child = spawn(input.command, { shell: true, cwd: ctx.cwd, signal: ctx.signal, detached: true })
       let stdout = ''
       let stderr = ''
       let truncated = false
@@ -66,17 +71,35 @@ export const bashTool = buildTool<typeof inputSchema, BashOutput>({
         }
         return (buf + chunk.toString()).slice(0, MAX_OUTPUT)
       }
+      // Kill the whole process group (negative pid). Fall back to the single child if the group send
+      // fails (already-exited, or a platform without process groups).
+      const killGroup = (sig: NodeJS.Signals): void => {
+        if (child.pid == null) return
+        try {
+          process.kill(-child.pid, sig)
+        } catch {
+          try {
+            child.kill(sig)
+          } catch {
+            /* already gone */
+          }
+        }
+      }
       const timeout = Math.min(input.timeout_ms ?? input.timeout ?? DEFAULT_TIMEOUT, MAX_TIMEOUT)
       const termTimer = setTimeout(() => {
         timedOut = true
-        child.kill('SIGTERM')
+        killGroup('SIGTERM')
       }, timeout)
-      // Escalate to SIGKILL if the process ignores SIGTERM, else the promise never settles and the
-      // agent loop awaits forever.
-      const killTimer = setTimeout(() => child.kill('SIGKILL'), timeout + KILL_GRACE)
+      // Escalate to SIGKILL if the group ignores SIGTERM, else the promise never settles and the agent
+      // loop awaits forever.
+      const killTimer = setTimeout(() => killGroup('SIGKILL'), timeout + KILL_GRACE)
+      // A caller abort (turn cancel) must reap the whole tree too — the spawn signal only kills the shell.
+      const onAbort = (): void => killGroup('SIGKILL')
+      ctx.signal?.addEventListener('abort', onAbort, { once: true })
       const cleanup = (): void => {
         clearTimeout(termTimer)
         clearTimeout(killTimer)
+        ctx.signal?.removeEventListener('abort', onAbort)
       }
       child.stdout?.on('data', (d: Buffer) => {
         stdout = append(stdout, d)
@@ -86,6 +109,7 @@ export const bashTool = buildTool<typeof inputSchema, BashOutput>({
       })
       child.on('error', (err) => {
         cleanup()
+        killGroup('SIGKILL')
         reject(err)
       })
       child.on('close', (code, signal) => {
