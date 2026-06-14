@@ -8,7 +8,8 @@ import * as agentService from './agent-dispatch'
 import * as memoryService from './memory.service'
 import * as gateOutcomeRepo from '../repos/gate-outcome.repo'
 import { COORDINATOR_VERIFIER_PROMPT, displayName } from '../agent/roles/prompts'
-import { deriveAcceptanceCriteria, route } from './coordinator-route'
+import { deriveAcceptanceCriteria, route, selectLensDimensions } from './coordinator-route'
+import { gitHead, changedPathsSince } from './lens-diff'
 import { describeSnapshot, snapshotWorkspace } from './git-snapshot'
 import { runRoleStep, type RunStepOptions } from './coordinator-step'
 import { ulid } from '../db/id'
@@ -26,12 +27,44 @@ import { ulid } from '../db/id'
 export type GateOutcome = 'pass' | 'fixed' | 'false-positive' | 'unverified' | 'unresolved'
 export type GatedStepResult = Awaited<ReturnType<typeof runRoleStep>> & { gateOutcome?: GateOutcome; gateEvidence?: string }
 
+// M2 shadow recorder (gate-b-multilens §3.2). Diffs the implementer's real changes, selects lens dimensions
+// (path + semantic LLM trigger), and writes a row_kind='lens' outcome='shadow' row per selected dimension —
+// the precision/recall measurement BEFORE lenses actually run (M3). Fully best-effort: never throws, never
+// touches the floor verdict. countByLens reads these shadow rows; the floor pass-rate excludes row_kind='lens'.
+async function recordShadowLenses(opts: RunStepOptions, roleId: string, stepId: string, baseRef: string, baseChanged: string[], task: string, signal?: AbortSignal): Promise<void> {
+  try {
+    const after = await changedPathsSince(opts.cwd, baseRef)
+    const before = new Set(baseChanged)
+    const changed = after.filter((p) => !before.has(p)) // ONLY this step's delta — de-contaminate prior pipeline steps
+    if (changed.length === 0) return
+    const selected = await selectLensDimensions(changed, task, signal)
+    for (const lens of selected) {
+      try {
+        gateOutcomeRepo.record({ convId: opts.convId, gate: 'B', roleId, outcome: 'shadow', rounds: 0, evidence: `[shadow:${lens.source}] ${lens.why}`, rowKind: 'lens', stepId, lens: lens.key })
+      } catch {
+        /* stats are best-effort */
+      }
+    }
+    if (selected.length) {
+      console.log(`[gate-b/multilens shadow] step ${stepId}: ${selected.length} lens(es) — ${selected.map((s) => `${s.key}(${s.source})`).join(', ')} over ${changed.length} changed path(s)`)
+    }
+  } catch (e) {
+    console.warn('[gate-b/multilens shadow] failed (non-blocking):', e instanceof Error ? e.message : e)
+  }
+}
+
 export async function runGatedRoleStep(roleId: string, prompt: string, opts: RunStepOptions, gate: { enabled: boolean; originalPrompt: string; approvedPlan?: string; acceptance?: string[] }, signal?: AbortSignal): Promise<GatedStepResult> {
   if (!gate.enabled) return runRoleStep({ ...opts, roleId, prompt, signal: signal ?? opts.signal })
 
   // One ulid per gated step — links this step's floor row (and, post-M3/M4, its lens/aggregate rows) in
   // gate_outcomes (gate-b-multilens §6). M1: only the floor row is written, tagged rowKind='floor'.
   const stepId = ulid()
+  // M2 (gate-b-multilens §3.2): record the implementer's STARTING commit + the paths ALREADY changed before
+  // it runs (prior pipeline steps share one cwd with no commit between them + any pre-existing user edits),
+  // so the content trigger can attribute ONLY this step's delta — not the union of all prior steps. Shadow
+  // mode — selection is recorded for precision/recall; lenses don't run.
+  const baseRef = await gitHead(opts.cwd)
+  const baseChanged = await changedPathsSince(opts.cwd, baseRef)
   // Acceptance criteria, derived ONCE here and handed verbatim to implementer + verifier + fail handler
   // (one source of "what correct means" for the whole gated step). Empty on any failure → the gate runs
   // exactly as before. Outcome recording (gate_outcomes) is equally best-effort: stats must never be
@@ -61,6 +94,11 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
     result = await runRoleStep({ ...baseOpts, permissionMode: 'plan' })
   }
   gate.approvedPlan = result.text
+
+  // M2 SHADOW (gate-b-multilens §3.2): select the lens dimensions this diff implicates and RECORD them
+  // (row_kind='lens', outcome='shadow') for precision/recall — fire-and-forget, never blocks or alters the
+  // floor verdict. M3 turns these into real parallel lens verifiers.
+  void recordShadowLenses(opts, roleId, stepId, baseRef, baseChanged, gate.originalPrompt, signal)
 
   // Gate B is an INDEPENDENT quality check, not a coordinator-driven fix loop: the implementer already
   // self-tests inside its own agent loop, so no blanket "retry N times" here. One verification of the

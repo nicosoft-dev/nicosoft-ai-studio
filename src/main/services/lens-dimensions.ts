@@ -145,3 +145,31 @@ export const MAX_LENS_DIMENSIONS = LENS_DIMENSIONS.length
 export function lensDimensionMeta(key: string): LensDimensionMeta | null {
   return LENS_DIMENSIONS.find((d) => d.key === key) ?? null
 }
+
+// Token-boundary path-hint match (§3.2). A plain-token hint ('ddl', 'auth') must equal a path SEGMENT
+// exactly — so 'ddl' never fires on 'mi(ddl)eware'. A file-pattern hint (one containing . _ / -, e.g.
+// '_test' / '.spec.') matches as a substring of the full lowercased path. This is the matcher discipline
+// the M0 review flagged as M2's responsibility.
+function hintMatchesPath(hint: string, segments: readonly string[], lowerPath: string): boolean {
+  if (/[._/-]/.test(hint)) return lowerPath.includes(hint) // file-pattern hint ('_test', '.spec.')
+  // Long plain tokens (>=6) match a segment as a SUBSTRING so plurals/variants count ('migration' →
+  // 'migrations', 'schema' → 'schemas'); short tokens (<6) must EQUAL a segment, so 'ddl' can't fire on
+  // 'middleware' and 'api' can't fire on 'rapid'.
+  if (hint.length >= 6) return segments.some((s) => s.includes(hint))
+  return segments.includes(hint)
+}
+
+// Path-only (zero-LLM) dimension selection (§3.2): which dimensions the changed file PATHS implicate.
+// Deterministic; the semantic LLM trigger (coordinator-route.selectLensDimensions) layers on top to catch
+// risk that lives in a small logic diff rather than the path. Deduped by key.
+export function selectDimensionsByPath(changedPaths: readonly string[]): LensDimension[] {
+  const hit = new Set<LensDimension>()
+  for (const path of changedPaths) {
+    const lower = path.toLowerCase()
+    const segments = lower.split(/[/._\-]+/).filter(Boolean)
+    for (const dim of LENS_DIMENSIONS) {
+      if (!hit.has(dim.key) && dim.pathHints.some((h) => hintMatchesPath(h, segments, lower))) hit.add(dim.key)
+    }
+  }
+  return [...hit]
+}

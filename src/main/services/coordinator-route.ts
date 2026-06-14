@@ -17,6 +17,7 @@ import { chatOnce } from './llm-once'
 import { resolveDepth } from '../llm/thinking'
 import type { ChatMessage } from '../llm/types'
 import { COORDINATOR_ROUTER_PROMPT, DISPATCHABLE_ROLE_IDS, displayName, roleIdFromName } from '../agent/roles/prompts'
+import { LENS_DIMENSIONS, LENS_DIMENSION_KEYS, selectDimensionsByPath, type LensDimension } from './lens-dimensions'
 import type { RouteDecision } from './coordinator-types'
 
 const ROUTER_HISTORY_LIMIT = 4 // last N messages handed to the router for context
@@ -193,6 +194,75 @@ export async function deriveAcceptanceCriteria(task: string, signal?: AbortSigna
     console.warn('[coordinator] acceptance-criteria derivation failed (gate runs without criteria):', e instanceof Error ? e.message : e)
     return []
   }
+}
+
+// --- Multi-lens Gate B content trigger (gate-b-multilens §3.2 / M2) --------------------------------------
+
+export interface SelectedLens {
+  key: LensDimension
+  why: string
+  source: 'path' | 'llm'
+}
+
+const LENS_TRIGGER_INSTRUCTION = `You decide which independent verification LENSES a code change needs, BEYOND the standard correctness review that already runs. Pick ZERO OR MORE dimensions from this CLOSED list — only ones a real, pointable risk in THIS diff justifies:
+${LENS_DIMENSIONS.map((d) => `- ${d.key}: ${d.focus}`).join('\n')}
+
+Return ONLY a JSON array of {"key":"<a dimension key from the list>","why":"<one line citing a file or concrete reason this diff risks that dimension>"}. Choose a dimension ONLY when the diff genuinely risks it; an empty array [] is the right answer for a low-risk change. NEVER invent a key outside the list. Output ONLY the JSON array — no prose, no markdown fence.`
+
+// Semantic layer of the content trigger: an LLM picks dimensions whose risk lives in the diff's MEANING,
+// not its path (e.g. tightening a token check in a generically-named middleware file). Keys are validated
+// against the closed enum in CODE (LENS_DIMENSION_KEYS) — the model proposes, code dedups. Best-effort:
+// any failure → [] (path layer still stands). Mirrors deriveAcceptanceCriteria's binding/chatOnce/try-catch.
+async function deriveSemanticLensDimensions(changedPaths: string[], task: string, signal?: AbortSignal): Promise<{ key: LensDimension; why: string }[]> {
+  const binding = rolesService.getBinding('coordinator')
+  if (!binding?.endpointId || !binding.model) return []
+  const ep = endpointRepo.getById(binding.endpointId)
+  if (!ep || !ep.enabled) return []
+  const apiKey = keychain.getApiKey(binding.endpointId)
+  if (!apiKey) return []
+  try {
+    const fileList = changedPaths.slice(0, 100).join('\n')
+    const text = await chatOnce(ep, apiKey, binding.model, [
+      { role: 'user', content: `${LENS_TRIGGER_INSTRUCTION}\n\nTask:\n${task.slice(0, 4000)}\n\nChanged files:\n${fileList}` }
+    ], { signal })
+    const start = text.indexOf('[')
+    const end = text.lastIndexOf(']')
+    if (start < 0 || end <= start) return []
+    const arr = JSON.parse(text.slice(start, end + 1)) as unknown
+    if (!Array.isArray(arr)) return []
+    const seen = new Set<LensDimension>()
+    const out: { key: LensDimension; why: string }[] = []
+    for (const item of arr) {
+      const key = (item as { key?: unknown })?.key
+      const why = (item as { why?: unknown })?.why
+      if (typeof key === 'string' && LENS_DIMENSION_KEYS.has(key as LensDimension) && !seen.has(key as LensDimension)) {
+        seen.add(key as LensDimension)
+        out.push({ key: key as LensDimension, why: typeof why === 'string' ? why.trim().slice(0, 200) : '' })
+      }
+    }
+    return out
+  } catch (e) {
+    console.warn('[coordinator] lens-trigger derivation failed (path layer only):', e instanceof Error ? e.message : e)
+    return []
+  }
+}
+
+// Pure docs / prose / license changes carry no code risk — used by the §3.2 structural cost pre-filter to
+// short-circuit BEFORE spending the semantic LLM trigger. A diff where EVERY path is no-risk skips the LLM.
+const NO_RISK_PATH = /(\.md|\.markdown|\.txt|\.rst)$|(^|\/)docs\/|(^|\/)(LICENSE|CHANGELOG|README)/i
+
+// Which lens dimensions a real diff implicates. Path layer is deterministic (zero LLM); the semantic layer
+// (LLM trigger) catches risk in a small logic diff the path can't reveal. Best-effort: a failed/empty LLM
+// layer leaves the path-layer result. Deduped by key (path entry wins). Structural cost pre-filter (§3.2):
+// an empty diff, or one where EVERY changed path is no-risk (docs/prose), short-circuits in CODE — no LLM
+// spend. A single code-bearing path (e.g. a generically-named middleware .ts) still reaches the LLM trigger,
+// so the flagship "semantic risk in a small logic diff" case is preserved.
+export async function selectLensDimensions(changedPaths: string[], task: string, signal?: AbortSignal): Promise<SelectedLens[]> {
+  const out: SelectedLens[] = selectDimensionsByPath(changedPaths).map((key) => ({ key, why: 'changed-path match', source: 'path' as const }))
+  if (changedPaths.length === 0 || changedPaths.every((p) => NO_RISK_PATH.test(p))) return out
+  const llm = await deriveSemanticLensDimensions(changedPaths, task, signal)
+  for (const d of llm) if (!out.some((o) => o.key === d.key)) out.push({ ...d, source: 'llm' })
+  return out
 }
 
 export function isNonTrivialTask(prompt: string): boolean {
