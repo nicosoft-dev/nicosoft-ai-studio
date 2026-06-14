@@ -150,6 +150,7 @@ export const useChat = create<ChatState>((set, get) => {
           cur.text = d.text // done is authoritative
           if (typeof d.inputTokens === 'number') cur.inputTokens = d.inputTokens
           if (typeof d.usage?.outTokens === 'number') cur.outputTokens = d.usage.outTokens
+          if (typeof d.usage?.inTokens === 'number') cur.sentTokens = d.usage.inTokens
         }
         return {
           byConversation: { ...s.byConversation, [meta.convId]: msgs },
@@ -161,7 +162,7 @@ export const useChat = create<ChatState>((set, get) => {
       if (typeof ctxTok === 'number')
         set((s) => ({ contextTokens: { ...s.contextTokens, [meta.convId]: ctxTok } }))
       void window.api.conversations
-        .append(meta.convId, { author: 'expert', expertId: meta.expertId, model: meta.model, content: d.text, inputTokens: ctxTok, outputTokens: d.usage?.outTokens })
+        .append(meta.convId, { author: 'expert', expertId: meta.expertId, model: meta.model, content: d.text, inputTokens: ctxTok, outputTokens: d.usage?.outTokens, sentTokens: d.usage?.inTokens })
         .then(() => get().loadConversations())
       void window.api.memory.onTurn({ convId: meta.convId, roleId: meta.expertId, endpointId: meta.endpointId, model: meta.model })
       void window.api.chat.compress({ convId: meta.convId, roleId: meta.expertId, endpointId: meta.endpointId, model: meta.model, currentTokens: ctxTok })
@@ -334,6 +335,7 @@ export const useChat = create<ChatState>((set, get) => {
           cur.streaming = false
           if (typeof d.inputTokens === 'number') cur.inputTokens = d.inputTokens
           if (typeof d.outputTokens === 'number') cur.outputTokens = d.outputTokens
+          if (typeof d.sentTokens === 'number') cur.sentTokens = d.sentTokens // SETTLE ↑: cumulative total sent this run
         }
         return {
           byConversation: { ...s.byConversation, [meta.convId]: msgs },
@@ -468,7 +470,7 @@ export const useChat = create<ChatState>((set, get) => {
         // isn't necessarily this step's. step:done text is authoritative over the delta accumulator.
         for (let i = msgs.length - 1; i >= 0; i--) {
           if (msgs[i].role === 'assistant' && msgs[i].streaming && msgs[i].expertId === d.roleId) {
-            msgs[i] = { ...msgs[i], text: d.text, streaming: false, ...(typeof d.inputTokens === 'number' ? { inputTokens: d.inputTokens } : {}), ...(typeof d.outputTokens === 'number' ? { outputTokens: d.outputTokens } : {}) }
+            msgs[i] = { ...msgs[i], text: d.text, streaming: false, ...(typeof d.inputTokens === 'number' ? { inputTokens: d.inputTokens } : {}), ...(typeof d.outputTokens === 'number' ? { outputTokens: d.outputTokens } : {}), ...(typeof d.sentTokens === 'number' ? { sentTokens: d.sentTokens } : {}) }
             break
           }
         }
@@ -727,7 +729,8 @@ export const useChat = create<ChatState>((set, get) => {
           dispatch: m.dispatch,
           inputTokens: m.author !== 'user' && m.inputTokens > 0 ? m.inputTokens : undefined,
           cacheReadTokens: m.author !== 'user' && m.cacheReadTokens > 0 ? m.cacheReadTokens : undefined,
-          outputTokens: m.author !== 'user' && m.outputTokens > 0 ? m.outputTokens : undefined
+          outputTokens: m.author !== 'user' && m.outputTokens > 0 ? m.outputTokens : undefined,
+          sentTokens: m.author !== 'user' && m.sentTokens > 0 ? m.sentTokens : undefined
         }
       })
       // Seed the composer readout from the most recent assistant turn's measured prompt tokens.

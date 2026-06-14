@@ -34,9 +34,10 @@ export interface ChatMessage {
   // and draw a single dispatch badge spanning consecutive same-chain messages.
   expertId?: string | null
   dispatch?: string[] | null
-  inputTokens?: number // measured prompt (sent) tokens for THIS turn — per-message so collab experts each show their own; drives the finalized readout
+  inputTokens?: number // CURRENT context size for THIS turn (count_tokens) — per-message so collab experts each show their own; drives the composer "/ window" meter, NOT the settlement total
   cacheReadTokens?: number // cache-read share of inputTokens for THIS turn (persisted via MessageDto) — drives the finalized "(+N cached)" note after the live overlay clears + across reloads
-  outputTokens?: number // real output tokens for THIS turn (upstream usage) — finalized ↓ readout once the turn completes
+  outputTokens?: number // real output tokens for THIS turn (upstream usage) — finalized ↓ readout; SETTLE: summed for the run's ↓ total
+  sentTokens?: number // cumulative billing input (incl. cache) actually SENT for THIS turn — SETTLE: summed for the run's ↑ total at segment end (persisted via MessageDto)
   liveInputTokens?: number // coordinator only: live ↑ for THIS segment while it streams (per-message, so concurrent segments don't all read the conv-level overlay — BUG 2). step:done supersedes it with inputTokens.
   liveOutputTokens?: number // coordinator only: live ↓ for THIS segment while it streams
   liveCachedTokens?: number // cache-read share of liveInputTokens — drives the Codex-style ↑ split (fresh main number + "(+N cached)")

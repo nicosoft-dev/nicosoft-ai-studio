@@ -62,9 +62,10 @@ CREATE TABLE IF NOT EXISTS messages (
   model           TEXT,
   content         TEXT NOT NULL DEFAULT '',
   attachments     TEXT NOT NULL DEFAULT '[]',     -- JSON
-  in_tokens       INTEGER NOT NULL DEFAULT 0,
+  in_tokens       INTEGER NOT NULL DEFAULT 0,    -- DISPLAY: current context size (last turn) — composer "/ window" meter
   cache_read_tokens INTEGER NOT NULL DEFAULT 0,
-  out_tokens      INTEGER NOT NULL DEFAULT 0,
+  out_tokens      INTEGER NOT NULL DEFAULT 0,    -- SETTLE ↓: cumulative output (total received) for the segment
+  sent_tokens     INTEGER NOT NULL DEFAULT 0,    -- SETTLE ↑: cumulative input (total sent, billing) for the segment
   dispatch        TEXT,                           -- JSON string[] | null
   run_id          TEXT,                           -- agent run id (Engineer); links to transcript. null for plain chat
   created_at      TEXT NOT NULL,

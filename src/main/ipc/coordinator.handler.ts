@@ -76,8 +76,8 @@ export function registerCoordinatorHandlers(): void {
             const ev: CoordinatorStepDelta = { streamId, roleId, text }
             send('coordinator:delta', ev)
           },
-          onStepDone: (roleId, text, inputTokens, outputTokens) => {
-            const ev: CoordinatorStepDone = { streamId, roleId, text, inputTokens, outputTokens }
+          onStepDone: (roleId, text, inputTokens, outputTokens, sentTokens) => {
+            const ev: CoordinatorStepDone = { streamId, roleId, text, inputTokens, outputTokens, sentTokens }
             send('coordinator:step:done', ev)
           },
           // The coordinator fires onUsage from up-front count_tokens (input only → current context, the "/

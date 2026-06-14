@@ -225,11 +225,12 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
         dispatch: dispatch ?? undefined,
         inputTokens: res.contextTokens, // DISPLAY: current context size (last turn, not accumulated). Billing below uses total.
         cacheReadTokens: res.cacheReadTokens, // cache-read share of that last turn — persistent "(+N cached)" note
-        outputTokens: res.outTokens
+        outputTokens: res.outTokens,
+        sentTokens: res.inTokens // SETTLE ↑: cumulative billing input for the whole agent loop (total sent this turn)
       })
     }
     usageRepo.record({ conversationId: convId, expertId: roleId, model: binding.model, provider: ep.protocol, inTokens: res.inTokens, outTokens: res.outTokens })
-    cb.onStepDone(roleId, text, res.contextTokens, res.outTokens)
+    cb.onStepDone(roleId, text, res.contextTokens, res.outTokens, res.inTokens)
     // inputTokens returned to the caller = CURRENT context size (last turn's prompt) — same as the persisted
     // message (line 216), onStepDone, the tool-less return below, and agent.service. It feeds the "/ window"
     // meter + compression threshold, NOT the cumulative loop total (res.inTokens, already recorded for billing
@@ -319,11 +320,12 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
       content: text,
       dispatch: dispatch ?? undefined,
       inputTokens,
-      outputTokens: result.usage.outTokens
+      outputTokens: result.usage.outTokens,
+      sentTokens: result.usage.inTokens // SETTLE ↑: this turn's upstream input usage = total sent (single round trip)
     })
   }
   usageRepo.record({ conversationId: convId, expertId: roleId, model: binding.model, provider: ep.protocol, inTokens: result.usage.inTokens, outTokens: result.usage.outTokens })
-  cb.onStepDone(roleId, text, inputTokens, result.usage.outTokens)
+  cb.onStepDone(roleId, text, inputTokens, result.usage.outTokens, result.usage.inTokens)
 
   return { text, inputTokens, outputTokens: result.usage.outTokens, endpointId: binding.endpointId, model: binding.model }
 }

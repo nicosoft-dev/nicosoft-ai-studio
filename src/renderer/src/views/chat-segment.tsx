@@ -269,14 +269,15 @@ export function ChatSegment({
   useEffect(() => {
     if (windowed && bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight
   }, [last.text, last.tools?.length, last.servers?.length, last.streaming, msgs.length, windowed])
-  // Finished-run token summary: ↓ totals the whole run's output; ↑ is the newest call's prompt size
-  // (each call's input already includes the prior context — summing inputs would overstate).
+  // Finished-run SETTLEMENT summary: this turn is over, so report the cumulative totals for the whole run —
+  // ↓ totals every message's output, ↑ totals every message's SENT input (sentTokens). Per-message
+  // sentTokens is the cumulative billing input — cache included — for that message's own LLM loop, so
+  // summing across a run's messages is the genuine grand total sent upstream, NOT a re-count of shared
+  // context. Do NOT sum inputTokens for ↑: that's per-turn CURRENT context (re-includes history each turn),
+  // and summing it balloons to millions (guard: git 360c2fe). inputTokens stays the composer "/ window"
+  // meter's job (current context), untouched here.
   const sumOut = msgs.reduce((n, m) => n + (m.outputTokens ?? 0), 0)
-  const lastInMsg = [...msgs].reverse().find((m) => m.inputTokens)
-  const lastIn = lastInMsg?.inputTokens
-  // Cache-read share of that same last turn: the persisted value after reload, else the live overlay
-  // captured during streaming (segment messages carry liveCachedTokens; it isn't cleared at turn end).
-  const lastCached = (lastInMsg?.cacheReadTokens ?? lastInMsg?.liveCachedTokens) || 0
+  const sumSent = msgs.reduce((n, m) => n + (m.sentTokens ?? 0), 0)
   return (
     <div className={'segment' + (isUser ? ' user' : '')} style={{ '--seg-color': segColor } as CSSProperties}>
       <div className="seg-head">
@@ -316,8 +317,10 @@ export function ChatSegment({
           // Coordinator segments carry their own live ↑/↓ (per-message) so concurrent segments don't all show
           // the conv-level total; single chat/agent turns have no per-message live → fall back to the conv prop.
           <ThinkingReadout chars={last.text.length} inputTokens={last.liveInputTokens ?? inputTokens} outputTokens={last.liveOutputTokens ?? outputTokens} cachedTokens={last.liveInputTokens !== undefined ? (last.liveCachedTokens ?? 0) : cachedTokens} activity={segmentActivity(last.tools)} />
-        ) : !isUser && (lastIn || sumOut) ? (
-          <TokenSummary inputTokens={lastIn} outputTokens={sumOut || undefined} cachedTokens={lastCached} />
+        ) : !isUser && (sumSent || sumOut) ? (
+          // Settlement: ↑ and ↓ are BOTH cumulative for the run. No fresh/cached split here — sentTokens
+          // already folds cache reads into the total sent, and we don't track a cumulative cache-read sum.
+          <TokenSummary inputTokens={sumSent || undefined} outputTokens={sumOut || undefined} cachedTokens={0} />
         ) : null}
       </div>
     </div>

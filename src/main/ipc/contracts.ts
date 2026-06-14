@@ -288,6 +288,7 @@ export interface AgentDone {
   turns: number
   inputTokens?: number // exact prompt context for this run (count_tokens), drives the composer readout
   outputTokens?: number // real output tokens (upstream usage) — corrects the live chars/4 estimate at end
+  sentTokens?: number // cumulative billing input across the whole loop (total SENT) — drives the run's ↑ settlement total
 }
 export interface AgentErrorDto {
   streamId: string
@@ -362,6 +363,7 @@ export interface CoordinatorStepDone {
   text: string
   inputTokens: number
   outputTokens?: number // real output tokens for this step — corrects the live ↓ estimate at step end
+  sentTokens?: number // cumulative billing input (total SENT) for this step — drives the run's ↑ settlement total
 }
 export interface CoordinatorDoneDto {
   streamId: string
@@ -562,9 +564,10 @@ export interface MessageDto {
   content: string
   attachments: MessageAttachmentDto[]
   runId: string | null // agent run id (Engineer); null for plain chat
-  inputTokens: number // exact prompt context counted before this turn was sent (0 if unknown)
+  inputTokens: number // exact prompt context counted before this turn was sent (0 if unknown) — drives the composer "/ window" meter (CURRENT context, overwritten each turn)
   cacheReadTokens: number // cache-read share of inputTokens for this turn (0 if none / unknown) — persistent "(+N cached)" note
-  outputTokens: number // real output tokens for this turn (0 if unknown / user message)
+  outputTokens: number // real output tokens for this turn (0 if unknown / user message) — SETTLE: summed for the ↓ total at segment end
+  sentTokens: number // cumulative billing input for this turn incl. cache (0 if unknown / user message) — SETTLE: summed for the ↑ total at segment end
   dispatch: string[] | null // coordinator pipeline chain; null for single-expert / direct chat / agent turns
   createdAt: string
 }
@@ -578,6 +581,7 @@ export interface MessageAppendDto {
   inputTokens?: number // exact prompt context for this turn (assistant messages)
   cacheReadTokens?: number // cache-read share of inputTokens (assistant messages)
   outputTokens?: number // real output tokens for this turn (assistant messages)
+  sentTokens?: number // cumulative billing input incl. cache (assistant messages) — total-sent settlement
   dispatch?: string[] // set by coordinator.service for pipeline steps; renderer reads it via MessageDto.dispatch
 }
 export interface ConversationTitleInput {

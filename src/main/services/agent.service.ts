@@ -40,7 +40,7 @@ export async function run(
   input: AgentRunInput,
   cb: AgentCallbacks,
   signal: AbortSignal,
-): Promise<{ reason: string; turns: number; convId: string; runId: string; promptTokens: number; outputTokens: number }> {
+): Promise<{ reason: string; turns: number; convId: string; runId: string; promptTokens: number; outputTokens: number; sentTokens: number }> {
   const ep = endpointRepo.getById(input.endpointId)
   if (!ep) throw new LlmError('bad_request', 'endpoint not found')
   // The agent loop speaks Anthropic Messages (/v1/messages), OpenAI Responses (/v1/responses), or Gemini
@@ -157,6 +157,7 @@ export async function run(
       inputTokens: loopRes.contextTokens, // DISPLAY: current context size (last turn's prompt, NOT accumulated). usage_events below keeps the accumulated total for billing.
       cacheReadTokens: loopRes.cacheReadTokens, // cache-read share of that last turn — drives the persistent "(+N cached)" note
       outputTokens: loopRes.outTokens,
+      sentTokens: loopRes.inTokens, // SETTLE ↑: cumulative billing input across the whole agent loop (total sent this turn)
     })
   }
 
@@ -187,7 +188,7 @@ export async function run(
     })
     .catch(() => {})
 
-  return { reason: loopRes.reason, turns: loopRes.turns, convId, runId, promptTokens, outputTokens: loopRes.outTokens }
+  return { reason: loopRes.reason, turns: loopRes.turns, convId, runId, promptTokens, outputTokens: loopRes.outTokens, sentTokens: loopRes.inTokens }
 }
 
 // Rebuild tool cards from a conversation's transcript, grouped by run_id. The renderer calls this when
