@@ -6,6 +6,7 @@
 import * as rolesService from './roles.service'
 import * as agentService from './agent-dispatch'
 import * as memoryService from './memory.service'
+import * as settingsService from './settings.service'
 import * as gateOutcomeRepo from '../repos/gate-outcome.repo'
 import { COORDINATOR_VERIFIER_PROMPT, lensVerifierPrompt, displayName } from '../agent/roles/prompts'
 import { deriveAcceptanceCriteria, route, selectLensDimensions } from './coordinator-route'
@@ -89,6 +90,12 @@ interface LensVerdict {
 
 async function runLenses(roleId: string, opts: RunStepOptions, gate: { originalPrompt: string; approvedPlan?: string; acceptance?: string[] }, implementationText: string, stepId: string, baseRef: string, baseChanged: string[], signal?: AbortSignal): Promise<LensVerdict[]> {
   try {
+    // M5 kill-switch / A/B baseline (gate-b-multilens §10): the multi-lens amplifier defaults ON; setting
+    // `gateB.multiLens.enabled` to false falls back to floor-only — this IS the §10 red-line "B fails →
+    // revert" mechanism, and the way to run a floor-only A/B baseline. INSIDE the try so a settings-read fault
+    // (e.g. a corrupt KV value) degrades to floor-only ([]) rather than breaking the gated step — floor is
+    // unaffected either way. Cheap KV lookup per gated step.
+    if (settingsService.get<boolean>('gateB.multiLens.enabled') === false) return []
     const after = await changedPathsSince(opts.cwd, baseRef)
     const before = new Set(baseChanged)
     const changed = after.filter((p) => !before.has(p)) // ONLY this step's delta — de-contaminate prior pipeline steps
@@ -243,6 +250,10 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
     const outcome: GateOutcome = verdict.skipped ? 'unverified' : 'pass'
     recordOutcome(outcome, 1, verdict.feedback)
     for (const lv of lensVerdicts) recordLensOutcome(lv.key, 'pass', lv.feedback) // passing lens rows
+    // An ALL-GREEN multi-lens step still gets an aggregate row (=outcome) so the M5 A/B reader counts it as an
+    // amplified step — the denominator. A pure floor-only step (NO lens ran) gets NO aggregate row: it stays a
+    // lone floor row, byte-identical to the single-verifier era (the lensVsFloor join simply doesn't see it).
+    if (lensVerdicts.length > 0) recordAggregate(outcome, 1, verdict.feedback)
     return { ...result, inputTokens, outputTokens, gateOutcome: outcome, gateEvidence: verdict.skipped ? verdict.feedback : undefined }
   }
 
@@ -305,7 +316,11 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
   const aggregate = worstOf([floorDomainOutcome, ...lensOutcomes])
   let aggregateEvidence = closures.map((c) => `[${c.kind === 'lens' ? `${c.key} lens` : 'floor'} — ${c.outcome}] ${c.evidence}`).join('\n\n') || verdict.feedback
   if (aggregate === 'unresolved' && snap?.sha) aggregateEvidence += `\n[Pre-fix workspace snapshot available — ${describeSnapshot(snap)}]`
-  recordAggregate(aggregate, closures.length + 1, aggregateEvidence)
+  // Aggregate row ONLY for steps that actually ran lenses: a floor-only FAIL→closure step (kill-switch off /
+  // no changed paths / no independent verifier / degraded fan-out → lensVerdicts=[]) has no lens to compare
+  // against, so recording an aggregate would over-count it as "amplified" in the M5 A/B denominator and break
+  // the "a pure floor-only step gets no aggregate row" invariant. Its floor row already carries the outcome.
+  if (lensVerdicts.length > 0) recordAggregate(aggregate, closures.length + 1, aggregateEvidence)
   console.log(`[coordinator] gate-b closure floor=${floorDomainOutcome} lenses=[${lensOutcomes.join(',')}] aggregate=${aggregate}`)
 
   // Learning loop: distill each domain's confirmed fix / proven false positive (fire-and-forget). 'unresolved'

@@ -102,6 +102,20 @@ export function getSummary(): AnalyticsSummary {
   }
   const verifByExpert = [...byRoleMap.entries()].map(([id, e]) => ({ id, ...e })).sort((a, b) => b.total - a.total)
 
+  // M5 multi-lens A/B snapshot (gate-b-multilens §10): the amplifier's measured impact, read off the built-in
+  // floor/lens/aggregate row split (no separate experiment). caughtBeyondFloor = the headline A-signal (the
+  // floor passed but a lens flagged → multi-lens caught what floor-only would have shipped); lensFalseReds =
+  // the B-signal (lens false positives — the red-line cost). lensCatches = lens-found defects that got fixed.
+  const lensVsFloorRows = gateOutcomeRepo.lensVsFloor()
+  const lensDimRows = gateOutcomeRepo.countByLens()
+  const sum = <T>(rows: T[], pick: (r: T) => number): number => rows.reduce((s, r) => s + pick(r), 0)
+  const lensImpact = {
+    steps: sum(lensVsFloorRows, (r) => r.v),
+    caughtBeyondFloor: sum(lensVsFloorRows.filter((r) => r.floorOutcome === 'pass' && r.aggregateOutcome !== 'pass'), (r) => r.v),
+    lensCatches: sum(lensDimRows.filter((r) => r.outcome === 'fixed'), (r) => r.v),
+    lensFalseReds: sum(lensDimRows.filter((r) => r.outcome === 'false-positive'), (r) => r.v)
+  }
+
   return {
     usage: {
       tokensToday: tToday.i + tToday.o,
@@ -116,7 +130,7 @@ export function getSummary(): AnalyticsSummary {
     },
     memory: { total: memTotal, perExpert, layers, learning: { approved, corrected, byWeek } },
     activity: { byDay: actByDay, mostActive, tools: scanToolsToday(), peakHours },
-    verification: { gateB, gateC, byExpert: verifByExpert }
+    verification: { gateB, gateC, byExpert: verifByExpert, lensImpact }
   }
 }
 

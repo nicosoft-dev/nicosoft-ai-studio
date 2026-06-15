@@ -83,8 +83,34 @@ export interface LensGateCount {
 
 // Gate B per-dimension lens outcome counts — the per-dimension miss-tracking source (gate-b-multilens §6,
 // the §5.2 prerequisite for any panel). Reads ONLY row_kind='lens' rows, kept out of the floor pass-rate.
+// In the M5 A/B reading, a lens row's outcome tells real-catch from false-red: 'fixed' = the lens caught a
+// real defect that got fixed; 'false-positive' = a FALSE RED (the §10 red-line B cost to watch).
 export function countByLens(): LensGateCount[] {
   return getDb()
     .prepare(`SELECT role_id roleId, lens, outcome, COUNT(*) v FROM gate_outcomes WHERE gate = 'B' AND row_kind = 'lens' AND lens IS NOT NULL GROUP BY role_id, lens, outcome`)
     .all() as unknown as LensGateCount[]
+}
+
+export interface LensImpactRow {
+  floorOutcome: string
+  aggregateOutcome: string
+  v: number
+}
+
+// Multi-lens A/B impact (gate-b-multilens §10 M5): join the floor row (the floor-only baseline outcome) to the
+// aggregate row (the multi-lens step result) for the SAME step. The headline A/B signal is the cell where
+// floorOutcome='pass' but aggregateOutcome≠'pass' — the multi-lens amplifier caught a real concern the
+// floor-only baseline would have shipped. Reads ONLY steps that ran lenses (an aggregate row exists); the
+// floor pass-rate readers above are untouched. NO new tracking table — the M1-M4 row_kind split IS the A/B
+// fixture (floor row = baseline, aggregate row = amplified), so the comparison is built-in, not bolted on.
+export function lensVsFloor(): LensImpactRow[] {
+  return getDb()
+    .prepare(
+      `SELECT f.outcome floorOutcome, a.outcome aggregateOutcome, COUNT(*) v
+       FROM gate_outcomes a
+       JOIN gate_outcomes f ON f.step_id = a.step_id AND f.row_kind = 'floor'
+       WHERE a.gate = 'B' AND a.row_kind = 'aggregate'
+       GROUP BY f.outcome, a.outcome`
+    )
+    .all() as unknown as LensImpactRow[]
 }

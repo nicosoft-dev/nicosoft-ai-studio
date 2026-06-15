@@ -200,6 +200,11 @@ export interface AnalyticsSummary {
     gateB: { outcome: string; v: number }[]
     gateC: { outcome: string; v: number }[] // background e2e verdicts: PASS / FAIL / BLOCKED / SKIP
     byExpert: { id: string; total: number; ok: number }[] // Gate B per implementer; ok = pass+fixed+false-positive
+    // M5 multi-lens A/B snapshot (gate-b-multilens §10), computed from the built-in floor/lens/aggregate row
+    // split — no separate experiment run. steps = gated steps that ran lenses; caughtBeyondFloor = steps the
+    // floor-only baseline would have shipped (floor pass) but a lens flagged; lensCatches = lens-found defects
+    // that got fixed; lensFalseReds = lens false positives (the §10 red-line B cost to watch).
+    lensImpact: { steps: number; caughtBeyondFloor: number; lensCatches: number; lensFalseReds: number }
   }
 }
 // A tool the model just started calling — streamed the moment the call begins, before the turn

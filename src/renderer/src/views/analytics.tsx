@@ -157,6 +157,15 @@ export function StatsPage(): ReactElement {
     const e = expertMeta(r.id)
     return { name: e.name, v: r.total ? r.ok / r.total : 0, val: `${r.ok}/${r.total}`, color: e.color }
   })
+  // M5 multi-lens A/B (gate-b-multilens §10): the amplifier's measured catches vs the floor-only baseline,
+  // read off the built-in floor/lens/aggregate row split. "caught beyond floor" is the A-signal (floor would
+  // have shipped it, a lens flagged); "false reds" is the B-cost (lens false positives).
+  const lensImpact = a.verification.lensImpact
+  const lensRows = [
+    { name: "caught beyond floor", v: lensImpact.caughtBeyondFloor, val: String(lensImpact.caughtBeyondFloor), color: GATE_COLOR.pass },
+    { name: "lens catches", v: lensImpact.lensCatches, val: String(lensImpact.lensCatches), color: GATE_COLOR.fixed },
+    { name: "false reds", v: lensImpact.lensFalseReds, val: String(lensImpact.lensFalseReds), color: GATE_COLOR.unresolved }
+  ].filter((r) => r.v > 0)
   const total = a.usage.conversationsTotal
   const inProgress = Math.min(streamingCount, total)
   const inPct = a.usage.tokensToday > 0 ? Math.round((a.usage.tokensIn / a.usage.tokensToday) * 100) : 0
@@ -258,6 +267,18 @@ export function StatsPage(): ReactElement {
 
           <AnCard title="Pass rate by expert" sub="verified-good / gated">
             {verifRows.length ? <BarList rows={verifRows} max={1} /> : <div className="an-mini-label">No gated runs yet.</div>}
+          </AnCard>
+
+          <AnCard title="Multi-lens amplifier" sub={lensImpact.steps + " amplified"}>
+            {lensImpact.steps ? (
+              lensRows.length ? (
+                <BarList rows={lensRows} />
+              ) : (
+                <div className="an-mini-label">{lensImpact.steps} step(s) amplified — every lens passed, nothing flagged.</div>
+              )
+            ) : (
+              <div className="an-mini-label">No multi-lens runs yet — high-risk code changes trigger extra lenses.</div>
+            )}
           </AnCard>
         </div>
       </div>
