@@ -9,6 +9,7 @@ import { Avatar, NameChip } from '@/components/primitives'
 import type { ChatMessage, MsgBlock, ToolCall } from '@/stores/chat'
 import { ServerBubble, Sources } from '@/components/tool-bubble'
 import { ToolRun } from '@/components/tool-run'
+import { PanelCard } from '@/components/panel-card'
 import { Markdown } from '@/components/markdown'
 import { useT } from '@/stores/locale'
 import type { Expert } from '@/types'
@@ -157,6 +158,13 @@ function RunBody({ msgs, onOpenImage, live }: { msgs: ChatMessage[]; onOpenImage
       }
       const tool = tools.find((tl) => tl.id === b.id)
       if (!tool) return
+      // panel_examine renders as its own dedicated card (§4.4), so it BREAKS the tool fold like text does —
+      // never folded into the generic count summary. Every other tool keeps folding into the ToolRun.
+      if (tool.name === 'PanelExamine') {
+        flushFold(false)
+        out.push(<PanelCard key={`pe${tool.id}`} tool={tool} />)
+        return
+      }
       fold.push(tool)
     })
     if (m.images && m.images.length > 0) {

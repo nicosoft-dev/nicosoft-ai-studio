@@ -240,6 +240,9 @@ export interface AgentSubToolDone {
   name: string
   result?: unknown
   isError?: boolean
+  // Final structured metadata on the done event (panel_examine re-emits a subject's resolved outcome /
+  // refute tally / fixed-by here so the panel card renders the final row without re-parsing prose).
+  input?: unknown
   subAgentId?: string
 }
 export interface AgentResultDto {

@@ -91,12 +91,15 @@ export const applySubToolStart = (message: ChatMessage, parentToolId: string, to
   }
 }
 
-export const applySubToolDone = (message: ChatMessage, parentToolId: string, toolUseId: string, name: string, result: unknown, isError?: boolean): ChatMessage => {
+// `input` on a DONE event carries final structured metadata (panel_examine re-emits a subject's resolved
+// outcome / refute tally / fixed-by here). Most done events omit it → input stays whatever the start set.
+export const applySubToolDone = (message: ChatMessage, parentToolId: string, toolUseId: string, name: string, result: unknown, isError?: boolean, input?: unknown): ChatMessage => {
   const patch: Partial<ToolCall> = {
     name,
     status: isError ? 'error' : 'done',
     result: summarizeValue(result),
   }
+  if (input !== undefined) patch.input = input
   const tools = updateSubTool(message.tools, parentToolId, toolUseId, patch)
   if (tools !== message.tools) return { ...message, tools }
 
@@ -108,7 +111,7 @@ export const applySubToolDone = (message: ChatMessage, parentToolId: string, too
 
   return {
     ...message,
-    tools: [...(message.tools ?? []), { id: toolUseId, name, input: {}, status: isError ? 'error' : 'done', result: summarizeValue(result) }],
+    tools: [...(message.tools ?? []), { id: toolUseId, name, input: input ?? {}, status: isError ? 'error' : 'done', result: summarizeValue(result) }],
     blocks: [...(message.blocks ?? []), { kind: 'tool', id: toolUseId }],
   }
 }

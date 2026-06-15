@@ -228,7 +228,7 @@ export const useChat = create<ChatState>((set, get) => {
         byConversation: {
           ...s.byConversation,
           [meta.convId]: (s.byConversation[meta.convId] ?? []).map((m) =>
-            applySubToolDone(m, d.parentToolId, d.toolUseId, d.name, d.result, d.isError)
+            applySubToolDone(m, d.parentToolId, d.toolUseId, d.name, d.result, d.isError, d.input)
           ),
         },
       }))
@@ -560,7 +560,7 @@ export const useChat = create<ChatState>((set, get) => {
         const msgs = (s.byConversation[meta.convId] ?? []).map((m) => ({ ...m }))
         for (let i = msgs.length - 1; i >= 0; i--) {
           if (msgs[i].role === 'assistant' && msgs[i].expertId === d.roleId) {
-            msgs[i] = applySubToolDone(msgs[i], d.parentToolId, d.toolUseId, d.name, d.result, d.isError)
+            msgs[i] = applySubToolDone(msgs[i], d.parentToolId, d.toolUseId, d.name, d.result, d.isError, d.input)
             break
           }
         }

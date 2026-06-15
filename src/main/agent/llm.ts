@@ -59,7 +59,7 @@ export type AgentLlmEvent =
   | { type: 'tool_use_start'; id: string; name: string }
   | { type: 'tool_use_input'; id: string; delta: string }
   | { type: 'sub_tool_start'; parentToolId: string; toolUseId: string; name: string; input?: Record<string, unknown>; subAgentId?: string }
-  | { type: 'sub_tool_done'; parentToolId: string; toolUseId: string; name: string; result?: unknown; isError?: boolean; subAgentId?: string }
+  | { type: 'sub_tool_done'; parentToolId: string; toolUseId: string; name: string; result?: unknown; isError?: boolean; input?: Record<string, unknown>; subAgentId?: string }
   | { type: 'usage'; inputTokens: number; outputTokens: number; cachedTokens?: number } // in-flight request's REAL usage per chunk; cachedTokens = cache-read share of inputTokens (Codex-style split in the ↑ readout)
   | { type: 'turn-final'; usage: FinalUsage } // exactly-once final usage for accumulation
 

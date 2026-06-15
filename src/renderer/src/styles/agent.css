@@ -144,6 +144,79 @@
   animation: none;
   opacity: 0.45;
 }
+
+/* — panel_examine card (panel-examine §4.4): ONE foldable card, dedicated to panel_examine only. Reuses the
+     breathing .tr-dot (front, running-only) + .tr-chev (right end); no new widgets. Header = agent COUNTS only,
+     never a token sum (the "↑48.1m" balloon root). — */
+.pe-card {
+  margin: 6px 0;
+  border: 1px solid var(--border-1);
+  background: var(--bg-1);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.pe-card.has-flag { border-color: color-mix(in oklch, var(--error) 30%, var(--border-1)); }
+.pe-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--text-3);
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.pe-head:hover { background: var(--bg-2); }
+.pe-name { font-family: var(--mono); color: var(--text-2); font-weight: 600; flex: none; }
+.pe-mode { font-family: var(--mono); color: var(--text-3); flex: none; }
+.pe-sep { color: var(--text-5, var(--text-4)); flex: none; }
+.pe-meta { color: var(--text-4); flex: none; }
+.pe-pass { color: var(--success); flex: none; }
+.pe-fail { color: var(--error); flex: none; }
+.pe-fixed { color: var(--accent); flex: none; }
+.pe-chev { margin-left: auto; }
+.pe-body { border-top: 1px solid var(--border-1); padding: 2px 0; }
+.pe-row-wrap { padding: 0 10px; }
+.pe-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12.5px;
+  min-width: 0;
+}
+.pe-row.queued { opacity: 0.5; }
+.pe-row-dot { width: 6px; height: 6px; }
+.pe-subject { font-family: var(--mono); color: var(--text-2); flex: none; }
+.pe-row.flagged .pe-subject { color: var(--error); }
+.pe-summary {
+  color: var(--text-4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+.pe-verdict {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex: none;
+}
+.pe-verdict.pass { color: var(--success); background: color-mix(in oklch, var(--success) 16%, transparent); }
+.pe-verdict.fail { color: var(--error); background: color-mix(in oklch, var(--error) 16%, transparent); }
+.pe-verdict.fixed { color: var(--accent); background: color-mix(in oklch, var(--accent) 16%, transparent); }
+.pe-verdict.fp { color: var(--text-3); background: var(--bg-2); }
+.pe-verdict.dim { color: var(--text-4); background: var(--bg-2); }
+.pe-viewfull { color: var(--text-4); font-size: 11.5px; cursor: pointer; flex: none; }
+.pe-viewfull:hover { color: var(--text-2); }
+.pe-nested { padding: 0 0 4px 14px; border-left: 1px solid var(--border-1); margin-left: 4px; }
+.pe-nested-line { color: var(--text-4); font-size: 11.5px; padding: 1px 0; }
+.pe-payload { margin: 2px 0 6px; }
 /* Agent-authored Markdown result rendered inside the tool card — pad it like .tb-result and cap height
    so long verdicts scroll instead of stretching the card. */
 .tb-md {

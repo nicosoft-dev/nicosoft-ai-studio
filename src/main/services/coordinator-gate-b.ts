@@ -6,18 +6,21 @@
 import * as rolesService from './roles.service'
 import * as agentService from './agent-dispatch'
 import * as memoryService from './memory.service'
-import * as settingsService from './settings.service'
 import * as gateOutcomeRepo from '../repos/gate-outcome.repo'
-import { COORDINATOR_VERIFIER_PROMPT, subjectExaminePrompt, refutePrompt, displayName } from '../agent/roles/prompts'
-import { deriveAcceptanceCriteria, route, selectSubjects } from './coordinator-route'
+import { displayName } from '../agent/roles/prompts'
+import { deriveAcceptanceCriteria, route } from './coordinator-route'
 import { gitHead, changedPathsSince, buildChangedSet } from './examine/diff'
 import type { WrittenFile } from '../agent/context'
 import { subjectMeta, type ReviewSubject } from './examine/subjects'
-import { runBuildOnce, type SharedBuild } from './examine/build'
-import { parallelExamineLimited } from './examine/pool'
+import { runBuildOnce } from './examine/build'
 import { describeSnapshot, snapshotWorkspace } from './git-snapshot'
 import { runRoleStep, type RunStepOptions } from './coordinator-step'
 import { ulid } from '../db/id'
+// Panel-examine §7 Phase 1: the fan-out primitive (subject fan-out + refute + summary) lives in examine/panel;
+// the SHARED single verifier body lives in examine/verifier — the floor (runGatedRoleStep + closeDomain
+// re-verify) and the panel both call the SAME runVerifierStep (never a copy → floor stays byte-identical).
+import { runPanelExamine, subjectEvidence, type SubjectFinding } from './examine/panel'
+import { runVerifierStep } from './examine/verifier'
 
 // How the gated step ended. 'pass' = verifier approved the implementer's change directly. 'fixed' =
 // verifier FAILed, the fail handler claimed a fix AND a re-verification confirmed it. 'false-positive' =
@@ -75,228 +78,6 @@ interface DomainClosure {
   outputTokens: number
 }
 
-// Panel fan-out (panel-examine §3.4/§4, M3) — replaces M2's shadow recorder. Runs AFTER the floor
-// verifier: diffs the implementer's real delta, selects subject dimensions (path + semantic trigger), runs ONE
-// shared build, then fans out one read-only adversarial verifier per dimension under the concurrency limiter.
-// Each subject emits a hard PASS/FAIL on a pointable defect in ITS dimension; the verdicts feed the pre-closure
-// gate (floor-FAIL OR any-subject-FAIL) in runGatedRoleStep. Subject rows now carry real pass/fail outcomes (not
-// M2's 'shadow'). Fully best-effort: any failure → [] so the floor verdict always stands alone.
-interface SubjectFinding {
-  key: ReviewSubject
-  why: string // why the trigger selected this dimension — recorded so the selected-subject set is reconstructable
-  produced: boolean // did the subject verifier yield a usable PASS/FAIL? false = dropped (infra fail / no VERDICT)
-  passed: boolean // meaningful only when produced; false placeholder when dropped
-  feedback: string
-  inputTokens: number
-  outputTokens: number
-  refuted?: boolean // adversarial refute: a FAILED subject that a majority of skeptics PROVED was a false alarm
-  refuteEvidence?: string // the refute tally (N/M skeptics) — kept in the subject row for reconstructability
-}
-
-// Subject-row evidence = the selection reason (why this dimension fired) + the verifier's verdict text (+ the
-// adversarial-refute tally when present), so a gate_outcomes dump reconstructs the full selected-subject set:
-// which dimensions fired, why, each outcome, and whether a FAIL was overturned by the skeptics.
-function subjectEvidence(lv: SubjectFinding): string {
-  const base = `[selected: ${lv.why || 'semantic trigger'}] ${lv.feedback}`
-  return lv.refuteEvidence ? `${base}\n[${lv.refuteEvidence}]` : base
-}
-
-async function runPanelExamine(roleId: string, opts: RunStepOptions, gate: { originalPrompt: string; approvedPlan?: string; acceptance?: string[] }, implementationText: string, stepId: string, baseRef: string, baseChanged: string[], implementerFiles: readonly WrittenFile[], signal?: AbortSignal): Promise<SubjectFinding[]> {
-  try {
-    // M5 kill-switch / A/B baseline (panel-examine §10): the panel amplifier defaults ON; setting
-    // `gateB.panelExamine.enabled` to false falls back to floor-only — this IS the §10 red-line "B fails →
-    // revert" mechanism, and the way to run a floor-only A/B baseline. INSIDE the try so a settings-read fault
-    // (e.g. a corrupt KV value) degrades to floor-only ([]) rather than breaking the gated step — floor is
-    // unaffected either way. Cheap KV lookup per gated step.
-    if (settingsService.get<boolean>('gateB.panelExamine.enabled') === false) return []
-    // Git+event hybrid (subject-trigger event-bus): the changed-set + diff come from the agent's OWN Write/Edit
-    // operations (always available, greenfield/non-git included) UNION git's view, with git supplying precise
-    // hunks for tracked-modified files. This is the fix for greenfield triggering — a brand-new all-untracked
-    // project that `git diff` reports as zero bytes now reaches the trigger with real file content. `baseChanged`
-    // de-contaminates the git side from prior pipeline steps (P1a); event paths are already this-step-only.
-    const { changed, diff } = await buildChangedSet(opts.cwd, baseRef, baseChanged, implementerFiles)
-    if (changed.length === 0) return []
-    const selected = await selectSubjects(changed, diff, gate.originalPrompt, signal)
-    if (selected.length === 0) return []
-
-    // All subjects borrow ONE independent verifier role (≠ implementer) for their model/endpoint — also used
-    // to key the per-endpoint limiter. No independent role bound → no subject (the floor already labels that
-    // case 'skipped'/unverified; subjects simply don't run).
-    const verifierRoleId = chooseVerifierRole(roleId)
-    if (verifierRoleId === roleId) return []
-    const verifierEndpointId = rolesService.getBinding(verifierRoleId)?.endpointId ?? ''
-
-    // Shared build prefix — run ONCE for all subjects (§3.4); injected as ground truth so no subject re-builds
-    // (their kit also omits Bash, enforcing read-only physically). The diff is the git+event hybrid computed
-    // above (passed as override) so subjects see the SAME content the trigger did — new/untracked files included;
-    // the build itself stays whole-project.
-    const sharedBuild = await runBuildOnce(opts.cwd, baseRef, changed, diff)
-
-    // Fan out under the two-layer limiter (global min(16,cores−2) + per-endpoint). Each subject emits a hard
-    // verdict; a non-contracted reply is retried ONCE (schema-equivalent, §4.F), then marked produced:false
-    // (dropped, degrade — never block the others or the floor). EVERY selected subject returns a record (carrying
-    // its `why`) so the selected-subject set is fully reconstructable from gate_outcomes — a dropped subject still
-    // gets a row (unverified) downstream, so a green step can never be confused with a never-triggered one.
-    const tasks = selected.map((sel) => async (): Promise<SubjectFinding> => {
-      const base = { key: sel.key, why: sel.why }
-      const meta = subjectMeta(sel.key)
-      if (!meta) return { ...base, produced: false, passed: false, feedback: 'unknown dimension (dropped)', inputTokens: 0, outputTokens: 0 }
-      const subjectCtx: SubjectContext = { key: sel.key, focus: meta.focus, sharedBuild, stepId }
-      let inTok = 0
-      let outTok = 0
-      // Up to 2 attempts: a non-contracted reply (no parseable VERDICT line) is retried ONCE, then dropped.
-      // The attempts run SEQUENTIALLY and reuse the same subject toolUseId by design — the retry's start/done
-      // overwrites the dropped first attempt's bubble, so the UI shows the final usable verdict. (Distinct ids
-      // matter only for CONCURRENT subjects, which always have distinct dimension keys.) Tokens accumulate across
-      // attempts so a dropped subject's retry cost is still counted.
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const v = await runVerifierStep(roleId, opts, gate, implementationText, signal, subjectCtx)
-        inTok += v.inputTokens
-        outTok += v.outputTokens
-        if (v.infraFailure) return { ...base, produced: false, passed: false, feedback: `subject verifier infra failure: ${v.feedback}`, inputTokens: inTok, outputTokens: outTok }
-        if (v.contracted) return { ...base, produced: true, passed: v.passed, feedback: v.feedback, inputTokens: inTok, outputTokens: outTok }
-      }
-      return { ...base, produced: false, passed: false, feedback: 'subject produced no parseable VERDICT after 2 attempts (dropped)', inputTokens: inTok, outputTokens: outTok }
-    })
-    // parallelExamineLimited preserves order (Promise.all) and yields null ONLY for a rare aborted task
-    // (concurrency backstop / unexpected throw). Map each null back to a dropped record via selected[i] so
-    // EVERY selected subject still produces exactly one record → exactly one gate_outcomes row → the selected
-    // set stays fully reconstructable even in that edge (no silently-vanished subject).
-    const results = await parallelExamineLimited(verifierEndpointId, tasks)
-    const verdicts: SubjectFinding[] = results.map((v, i) =>
-      v ?? { key: selected[i].key, why: selected[i].why, produced: false, passed: false, feedback: 'subject task aborted (concurrency backstop or unexpected error)', inputTokens: 0, outputTokens: 0 }
-    )
-
-    // Adversarial refute (Workflow's adversarial-verify pattern): each FAILED subject faces N independent skeptics
-    // (read-only, sharing this same build) that try to disprove the finding. A majority "proven false alarm"
-    // marks the subject refuted → it never enters closure and is recorded false-positive (lowers B-cost / false
-    // reds). Burden is on the skeptics: uncertain → NOT refuted, so a real defect is never lightly dropped.
-    const failed = verdicts.filter((v) => v.produced && !v.passed)
-    if (failed.length > 0) {
-      const refutes = await refuteSubjectFailures(roleId, opts, gate, implementationText, failed, sharedBuild, verifierRoleId, verifierEndpointId, stepId, signal)
-      for (const v of failed) {
-        const r = refutes.get(v.key)
-        if (!r) continue
-        v.refuted = r.refuted
-        v.refuteEvidence = r.evidence
-        v.inputTokens += r.inputTokens
-        v.outputTokens += r.outputTokens
-      }
-    }
-
-    // NOTE: subject rows are NOT recorded here. M4 records each subject's FINAL outcome (pass / closure result /
-    // unverified-if-dropped / false-positive-if-refuted) AFTER the closure stage in runGatedRoleStep —
-    // recording now would double-count a subject that later gets fixed. The console line logs the full set.
-    const produced = verdicts.filter((v) => v.produced)
-    const dropped = verdicts.filter((v) => !v.produced)
-    const refutedN = verdicts.filter((v) => v.refuted).length
-    console.log(`[panel-examine] step ${stepId}: selected ${verdicts.length} subject(s) over ${changed.length} changed path(s) — ${verdicts.map((v) => `${v.key}${v.produced ? (v.refuted ? ':REFUTED' : `:${v.passed ? 'PASS' : 'FAIL'}`) : ':DROPPED'}`).join(', ')}${dropped.length ? ` (${produced.length} produced, ${dropped.length} dropped)` : ''}${refutedN ? ` (${refutedN} refuted→false-positive)` : ''}`)
-    return verdicts
-  } catch (e) {
-    console.warn('[panel-examine] subject fan-out failed (non-blocking, floor stands):', e instanceof Error ? e.message : e)
-    return []
-  }
-}
-
-// Adversarial refute — the Workflow "adversarial verify" pattern adapted to subject findings. Each FAILED subject
-// gets REFUTE_VOTERS independent skeptics that try to PROVE its finding is a false alarm; ≥ REFUTE_MAJORITY
-// "proven false alarm" votes refute it (recorded false-positive, kept out of closure → lower B-cost). The
-// burden is on the skeptics (a non-contracted / uncertain / infra-failed vote does NOT refute), so a real
-// defect is never dropped on a maybe — A-signal is preserved. All skeptics are read-only and share the one
-// build, so they run together under the same concurrency limiter as the subject fan-out (no new resource class).
-const REFUTE_VOTERS = 3
-const REFUTE_MAJORITY = 2 // ≥ 2 of 3 must concretely disprove the finding to overturn it
-
-async function refuteSubjectFailures(
-  roleId: string,
-  opts: RunStepOptions,
-  gate: { originalPrompt: string; approvedPlan?: string; acceptance?: string[] },
-  implementationText: string,
-  failed: SubjectFinding[],
-  sharedBuild: SharedBuild,
-  verifierRoleId: string,
-  verifierEndpointId: string,
-  stepId: string,
-  signal?: AbortSignal
-): Promise<Map<ReviewSubject, { refuted: boolean; evidence: string; inputTokens: number; outputTokens: number }>> {
-  // One read-only skeptic job per (failed subject × voter); all run together under the limiter (read-only, no
-  // working-tree write, so parallel is safe — unlike closure). Each job is tagged with its subject key to tally.
-  const jobs: Array<() => Promise<{ key: ReviewSubject; refuted: boolean; inputTokens: number; outputTokens: number }>> = []
-  for (const lv of failed) {
-    const focus = subjectMeta(lv.key)?.focus ?? lv.key
-    for (let i = 0; i < REFUTE_VOTERS; i++) {
-      jobs.push(() => runRefuteVote(roleId, opts, gate, implementationText, lv, focus, sharedBuild, verifierRoleId, i, stepId, signal).then((r) => ({ key: lv.key, ...r })))
-    }
-  }
-  const votes = (await parallelExamineLimited(verifierEndpointId, jobs)).filter((v): v is { key: ReviewSubject; refuted: boolean; inputTokens: number; outputTokens: number } => v != null)
-  const out = new Map<ReviewSubject, { refuted: boolean; evidence: string; inputTokens: number; outputTokens: number }>()
-  for (const lv of failed) {
-    const lvVotes = votes.filter((v) => v.key === lv.key)
-    const yes = lvVotes.filter((v) => v.refuted).length
-    const refuted = yes >= REFUTE_MAJORITY // burden on skeptics: need a clear majority of PROVEN false-alarm votes
-    const evidence = `adversarial refute: ${yes}/${lvVotes.length} skeptic(s) disproved the finding → ${refuted ? 'REFUTED (false positive)' : 'defect stands'}`
-    out.set(lv.key, {
-      refuted,
-      evidence,
-      inputTokens: lvVotes.reduce((s, v) => s + v.inputTokens, 0),
-      outputTokens: lvVotes.reduce((s, v) => s + v.outputTokens, 0)
-    })
-    console.log(`[panel-examine refute] step ${stepId} subject ${lv.key}: ${yes}/${lvVotes.length} refute → ${refuted ? 'FALSE-POSITIVE' : 'CONFIRMED'}`)
-  }
-  return out
-}
-
-// One skeptic vote on one subject finding. Read-only kit (no Bash — the build is provided), the refute persona,
-// a distinct per-(subject,voter,step) toolUseId so concurrent skeptics don't collide in the event stream. A
-// non-contracted reply (no REFUTE: line) or an infra failure → refuted:false (the finding stands; the burden
-// is on the skeptic to disprove it).
-async function runRefuteVote(
-  roleId: string,
-  opts: RunStepOptions,
-  gate: { originalPrompt: string; approvedPlan?: string; acceptance?: string[] },
-  implementationText: string,
-  lv: SubjectFinding,
-  focus: string,
-  sharedBuild: SharedBuild,
-  verifierRoleId: string,
-  voterIdx: number,
-  stepId: string,
-  signal?: AbortSignal
-): Promise<{ refuted: boolean; inputTokens: number; outputTokens: number }> {
-  const toolId = `gate-b-refute-${lv.key}-${voterIdx}-${stepId}`
-  opts.cb.onToolEvent?.(roleId, { type: 'sub_tool_start', toolUseId: toolId, parentToolId: 'coordinator-gate-b', name: 'SubjectRefute', input: { subject: lv.key, voter: voterIdx } })
-  const refuteUserPrompt = [
-    `An independent "${lv.key}" subject flagged a defect in the change below. As a SKEPTIC, try to REFUTE it — prove it is a false alarm, or concede the defect stands.`,
-    `The subject's claim (the finding to refute):\n${lv.feedback}`,
-    `Original task:\n${gate.originalPrompt}`,
-    sharedBuild.diff ? `Diff under review:\n\`\`\`diff\n${sharedBuild.diff}\n\`\`\`` : '',
-    sharedBuild.ran ? `Build / typecheck output (already run — do NOT re-run it):\n\`\`\`\n${sharedBuild.output}\n\`\`\`` : '',
-    `Implementer's own summary:\n${implementationText}`
-  ].filter(Boolean).join('\n\n')
-  let res: Awaited<ReturnType<typeof runRoleStep>>
-  try {
-    res = await runRoleStep({
-      ...opts,
-      roleId: verifierRoleId,
-      prompt: refuteUserPrompt,
-      dispatch: [...(opts.dispatch ?? []), verifierRoleId],
-      includeHistory: false,
-      toolNames: ['Read', 'Grep', 'Glob'], // read-only — the build is provided, never re-run
-      systemPromptOverride: refutePrompt(focus),
-      signal: signal ?? opts.signal
-    })
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    opts.cb.onToolEvent?.(roleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: 'coordinator-gate-b', name: 'SubjectRefute', isError: true, result: `refute vote failed: ${msg}` })
-    return { refuted: false, inputTokens: 0, outputTokens: 0 } // infra failure → cannot disprove → defect stands
-  }
-  const text = res.text.trim()
-  const contracted = [...text.matchAll(/^\s*[#*>•-]*\s*REFUTE:\s*(YES|NO)\b/gim)].pop()?.[1]
-  const refuted = contracted ? contracted.toUpperCase() === 'YES' : false // no contract → don't refute (burden on skeptic)
-  opts.cb.onToolEvent?.(roleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: 'coordinator-gate-b', name: 'SubjectRefute', isError: false, result: text || 'no vote' })
-  return { refuted, inputTokens: res.inputTokens, outputTokens: res.outputTokens }
-}
-
 export async function runGatedRoleStep(roleId: string, prompt: string, opts: RunStepOptions, gate: { enabled: boolean; originalPrompt: string; approvedPlan?: string; acceptance?: string[] }, signal?: AbortSignal): Promise<GatedStepResult> {
   if (!gate.enabled) return runRoleStep({ ...opts, roleId, prompt, signal: signal ?? opts.signal })
 
@@ -340,6 +121,22 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
     } catch {
       /* stats best-effort */
     }
+  }
+  // Panel card (panel-examine §4.4): re-emit each subject's FINAL resolved state — after refute + closure —
+  // onto the panel card (id=panel-<stepId>, the same id runPanelExamine opened). Carries the structured
+  // outcome / refute tally / fixed-by so the card row renders the final verdict + "→ fixed by X" without
+  // re-parsing prose. A no-op when no panel ran (no card with that id exists → the orphan event is ignored).
+  const panelId = `panel-${stepId}`
+  const emitSubjectFinal = (lv: SubjectFinding, outcome: GateOutcome, handlerRoleId?: string): void => {
+    opts.cb.onToolEvent?.(roleId, {
+      type: 'sub_tool_done',
+      toolUseId: `gate-b-subject-${lv.key}-${stepId}`,
+      parentToolId: panelId,
+      name: 'Subject',
+      isError: outcome === 'unresolved' || outcome === 'unverified',
+      input: { subject: lv.key, why: lv.why, mode: 'review', verdict: outcome, refuted: lv.refuted ?? false, refuteTally: lv.refuteTotal ? `${lv.refuteYes ?? 0}/${lv.refuteTotal}` : '', handlerName: handlerRoleId ? displayName(handlerRoleId) : '' },
+      result: lv.refuteEvidence ? `${lv.feedback}\n[${lv.refuteEvidence}]` : lv.feedback
+    })
   }
   const baseOpts: RunStepOptions = { ...opts, roleId, prompt: prompt + criteriaBlock, signal: signal ?? opts.signal }
 
@@ -404,7 +201,11 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
     recordOutcome(outcome, 1, verdict.feedback)
     // Pure-green branch (no confirmed fail, no refuted fail): produced subject → 'pass'; dropped → 'unverified'
     // (kept so the selected set is reconstructable). Steps WITH a refuted subject take the unified path below.
-    for (const lv of subjectFindings) recordSubjectOutcome(lv.key, lv.produced ? 'pass' : 'unverified', subjectEvidence(lv))
+    for (const lv of subjectFindings) {
+      const oc: GateOutcome = lv.produced ? 'pass' : 'unverified'
+      recordSubjectOutcome(lv.key, oc, subjectEvidence(lv))
+      emitSubjectFinal(lv, oc)
+    }
     // An ALL-GREEN panel step still gets an aggregate row (=outcome) so the M5 A/B reader counts it as an
     // amplified step — the denominator. A pure floor-only step (NO subject ran) gets NO aggregate row: it stays a
     // lone floor row, byte-identical to the single-verifier era (the subjectVsFloor join simply doesn't see it).
@@ -461,16 +262,19 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
       // the aggregate — it has no verdict to fold. Keeps the M4 worst-of semantics while making it visible
       // that the dimension WAS selected (vs never triggered).
       recordSubjectOutcome(lv.key, 'unverified', subjectEvidence(lv))
+      emitSubjectFinal(lv, 'unverified')
       continue
     }
     if (lv.passed) {
       recordSubjectOutcome(lv.key, 'pass', subjectEvidence(lv))
+      emitSubjectFinal(lv, 'pass')
       subjectOutcomes.push('pass')
       continue
     }
     if (lv.refuted) {
       // adversarial refute proved a false alarm → 'false-positive' (not a fail, never closed); folds as such.
       recordSubjectOutcome(lv.key, 'false-positive', subjectEvidence(lv))
+      emitSubjectFinal(lv, 'false-positive')
       subjectOutcomes.push('false-positive')
       continue
     }
@@ -480,6 +284,7 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
     // gate_outcomes dump shows this FAIL survived the skeptics — not just that it was closed.
     const ev = lc?.evidence ?? subjectEvidence(lv)
     recordSubjectOutcome(lv.key, subjectOutcome, lv.refuteEvidence ? `${ev}\n[${lv.refuteEvidence}]` : ev)
+    emitSubjectFinal(lv, subjectOutcome, lc?.handlerRoleId)
     subjectOutcomes.push(subjectOutcome)
   }
 
@@ -629,7 +434,9 @@ async function closeDomain(
       // files git can't show — the greenfield coverage carries into closure too.
       const { changed: reChanged, diff: reDiff } = await buildChangedSet(opts.cwd, baseRef, baseChanged, [...implementerFiles, ...followUp.writtenFiles])
       const freshBuild = await runBuildOnce(opts.cwd, baseRef, reChanged, reDiff)
-      reVerdict = await runVerifierStep(implementerRoleId, opts, gate, followUp.text, signal, { key: domain.key, focus: domain.focus, sharedBuild: freshBuild, stepId })
+      // quiet: this re-verify reuses the subject's stable toolUseId; an event would overwrite the original
+      // FAIL bubble the panel card keeps (the resolved outcome is re-emitted via emitSubjectFinal instead).
+      reVerdict = await runVerifierStep(implementerRoleId, opts, gate, followUp.text, signal, { key: domain.key, focus: domain.focus, sharedBuild: freshBuild, stepId, quiet: true })
     } else {
       reVerdict = await runVerifierStep(implementerRoleId, opts, gate, followUp.text, signal)
     }
@@ -639,105 +446,4 @@ async function closeDomain(
   }
   // No closure claim at all → unresolved (dogfood 2026-06-11: a zero-work handler must not pass silently).
   return { ...base, outcome: 'unresolved', evidence: followUp.text, inputTokens, outputTokens }
-}
-
-export function chooseVerifierRole(implementerRoleId: string): string {
-  // The verifier runs the agent loop with an overridden read-only kit (Read/Grep/Glob/Bash) + the Gate B
-  // verifier persona, so we only need an independent, BOUND agent role for its model/endpoint. It must be an
-  // AGENT_ROLE (the coordinator has no agent-loop path — picking it would throw) and never the implementer.
-  const order = ['analyst', 'engineer', 'shuri', 'generalist', 'scheduler', 'translator', 'editor', 'designer']
-  return (
-    order.find((r) => r !== implementerRoleId && agentService.AGENT_ROLE_IDS.has(r) && Boolean(rolesService.getBinding(r)?.endpointId)) ??
-    'generalist'
-  )
-}
-
-// Subject context for a panel verifier call (panel-examine §3.3/§3.4). ABSENT → the FLOOR verifier,
-// byte-identical to before: full COORDINATOR_VERIFIER_PROMPT, Read/Grep/Glob/Bash kit, runs the build itself.
-// PRESENT → an ADDITIVE per-dimension subject: derived persona, read-only kit (NO Bash), reasons over the shared
-// build, distinct per-(subject,step) stream identity.
-interface SubjectContext {
-  key: ReviewSubject
-  focus: string
-  sharedBuild: SharedBuild
-  stepId: string
-}
-
-async function runVerifierStep(implementerRoleId: string, opts: RunStepOptions, gate: { originalPrompt: string; approvedPlan?: string; acceptance?: string[] }, implementationText: string, signal?: AbortSignal, subject?: SubjectContext): Promise<{ passed: boolean; feedback: string; inputTokens: number; outputTokens: number; infraFailure?: boolean; skipped?: boolean; contracted?: boolean }> {
-  const verifierRoleId = chooseVerifierRole(implementerRoleId)
-  // No independent agent role is bound besides the implementer → there's no one to verify. Don't FAIL/throw
-  // the turn over a config gap; deliver the result with an explicit skipped marker so the caller labels
-  // the outcome 'unverified' (never a silent pass).
-  if (verifierRoleId === implementerRoleId) return { passed: true, skipped: true, feedback: 'Independent verification skipped: no independent verifier role bound (only the implementer is available); result delivered unverified.', inputTokens: 0, outputTokens: 0 }
-  // Distinct stream identity (panel-examine §4-D): FLOOR keeps the `Date.now()` id; each SUBJECT gets a
-  // stable per-(subject,step) id so N parallel subjects don't collide in the live event stream (a shared
-  // `Date.now()` could fire in the same millisecond). The display name disambiguates the bubbles too.
-  const toolId = subject ? `gate-b-subject-${subject.key}-${subject.stepId}` : `gate-b-verifier-${Date.now()}`
-  const toolName = subject ? 'Subject' : 'IndependentVerifier'
-  opts.cb.onToolEvent?.(implementerRoleId, { type: 'sub_tool_start', toolUseId: toolId, parentToolId: 'coordinator-gate-b', name: toolName, input: subject ? { verifierRoleId, subject: subject.key } : { verifierRoleId } })
-  // Persona + how-to-verify live in the system-prompt override; this user message carries only the case to
-  // judge. FLOOR: detect the project's own toolchain and run the build itself — stack-agnostic on purpose (a
-  // hard-coded npm command sent a Go-repo verifier chasing a nonexistent package.json, dogfood 2026-06-11).
-  // SUBJECT: the diff + build output are PROVIDED (shared once, §3.4) — it must NOT re-run the build (N subjects
-  // racing the same tree → phantom red); it reasons over the provided output + read-only code inspection.
-  const verifierPrompt = subject
-    ? [
-        `Run your "${subject.key}" subject on the change below. The diff and the project's build output are PROVIDED — do NOT re-run the build; reason over them and use Read / Grep / Glob to inspect the touched code for your dimension. End your message with exactly one final line \`VERDICT: PASS\` or \`VERDICT: FAIL\`.`,
-        `Original task:\n${gate.originalPrompt}`,
-        gate.acceptance?.length ? `Acceptance criteria the change must satisfy:\n${gate.acceptance.map((c) => `- ${c}`).join('\n')}` : '',
-        subject.sharedBuild.diff ? `Diff under review (this step's changes):\n\`\`\`diff\n${subject.sharedBuild.diff}\n\`\`\`` : '',
-        subject.sharedBuild.ran ? `Build / typecheck output (already run for all subjects — do NOT re-run it):\n\`\`\`\n${subject.sharedBuild.output}\n\`\`\`` : 'No build output is available — judge from the diff plus your own read-only code inspection.',
-        `Implementer role (do NOT defer to them): ${implementerRoleId}`,
-        `Implementer's own summary (a claim to verify, not ground truth):\n${implementationText}`
-      ].filter(Boolean).join('\n\n')
-    : [
-        'Verify the change below as an independent reviewer. Inspect the diff (Bash `git diff`, Read the touched files), detect the project\'s own toolchain (go.mod → `go build ./...` + `go vet ./...`; package.json → `npm run typecheck`/`npm run build`; Cargo.toml → `cargo check`; etc.), run the relevant build/checks and the tests the task demands, report your evidence, then END your message with exactly one final line `VERDICT: PASS` or `VERDICT: FAIL` — the classifier reads only that line.',
-        `Original task:\n${gate.originalPrompt}`,
-        gate.acceptance?.length ? `Acceptance criteria — check each of these FIRST (they were given to the implementer as the definition of done), then run the toolchain checks:\n${gate.acceptance.map((c) => `- ${c}`).join('\n')}` : '',
-        gate.approvedPlan ? `Approved plan the change must match:\n${gate.approvedPlan}` : '',
-        `Implementer role (do NOT defer to them): ${implementerRoleId}`,
-        `Implementer's own summary (a claim to verify, not ground truth):\n${implementationText}`
-      ].filter(Boolean).join('\n\n')
-  let verifier: Awaited<ReturnType<typeof runRoleStep>>
-  try {
-    verifier = await runRoleStep({
-      ...opts,
-      roleId: verifierRoleId,
-      prompt: verifierPrompt,
-      dispatch: [...(opts.dispatch ?? []), verifierRoleId],
-      // Inherit the run's permission mode (opts.permissionMode), same as the implementer: a bypass run's verifier
-      // runs bypass too and skips the self-approve classifier entirely (execution.ts), so it can run the project's
-      // build/vet/test checks unattended. Hard-coding 'default' here forced every bypass run's verifier through the
-      // classifier — which hard-denied harmless verification commands (e.g. `go test … >/dev/null`). The kit is
-      // already read-only (toolNames below: no Write/Edit), so inheriting bypass adds no write capability.
-      includeHistory: false,
-      // FLOOR kit = Read/Grep/Glob + Bash so it can ACTUALLY run the checks (most non-dev roles lack Bash).
-      // SUBJECT kit = Read/Grep/Glob, NO Bash — the build already ran (shared), and dropping Bash PHYSICALLY
-      // enforces "a subject never re-builds / never starts a service" (§3.4 / §4-D), stronger than a prompt ask.
-      // Both use the adversarial verifier persona, not the borrowed role's "don't touch code" system prompt.
-      toolNames: subject ? ['Read', 'Grep', 'Glob'] : ['Read', 'Grep', 'Glob', 'Bash'],
-      systemPromptOverride: subject ? subjectExaminePrompt(subject.focus) : COORDINATOR_VERIFIER_PROMPT,
-      signal: signal ?? opts.signal
-    })
-  } catch (err) {
-    // The verifier's own LLM call failed (e.g. upstream empty-response / channel fault — round8). That is
-    // an infrastructure failure, not a verdict: report it as such so the caller skips the fail handler.
-    const msg = err instanceof Error ? err.message : String(err)
-    const feedback = `verifier LLM call failed: ${msg}`
-    opts.cb.onToolEvent?.(implementerRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: 'coordinator-gate-b', name: toolName, isError: true, result: feedback })
-    return { passed: false, feedback, inputTokens: 0, outputTokens: 0, infraFailure: true }
-  }
-  const text = verifier.text.trim()
-  // Contracted verdict line first: persona + user message both demand a FINAL `VERDICT: PASS|FAIL`
-  // line, and the classifier reads only that (last match wins = final-line semantics). Free-text token
-  // scanning is the fallback for a non-compliant reply only, fail-closed (PASS && !FAIL) — it MUST NOT
-  // be the primary path: dogfood 2026-06-12 had two clear-PASS verdicts flipped to FAIL because the
-  // evidence prose contained the brief's own term "fail-open", voiding a fully-green delivery. `contracted`
-  // is also the subject-retry signal (runPanelExamine): a non-contracted subject reply is retried once, then dropped.
-  const contracted = [...text.matchAll(/^\s*[#*>•-]*\s*VERDICT:\s*(PASS|FAIL)\b/gim)].pop()?.[1]
-  const passed = contracted ? contracted.toUpperCase() === 'PASS' : /\bPASS\b/i.test(text) && !/\bFAIL\b/i.test(text)
-  opts.cb.onToolEvent?.(implementerRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: 'coordinator-gate-b', name: toolName, isError: !passed, result: text })
-  // Empty text = the verifier ran but produced nothing (belt to the loop's empty-turn guard) — that is
-  // an absent verdict, not a FAIL with evidence; mark infra so the caller doesn't dispatch the handler.
-  return { passed, feedback: text || 'Verifier returned no verdict.', inputTokens: verifier.inputTokens, outputTokens: verifier.outputTokens, infraFailure: text ? undefined : true, contracted: Boolean(contracted) }
 }

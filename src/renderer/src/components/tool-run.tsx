@@ -106,6 +106,10 @@ function verbDone(t: ToolCall): string {
     case 'IndependentVerifier': return 'Verified independently'
     case 'GateBFailHandler': return 'Reworked after failed verification'
     case 'DannyPlanReview': return 'Reviewed the plan'
+    // panel_examine internals normally render inside PanelCard; these guard the rare top-level leak.
+    case 'PanelExamine': return 'Examined across perspectives'
+    case 'Subject': return 'Reviewed a perspective'
+    case 'SubjectRefute': return 'Cross-checked a finding'
     default: return t.name
   }
 }
@@ -129,6 +133,10 @@ function verbLive(t: ToolCall): string {
     case 'IndependentVerifier': return 'Verifying independently'
     case 'GateBFailHandler': return 'Reworking after failed verification'
     case 'DannyPlanReview': return 'Reviewing the plan'
+    // panel_examine internals normally render inside PanelCard; these guard the rare top-level leak.
+    case 'PanelExamine': return 'Examining across perspectives'
+    case 'Subject': return 'Reviewing a perspective'
+    case 'SubjectRefute': return 'Cross-checking a finding'
     default: return `Running ${t.name}`
   }
 }
