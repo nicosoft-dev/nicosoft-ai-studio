@@ -118,7 +118,12 @@ interface RespEvent {
   delta?: string
   item_id?: string
   item?: { type?: string; id?: string; call_id?: string; name?: string; arguments?: string; content?: unknown; [k: string]: unknown }
-  response?: { usage?: { input_tokens?: number; output_tokens?: number; input_tokens_details?: { cached_tokens?: number } } }
+  response?: {
+    usage?: { input_tokens?: number; output_tokens?: number; input_tokens_details?: { cached_tokens?: number } }
+    // status 'incomplete' + incomplete_details.reason 'max_output_tokens' = the response hit the output cap.
+    status?: string
+    incomplete_details?: { reason?: string }
+  }
 }
 
 export async function* callWithToolsOpenAI(
@@ -150,6 +155,7 @@ export async function* callWithToolsOpenAI(
   let inTokens = 0
   let outTokens = 0
   let cacheReadTokens = 0
+  let truncated = false // response hit the output-token cap (response.incomplete / status 'incomplete')
 
   // Idle-timeout: the fetch has no per-request timeout, so a hung upstream would wedge the loop forever.
   // Arm before opening (covers a hang before the first byte) + reset on every payload; dispose in finally.
@@ -203,8 +209,15 @@ export async function* callWithToolsOpenAI(
             const callId = it.call_id || fc?.callId || it.id || 'unknown'
             const name = it.name ?? fc?.name ?? 'unknown'
             const rawArgs = it.arguments ?? fc?.args ?? '{}'
-            const input = (parseJSON(rawArgs || '{}') as Record<string, unknown> | null) ?? {}
-            const block: ToolUseBlock = { type: 'tool_use', id: callId, name, input }
+            const parsedArgs = parseJSON(rawArgs || '{}') as Record<string, unknown> | null
+            if (parsedArgs === null) {
+              // Non-empty but unparseable arguments = a tool call cut off mid-JSON (max_output_tokens) or
+              // malformed. Executing it with {} would run a garbage call — DROP it (mirrors the Anthropic
+              // truncated-tool_use drop in llm.ts:256). The response.incomplete signal below maps stopReason
+              // to 'max_tokens' so the loop escalates the ceiling and retries instead of running an empty call.
+              break
+            }
+            const block: ToolUseBlock = { type: 'tool_use', id: callId, name, input: parsedArgs }
             content.push(block)
             yield block // ← stream: loop starts executing this tool
           } else if (it.type === 'message') {
@@ -224,7 +237,21 @@ export async function* callWithToolsOpenAI(
           }
           break
         }
+        // Both are terminal: on an output-token-cap truncation OpenAI emits response.incomplete INSTEAD of
+        // response.completed, so they must share the end-of-turn usage extraction (otherwise a truncated
+        // turn loses its token counts). response.incomplete (or status 'incomplete') maps stopReason to
+        // 'max_tokens' below, making the loop's escalate-to-64K + continue-in-pieces machinery reachable on
+        // this protocol (previously the Anthropic-only F15 path).
+        case 'response.incomplete':
         case 'response.completed': {
+          // Only an OUTPUT-CAP truncation should map to max_tokens (→ loop escalates the ceiling + re-sends).
+          // status 'incomplete' also covers reason 'content_filter', which a bigger ceiling can't fix — mapping
+          // it to max_tokens would burn a pointless 64K re-send + the bounded retries. Gate on the reason;
+          // default true when reason is absent so a plain incomplete still escalates as before.
+          if (ev.type === 'response.incomplete' || ev.response?.status === 'incomplete') {
+            const reason = ev.response?.incomplete_details?.reason
+            truncated = reason ? reason === 'max_output_tokens' : true
+          }
           const u = ev.response?.usage
           if (u) {
             inTokens = u.input_tokens ?? 0
@@ -246,10 +273,12 @@ export async function* callWithToolsOpenAI(
     guard.dispose()
   }
 
-  // The loop decides continuation by "did the assistant request a tool", not stop_reason — a
-  // best-effort mapping is enough.
+  // The loop decides continuation by "did the assistant request a tool", not stop_reason — a best-effort
+  // mapping is enough. A truncation (output-token cap) maps to 'max_tokens' so the loop escalates the ceiling
+  // and re-sends; when a tool DID survive intact the loop still executes it (it prioritizes tools over the
+  // max_tokens escalate, same as the Anthropic path).
   const hasToolUse = content.some((b) => b.type === 'tool_use')
-  const stopReason: StopReason = hasToolUse ? 'tool_use' : 'end_turn'
+  const stopReason: StopReason = truncated ? 'max_tokens' : hasToolUse ? 'tool_use' : 'end_turn'
   onEvent?.({
     type: 'turn-final',
     usage: {

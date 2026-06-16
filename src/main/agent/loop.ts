@@ -532,8 +532,9 @@ export async function* runAgent(
       // A max_tokens turn whose ONLY block was a tool_use truncated mid-json had that block dropped by the
       // llm layer, landing here content-less WITH stopReason==='max_tokens'. That is an output-size cap, not
       // an upstream empty — escalate the ceiling once and re-send (same budget bump as the tool-path escalate
-      // below) instead of burning the empty-turn retries on the identical 16K request. (Only Anthropic emits
-      // this stopReason today; the OpenAI/Gemini adapter gap is noted in docs/empty-turn-after-work.md.)
+      // below) instead of burning the empty-turn retries on the identical 16K request. (All three protocols
+      // now emit this stopReason on an output-cap truncation: Anthropic natively, OpenAI/Gemini via the
+      // adapter finish-reason mapping in llm-openai.ts / llm-gemini.ts.)
       if (assistant.stopReason === 'max_tokens' && !maxTokensEscalated && maxTokens < ESCALATED_MAX_TOKENS) {
         maxTokensEscalated = true
         maxTokens = ESCALATED_MAX_TOKENS

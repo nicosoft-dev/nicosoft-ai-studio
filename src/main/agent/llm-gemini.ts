@@ -122,7 +122,8 @@ function toGeminiTools(schemas: AnyToolSchema[]): unknown[] {
 }
 
 interface GeminiChunk {
-  candidates?: { content?: { parts?: GeminiPart[] } }[]
+  // finishReason 'MAX_TOKENS' = the candidate hit the output-token cap (truncated).
+  candidates?: { content?: { parts?: GeminiPart[] }; finishReason?: string }[]
   usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; cachedContentTokenCount?: number }
 }
 
@@ -146,6 +147,7 @@ export async function* callWithToolsGemini(
   let inTokens = 0
   let outTokens = 0
   let cacheReadTokens = 0
+  let truncated = false // a candidate finished with MAX_TOKENS (output-token cap)
 
   const guard = streamIdleGuard(req.signal, LLM_STREAM_IDLE_MS)
   try {
@@ -163,6 +165,7 @@ export async function* callWithToolsGemini(
       // (an enveloped-but-empty stream hung the loop forever; see the Anthropic path in llm.ts).
       guard.reset()
       for (const c of chunk.candidates ?? []) {
+        if (c.finishReason === 'MAX_TOKENS') truncated = true
         for (const p of c.content?.parts ?? []) {
           if (typeof p.text === 'string' && p.text.length > 0) {
             textAcc += p.text
@@ -197,8 +200,11 @@ export async function* callWithToolsGemini(
   // Emit the accumulated text as one block, ahead of the tool_use blocks (Gemini puts prose before its
   // functionCall; the loop decides continuation by "is there a tool_use", not by block order).
   if (textAcc) content.unshift({ type: 'text', text: textAcc })
+  // A MAX_TOKENS truncation maps to 'max_tokens' so the loop escalates the ceiling and re-sends (the F15
+  // path, previously Anthropic-only); a surviving whole functionCall still wins continuation via the loop's
+  // tool-priority. Gemini delivers functionCall args whole, so no partial-tool drop is needed here.
   const hasToolUse = content.some((b) => b.type === 'tool_use')
-  const stopReason: StopReason = hasToolUse ? 'tool_use' : 'end_turn'
+  const stopReason: StopReason = truncated ? 'max_tokens' : hasToolUse ? 'tool_use' : 'end_turn'
   onEvent?.({
     type: 'turn-final',
     usage: {
