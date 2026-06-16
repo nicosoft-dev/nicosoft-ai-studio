@@ -235,11 +235,14 @@ export function ChatSegment({
   const msgExpert: Expert | undefined = !isUser && first.expertId ? expertById[first.expertId] : undefined
   const renderExpert = msgExpert ?? expert
   const synthesis = isSynthesis(first)
+  // closure-loop §3.2/§3.3: an independent Gate B reviewer step renders with its own "· Verifier" identity.
+  const verifier = !isUser && first.segmentKind === 'verifier'
   const segColor = isUser ? 'var(--border-2)' : synthesis ? 'var(--accent)' : renderExpert.color
   // Foldable: a dispatched expert step inside a panel/debate (has a chain, isn't Coordinator's intro/synthesis).
   // Parallel/council stack many of these, so once a step finishes streaming we collapse it to a one-line
   // summary — the user watches it stream live, then it folds away, leaving Coordinator's synthesis prominent.
-  const foldable = !isUser && !synthesis && !!first.dispatch?.length && first.expertId != null && first.expertId !== 'coordinator'
+  // A Verifier segment never folds: it is a primary step of the closure flow (full verdict body + its panel).
+  const foldable = !isUser && !synthesis && !verifier && !!first.dispatch?.length && first.expertId != null && first.expertId !== 'coordinator'
   const [expanded, setExpanded] = useState(false)
   const bodyRef = useRef<HTMLDivElement>(null)
   // Folded expert steps render in a fixed-height scroll WINDOW from the start (not collapsed to a line):
@@ -265,6 +268,7 @@ export function ChatSegment({
         <div className="seg-meta">
           <NameChip expert={isUser ? null : renderExpert} neutral={isUser} />
           {synthesis ? <span className="synthesis-tag">{t('conv.synthesis')}</span> : null}
+          {verifier ? <span className="verifier-tag">{t('conv.verifier')}</span> : null}
           {foldable ? (
             <button className="fold-toggle" onClick={() => setExpanded((e) => !e)}>{expanded ? t('conv.collapse') : t('conv.viewFull')}</button>
           ) : null}
@@ -317,6 +321,7 @@ function canMerge(a: ChatMessage, b: ChatMessage): boolean {
     a.role === 'assistant' &&
     b.role === 'assistant' &&
     (a.expertId ?? null) === (b.expertId ?? null) &&
+    (a.segmentKind ?? null) === (b.segmentKind ?? null) && // a Verifier step is its own segment, never merged into a normal step of the same role
     chainsEqual &&
     isSynthesis(a) === isSynthesis(b)
   )

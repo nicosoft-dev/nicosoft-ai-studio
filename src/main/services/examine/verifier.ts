@@ -47,17 +47,17 @@ export async function runVerifierStep(implementerRoleId: string, opts: RunStepOp
   // the turn over a config gap; deliver the result with an explicit skipped marker so the caller labels
   // the outcome 'unverified' (never a silent pass).
   if (verifierRoleId === implementerRoleId) return { passed: true, skipped: true, feedback: 'Independent verification skipped: no independent verifier role bound (only the implementer is available); result delivered unverified.', inputTokens: 0, outputTokens: 0 }
-  // Distinct stream identity (panel-examine §4-D): FLOOR keeps the `Date.now()` id; each SUBJECT gets a
-  // stable per-(subject,step) id so N parallel subjects don't collide in the live event stream (a shared
-  // `Date.now()` could fire in the same millisecond). The display name disambiguates the bubbles too.
+  // closure-loop §3.2: presentation split by role.
+  //   FLOOR (no subject) → renders as the independent "<verifier> · Verifier" SEGMENT (its verdict prose IS the
+  //     body). It emits NO sub_tool card — the segment is the presentation, eliminating the old double (a card on
+  //     the implementer segment + a separate verifier segment). runRoleStep below carries segmentKind:'verifier'.
+  //   SUBJECT (subject present, not quiet) → a card-only PanelCard row, attributed to verifierRoleId so it folds
+  //     into the Verifier segment (NOT the implementer segment); runRoleStep runs quiet (no segment of its own).
+  //   QUIET SUBJECT (integrator re-verify) → no card (it re-emits onto the existing row via emitSubjectFinal).
   const toolId = subject ? `gate-b-subject-${subject.key}-${subject.stepId}` : `gate-b-verifier-${Date.now()}`
-  const toolName = subject ? 'Subject' : 'IndependentVerifier'
-  // Subject events nest under the panel card (parentToolId=panelId) when the caller is the panel fan-out; the
-  // FLOOR keeps 'coordinator-gate-b' (no match → surfaces as its own top-level verifier card), byte-identical
-  // to before. A quiet re-verify (the subject integrator) emits nothing so it can't clobber the original row.
   const parentToolId = subject?.panelId ?? 'coordinator-gate-b'
-  const emitEvents = !subject?.quiet
-  if (emitEvents) opts.cb.onToolEvent?.(implementerRoleId, { type: 'sub_tool_start', toolUseId: toolId, parentToolId, name: toolName, input: subject ? { verifierRoleId, subject: subject.key, mode: 'review', why: subject.why ?? '' } : { verifierRoleId } })
+  const emitCard = Boolean(subject) && !subject?.quiet
+  if (emitCard) opts.cb.onToolEvent?.(verifierRoleId, { type: 'sub_tool_start', toolUseId: toolId, parentToolId, name: 'Subject', input: { verifierRoleId, subject: subject!.key, mode: 'review', why: subject!.why ?? '' } })
   // Persona + how-to-verify live in the system-prompt override; this user message carries only the case to
   // judge. FLOOR: detect the project's own toolchain and run the build itself — stack-agnostic on purpose (a
   // hard-coded npm command sent a Go-repo verifier chasing a nonexistent package.json, dogfood 2026-06-11).
@@ -100,6 +100,10 @@ export async function runVerifierStep(implementerRoleId: string, opts: RunStepOp
       // Both use the adversarial verifier persona, not the borrowed role's "don't touch code" system prompt.
       toolNames: subject ? ['Read', 'Grep', 'Glob'] : ['Read', 'Grep', 'Glob', 'Bash'],
       systemPromptOverride: subject ? subjectExaminePrompt(subject.focus) : COORDINATOR_VERIFIER_PROMPT,
+      // closure-loop: FLOOR streams as its own "· Verifier" segment; SUBJECT runs card-only (quiet) and folds
+      // into that segment as a PanelCard row (via the sub_tool card above), never a separate prose segment.
+      segmentKind: subject ? undefined : 'verifier',
+      quiet: Boolean(subject),
       signal: signal ?? opts.signal
     })
   } catch (err) {
@@ -107,7 +111,7 @@ export async function runVerifierStep(implementerRoleId: string, opts: RunStepOp
     // an infrastructure failure, not a verdict: report it as such so the caller skips the fail handler.
     const msg = err instanceof Error ? err.message : String(err)
     const feedback = `verifier LLM call failed: ${msg}`
-    if (emitEvents) opts.cb.onToolEvent?.(implementerRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId, name: toolName, isError: true, result: feedback })
+    if (emitCard) opts.cb.onToolEvent?.(verifierRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId, name: 'Subject', isError: true, result: feedback })
     return { passed: false, feedback, inputTokens: 0, outputTokens: 0, infraFailure: true }
   }
   const text = verifier.text.trim()
@@ -119,7 +123,7 @@ export async function runVerifierStep(implementerRoleId: string, opts: RunStepOp
   // is also the subject-retry signal (runPanelExamine): a non-contracted subject reply is retried once, then dropped.
   const contracted = [...text.matchAll(/^\s*[#*>•-]*\s*VERDICT:\s*(PASS|FAIL)\b/gim)].pop()?.[1]
   const passed = contracted ? contracted.toUpperCase() === 'PASS' : /\bPASS\b/i.test(text) && !/\bFAIL\b/i.test(text)
-  if (emitEvents) opts.cb.onToolEvent?.(implementerRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId, name: toolName, isError: !passed, result: text })
+  if (emitCard) opts.cb.onToolEvent?.(verifierRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId, name: 'Subject', isError: !passed, result: text })
   // Empty text = the verifier ran but produced nothing (belt to the loop's empty-turn guard) — that is
   // an absent verdict, not a FAIL with evidence; mark infra so the caller doesn't dispatch the handler.
   return { passed, feedback: text || 'Verifier returned no verdict.', inputTokens: verifier.inputTokens, outputTokens: verifier.outputTokens, infraFailure: text ? undefined : true, contracted: Boolean(contracted) }

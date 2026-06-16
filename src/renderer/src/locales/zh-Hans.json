@@ -295,6 +295,7 @@
   "conv.tokensSuffix": "tokens",
   "conv.requestFailedRetrying": "请求失败 · 重试中 ({attempt}/{max})",
   "conv.synthesis": "综合",
+  "conv.verifier": "审查者",
   "conv.collapse": "收起",
   "conv.viewFull": "查看完整内容",
   "conv.needAgentProto": "{name} 是一个 agent — 请在其个人资料中绑定 Anthropic、OpenAI 或 Gemini 端点",

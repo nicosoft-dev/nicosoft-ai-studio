@@ -53,6 +53,12 @@ export async function runPanelExamine(roleId: string, opts: RunStepOptions, gate
   // error path: if anything throws AFTER the parent sub_tool_start, the catch MUST close it (else the card
   // spins 'running' forever — no turn-end net flips a lingering running tool on a finished segment).
   const panelId = `panel-${stepId}`
+  // closure-loop §3.2: the panel folds into the independent "· Verifier" segment, so EVERY panel card
+  // (the PanelExamine parent + its subject / refute rows) is attributed to verifierRoleId — never the
+  // implementer. Hoisted before the try so the catch's card-close targets the SAME role the card opened on.
+  // chooseVerifierRole is pure (no I/O); === caller → no independent reviewer → no panel (floor labels 'skipped').
+  const verifierRoleId = chooseVerifierRole(roleId)
+  if (verifierRoleId === roleId) return []
   let panelOpened = false
   try {
     // M5 kill-switch / A/B baseline (panel-examine §10): the panel amplifier defaults ON; setting
@@ -71,18 +77,16 @@ export async function runPanelExamine(roleId: string, opts: RunStepOptions, gate
     const selected = await selectSubjects(changed, diff, gate.originalPrompt, signal)
     if (selected.length === 0) return []
 
-    // All subjects borrow ONE independent reviewer role (≠ caller) for their model/endpoint — also used to key
-    // the per-endpoint limiter + the refute votes + the subject fan-out, so all three agree (chooseVerifierRole is
-    // deterministic). No independent role → no subject (floor labels that 'skipped'; the agent entry's bridge
-    // gives an explicit "can't form a panel" tool-result via this same chooseVerifierRole check before reaching here).
-    const verifierRoleId = chooseVerifierRole(roleId)
-    if (verifierRoleId === roleId) return []
+    // All subjects borrow the ONE independent reviewer role (verifierRoleId, hoisted above) for their
+    // model/endpoint — also used to key the per-endpoint limiter + the refute votes + the subject fan-out.
     const verifierEndpointId = rolesService.getBinding(verifierRoleId)?.endpointId ?? ''
 
-    // The panel card parent (panel-examine §4.4). parentToolId 'coordinator-gate-b' has no match → it surfaces
-    // as a top-level card; subjects/refute votes then nest under it (id=panelId). The roster (every selected
-    // key) lets the card show queued rows + a stable N before any subject starts under the concurrency limiter.
-    opts.cb.onToolEvent?.(roleId, { type: 'sub_tool_start', toolUseId: panelId, parentToolId: 'coordinator-gate-b', name: 'PanelExamine', input: { mode: 'review', subjects: selected.map((s) => s.key) } })
+    // The panel card parent (panel-examine §4.4), attributed to verifierRoleId so it opens on the Verifier
+    // segment (closure-loop §3.2). parentToolId 'coordinator-gate-b' is a sentinel (no card with that id) → the
+    // PanelExamine card surfaces top-level within that segment; subjects/refute votes then nest under it
+    // (id=panelId). The roster (every selected key) lets the card show queued rows + a stable N before any
+    // subject starts under the concurrency limiter.
+    opts.cb.onToolEvent?.(verifierRoleId, { type: 'sub_tool_start', toolUseId: panelId, parentToolId: 'coordinator-gate-b', name: 'PanelExamine', input: { mode: 'review', subjects: selected.map((s) => s.key) } })
     panelOpened = true
 
     // Shared build prefix — run ONCE for all subjects (§3.4); injected as ground truth so no subject re-builds
@@ -156,13 +160,13 @@ export async function runPanelExamine(roleId: string, opts: RunStepOptions, gate
     // errored; closure (fix) then re-emits those subject rows from gate-b while the card is already done, so
     // "→ fixed" nests in afterward (§4.4: refute/fix appear only once done).
     const confirmedFails = verdicts.filter((v) => v.produced && !v.passed && !v.refuted).length
-    opts.cb.onToolEvent?.(roleId, { type: 'sub_tool_done', toolUseId: panelId, parentToolId: 'coordinator-gate-b', name: 'PanelExamine', isError: confirmedFails > 0, result: `${produced.length}/${verdicts.length} reviewer(s) reported${confirmedFails ? `, ${confirmedFails} flagged` : ''}` })
+    opts.cb.onToolEvent?.(verifierRoleId, { type: 'sub_tool_done', toolUseId: panelId, parentToolId: 'coordinator-gate-b', name: 'PanelExamine', isError: confirmedFails > 0, result: `${produced.length}/${verdicts.length} reviewer(s) reported${confirmedFails ? `, ${confirmedFails} flagged` : ''}` })
     return verdicts
   } catch (e) {
     console.warn('[panel-examine] subject fan-out failed (non-blocking, floor stands):', e instanceof Error ? e.message : e)
     // Settle the card if it was opened — a throw after the parent start would otherwise leave it spinning
-    // 'running' forever (no turn-end net flips a lingering running tool on the finished implementer segment).
-    if (panelOpened) opts.cb.onToolEvent?.(roleId, { type: 'sub_tool_done', toolUseId: panelId, parentToolId: 'coordinator-gate-b', name: 'PanelExamine', isError: true, result: 'panel fan-out failed — floor verdict stands' })
+    // 'running' forever (no turn-end net flips a lingering running tool on the finished Verifier segment).
+    if (panelOpened) opts.cb.onToolEvent?.(verifierRoleId, { type: 'sub_tool_done', toolUseId: panelId, parentToolId: 'coordinator-gate-b', name: 'PanelExamine', isError: true, result: 'panel fan-out failed — floor verdict stands' })
     return []
   }
 }
@@ -237,9 +241,10 @@ async function runRefuteVote(
   signal?: AbortSignal
 ): Promise<{ refuted: boolean; inputTokens: number; outputTokens: number }> {
   const toolId = `gate-b-refute-${lv.key}-${voterIdx}-${stepId}`
-  // Refute votes nest under the panel card (parentToolId=panelId), tagged with their target subject so the
-  // card groups them as that subject's skeptics (the structured k/N tally rides on the subject's final row).
-  opts.cb.onToolEvent?.(roleId, { type: 'sub_tool_start', toolUseId: toolId, parentToolId: panelId, name: 'SubjectRefute', input: { subject: lv.key, voter: voterIdx } })
+  // Refute votes nest under the panel card (parentToolId=panelId), attributed to verifierRoleId so they fold
+  // into the Verifier segment alongside the subjects (closure-loop §3.2), tagged with their target subject so
+  // the card groups them as that subject's skeptics (the structured k/N tally rides on the subject's final row).
+  opts.cb.onToolEvent?.(verifierRoleId, { type: 'sub_tool_start', toolUseId: toolId, parentToolId: panelId, name: 'SubjectRefute', input: { subject: lv.key, voter: voterIdx } })
   const refuteUserPrompt = [
     `An independent "${lv.key}" subject flagged a defect in the change below. As a SKEPTIC, try to REFUTE it — prove it is a false alarm, or concede the defect stands.`,
     `The subject's claim (the finding to refute):\n${lv.feedback}`,
@@ -258,16 +263,17 @@ async function runRefuteVote(
       includeHistory: false,
       toolNames: ['Read', 'Grep', 'Glob'], // read-only — the build is provided, never re-run
       systemPromptOverride: refutePrompt(focus),
+      quiet: true, // card-only: the skeptic vote folds into the Verifier segment's panel card, not its own segment
       signal: signal ?? opts.signal
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    opts.cb.onToolEvent?.(roleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: panelId, name: 'SubjectRefute', isError: true, result: `refute vote failed: ${msg}` })
+    opts.cb.onToolEvent?.(verifierRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: panelId, name: 'SubjectRefute', isError: true, result: `refute vote failed: ${msg}` })
     return { refuted: false, inputTokens: 0, outputTokens: 0 } // infra failure → cannot disprove → defect stands
   }
   const text = res.text.trim()
   const contracted = [...text.matchAll(/^\s*[#*>•-]*\s*REFUTE:\s*(YES|NO)\b/gim)].pop()?.[1]
   const refuted = contracted ? contracted.toUpperCase() === 'YES' : false // no contract → don't refute (burden on skeptic)
-  opts.cb.onToolEvent?.(roleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: panelId, name: 'SubjectRefute', isError: false, result: text || 'no vote' })
+  opts.cb.onToolEvent?.(verifierRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: panelId, name: 'SubjectRefute', isError: false, result: text || 'no vote' })
   return { refuted, inputTokens: res.inputTokens, outputTokens: res.outputTokens }
 }

@@ -68,8 +68,8 @@ export function registerCoordinatorHandlers(): void {
             const ev: CoordinatorDispatchEvent = { streamId, chain, reason }
             send('coordinator:dispatch', ev)
           },
-          onStepStart: (roleId, dispatch, model) => {
-            const ev: CoordinatorStepStart = { streamId, roleId, dispatch, model }
+          onStepStart: (roleId, dispatch, model, segmentKind) => {
+            const ev: CoordinatorStepStart = { streamId, roleId, dispatch, model, segmentKind }
             send('coordinator:step:start', ev)
           },
           onDelta: (roleId, text) => {

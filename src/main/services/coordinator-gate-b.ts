@@ -3,13 +3,11 @@
 // loop); a FAIL routes the verdict + evidence to the expert who OWNS the failing domain, who fixes the
 // real defect or proves a false positive. Automatic re-work loops are Gate C's (e2e) job.
 
-import * as rolesService from './roles.service'
-import * as agentService from './agent-dispatch'
 import * as memoryService from './memory.service'
 import * as settingsService from './settings.service'
 import * as gateOutcomeRepo from '../repos/gate-outcome.repo'
 import { displayName } from '../agent/roles/prompts'
-import { deriveAcceptanceCriteria, route, decideEscalation } from './coordinator-route'
+import { deriveAcceptanceCriteria, decideEscalation } from './coordinator-route'
 import { gitHead, changedPathsSince, buildChangedSet } from './examine/diff'
 import type { WrittenFile } from '../agent/context'
 import { subjectMeta, type ReviewSubject } from './examine/subjects'
@@ -21,7 +19,7 @@ import { ulid } from '../db/id'
 // the SHARED single verifier body lives in examine/verifier — the floor (runGatedRoleStep + closeFloor +
 // the subject integrator re-verify) and the panel all call the SAME runVerifierStep (never a copy).
 import { runPanelExamine, subjectEvidence, type SubjectFinding } from './examine/panel'
-import { runVerifierStep } from './examine/verifier'
+import { runVerifierStep, chooseVerifierRole } from './examine/verifier'
 
 // How the gated step ended. 'pass' = verifier approved the implementer's change directly. 'fixed' =
 // verifier FAILed, the fail handler claimed a fix AND a re-verification confirmed it. 'false-positive' =
@@ -120,8 +118,13 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
   // outcome / refute tally / fixed-by so the card row renders the final verdict + "→ fixed by X" without
   // re-parsing prose. A no-op when no panel ran (no card with that id exists → the orphan event is ignored).
   const panelId = `panel-${stepId}`
+  // closure-loop §3.2: the panel lives on the independent Verifier segment, so the final-state re-emit is
+  // attributed to verifierRoleId (the renderer's card-anchored routing then lands it on the segment that owns
+  // the panelId card, regardless of any later verifier / implementer-fix segments). chooseVerifierRole is the
+  // SAME deterministic pick the panel used.
+  const verifierRoleId = chooseVerifierRole(roleId)
   const emitSubjectFinal = (lv: SubjectFinding, outcome: GateOutcome, handlerRoleId?: string): void => {
-    opts.cb.onToolEvent?.(roleId, {
+    opts.cb.onToolEvent?.(verifierRoleId, {
       type: 'sub_tool_done',
       toolUseId: `gate-b-subject-${lv.key}-${stepId}`,
       parentToolId: panelId,
@@ -352,26 +355,6 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
   }
 }
 
-// After Gate B FAILs, Danny picks the expert who owns the failing domain. Reuses the router so the choice isn't
-// hard-coded (frontend → Shuri, backend/logic → Flynn, etc.). Must resolve to a BOUND agent role that can run the
-// loop + edit code; falls back to the implementer (always a bound agent role) when the router yields nothing
-// usable (e.g. it answered 'direct' or picked an unbound role).
-async function chooseFailHandler(feedback: string, gate: { originalPrompt: string }, implementerRoleId: string, signal?: AbortSignal): Promise<string> {
-  const ask = [
-    'An independent quality check FAILED a code change. Pick the ONE expert who should OWN the failure — fix the real defect, or prove it is a false positive — chosen by the domain the failure actually involves.',
-    `Original task:\n${gate.originalPrompt}`,
-    `Verification failure evidence:\n${feedback}`
-  ].join('\n\n')
-  try {
-    const decision = await route(ask, [], signal)
-    const picked = decision.mode === 'single' ? decision.role : decision.roles?.[0]
-    if (picked && agentService.AGENT_ROLE_IDS.has(picked) && Boolean(rolesService.getBinding(picked)?.endpointId)) return picked
-  } catch {
-    /* router unavailable → fall back to the implementer below */
-  }
-  return implementerRoleId
-}
-
 // Gate B FAIL closure: the chosen expert handles the failure end-to-end and ends with an explicit conclusion, so
 // no FAIL is ever left hanging. Runs the normal agent-loop dispatch (full kit → it can edit code on a real defect)
 // under the implementer's working dir + permission mode, exactly like a regular dispatched step. The verifier is
@@ -383,15 +366,13 @@ async function runGateBFailFollowUp(
   implementationText: string,
   feedback: string,
   signal?: AbortSignal,
-  idTag?: string,
   presetHandler?: string
 ): Promise<{ handlerRoleId: string; text: string; inputTokens: number; outputTokens: number; writtenFiles: WrittenFile[] }> {
-  // The integrator already grouped surviving findings by owning expert, so it passes that expert as
-  // presetHandler (one consolidated dispatch per expert); the floor path lets chooseFailHandler pick.
-  const handlerRoleId = presetHandler ?? (await chooseFailHandler(feedback, gate, implementerRoleId, signal))
-  // Distinct per-round stream identity (idTag = floor/expert+step); falls back to a timestamp.
-  const toolId = `gate-b-followup-${idTag ?? Date.now()}`
-  opts.cb.onToolEvent?.(implementerRoleId, { type: 'sub_tool_start', toolUseId: toolId, parentToolId: 'coordinator-gate-b', name: 'GateBFailHandler', input: { handlerRoleId } })
+  // closure-loop decision ② "谁写谁修": the implementer who wrote the change fixes it — no domain re-routing to
+  // another owning expert. presetHandler is retained only as an explicit override (currently always the
+  // implementer too). The fix runs as the implementer's OWN visible segment (③ in §3.2), NOT a sub_tool card on
+  // the original implementer segment — so there is no GateBFailHandler card here anymore (it was the old double).
+  const handlerRoleId = presetHandler ?? implementerRoleId
   const handlerPrompt = [
     'Independent quality verification returned FAIL on the change below. As the responsible expert, CLOSE this out — never leave the FAIL dangling.',
     `Verification verdict + evidence:\n${feedback}`,
@@ -415,7 +396,6 @@ async function runGateBFailFollowUp(
     expectsFileChanges: true,
     signal: signal ?? opts.signal
   })
-  opts.cb.onToolEvent?.(implementerRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: 'coordinator-gate-b', name: 'GateBFailHandler', isError: false, result: handler.text || 'no output' })
   return { handlerRoleId, text: handler.text, inputTokens: handler.inputTokens, outputTokens: handler.outputTokens, writtenFiles: handler.writtenFiles }
 }
 
@@ -432,7 +412,7 @@ async function closeFloor(
   stepId: string,
   signal?: AbortSignal
 ): Promise<FloorClosure> {
-  const followUp = await runGateBFailFollowUp(implementerRoleId, opts, gate, implementationText, feedback, signal, `floor-${stepId}`)
+  const followUp = await runGateBFailFollowUp(implementerRoleId, opts, gate, implementationText, feedback, signal)
   let inputTokens = followUp.inputTokens
   let outputTokens = followUp.outputTokens
   const base = { handlerRoleId: followUp.handlerRoleId, failureFeedback: feedback }
@@ -481,14 +461,15 @@ async function integrateSubjectClosures(
   let inputTokens = 0
   let outputTokens = 0
 
-  // Route each confirmed subject to its owning expert, then GROUP by expert (the cross-dimension consolidation:
-  // two subjects owned by the same expert become one coherent fix, not two clobbering handlers).
+  // closure-loop decision ② "谁写谁修": every confirmed subject is fixed by the IMPLEMENTER who wrote the
+  // change — no per-subject domain routing to other experts. They therefore all group under one expert (the
+  // implementer), so the integrator dispatches ONE consolidated fix covering every finding coherently (which is
+  // also exactly the cross-dimension consolidation this grouping was built for — now with a single owner).
   const byExpert = new Map<string, SubjectFinding[]>()
   for (const lv of failedSubjects) {
-    const handler = await chooseFailHandler(lv.feedback, gate, implementerRoleId, signal)
-    const arr = byExpert.get(handler) ?? []
+    const arr = byExpert.get(implementerRoleId) ?? []
     arr.push(lv)
-    byExpert.set(handler, arr)
+    byExpert.set(implementerRoleId, arr)
   }
 
   // Fix-round backstop (inv6): cap distinct expert dispatches; overflow → unresolved, surfaced (not dropped).
@@ -505,7 +486,7 @@ async function integrateSubjectClosures(
     // ONE consolidated fix dispatch for this expert: every finding it owns, per-finding delimited so each is
     // addressed (the dispatch is merged for COHERENCE; learning + outcomes stay per-finding, never a blob).
     const merged = lvs.map((lv, i) => `Finding ${i + 1} — ${lv.key} dimension:\n${lv.feedback}`).join('\n\n———\n\n')
-    const followUp = await runGateBFailFollowUp(implementerRoleId, opts, gate, implementationText, merged, signal, `integrator-${handlerRoleId}-${stepId}`, handlerRoleId)
+    const followUp = await runGateBFailFollowUp(implementerRoleId, opts, gate, implementationText, merged, signal, handlerRoleId)
     inputTokens += followUp.inputTokens
     outputTokens += followUp.outputTokens
     // ONE fresh build after this expert's fix (P1a de-contamination: scope to THIS step's delta incl. the

@@ -38,6 +38,7 @@ export interface MessageRow {
   sentTokens: number
   dispatch: string[] | null
   runId: string | null
+  segmentKind: string | null
   createdAt: string
 }
 
@@ -53,6 +54,7 @@ export interface MessageAppendInput {
   sentTokens?: number
   dispatch?: string[]
   runId?: string
+  segmentKind?: string
 }
 
 interface ConversationRaw {
@@ -81,6 +83,7 @@ interface MessageRaw {
   sent_tokens: number
   dispatch: string | null
   run_id: string | null
+  segment_kind: string | null
   created_at: string
 }
 
@@ -113,6 +116,7 @@ function mapMessage(raw: MessageRaw): MessageRow {
     sentTokens: raw.sent_tokens,
     dispatch: raw.dispatch ? (JSON.parse(raw.dispatch) as string[]) : null,
     runId: raw.run_id,
+    segmentKind: raw.segment_kind,
     createdAt: raw.created_at
   }
 }
@@ -204,10 +208,11 @@ export function append(conversationId: string, input: MessageAppendInput): Messa
   const outTokens = input.outTokens ?? 0
   const sentTokens = input.sentTokens ?? 0
   const runId = input.runId ?? null
+  const segmentKind = input.segmentKind ?? null
   getDb()
     .prepare(
-      `INSERT INTO messages (id, conversation_id, author, expert_id, model, content, attachments, in_tokens, cache_read_tokens, out_tokens, sent_tokens, dispatch, run_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO messages (id, conversation_id, author, expert_id, model, content, attachments, in_tokens, cache_read_tokens, out_tokens, sent_tokens, dispatch, run_id, segment_kind, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -223,6 +228,7 @@ export function append(conversationId: string, input: MessageAppendInput): Messa
       sentTokens,
       dispatch,
       runId,
+      segmentKind,
       createdAt
     )
   return {
@@ -239,6 +245,7 @@ export function append(conversationId: string, input: MessageAppendInput): Messa
     sentTokens,
     dispatch: input.dispatch ?? null,
     runId,
+    segmentKind,
     createdAt
   }
 }

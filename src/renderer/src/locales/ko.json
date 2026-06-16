@@ -295,6 +295,7 @@
   "conv.tokensSuffix": "tokens",
   "conv.requestFailedRetrying": "요청 실패 · 재시도 중 ({attempt}/{max})",
   "conv.synthesis": "종합",
+  "conv.verifier": "검증자",
   "conv.collapse": "접기",
   "conv.viewFull": "전체 보기",
   "conv.needAgentProto": "{name}님은 에이전트입니다 — 프로필에서 Anthropic, OpenAI 또는 Gemini 엔드포인트를 바인딩하세요",

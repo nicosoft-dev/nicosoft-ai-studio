@@ -146,6 +146,22 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
         ].join('\n'),
         cb
       )
+    } else if (gateEnabled && (out.gateOutcome === 'pass' || out.gateOutcome === 'fixed')) {
+      // closure-loop decision ④ "Danny 收所有步": single mode's good outcomes used to end silently on the
+      // verifier's own segment (asymmetric with the multi-expert modes, which always close on Danny's synthesis).
+      // Danny now closes EVERY gated single step too — a short verdict beat after the implementer → Verifier
+      // (→ fix → re-verify) flow, so the closure loop always ends on the coordinator's voice.
+      emitCoordinatorIntro(
+        input.convId,
+        out.gateOutcome === 'fixed'
+          ? [
+              '**Delivered — independent verification flagged a defect; the implementer fixed it and re-verification passed.**',
+              '',
+              (out.gateEvidence ?? '').slice(0, 1200)
+            ].filter(Boolean).join('\n')
+          : '**Delivered — independent verification passed.**',
+        cb
+      )
     }
     fireSideEffects(input.convId, decision.role, out.endpointId, out.model, out.inputTokens)
     return { inputTokens: out.inputTokens, outputTokens: out.outputTokens }

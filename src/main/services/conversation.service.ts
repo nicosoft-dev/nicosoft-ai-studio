@@ -46,6 +46,7 @@ function toMsgDto(r: convRepo.MessageRow): MessageDto {
     outputTokens: r.outTokens,
     sentTokens: r.sentTokens,
     dispatch: r.dispatch,
+    segmentKind: r.segmentKind,
     createdAt: r.createdAt
   }
 }
@@ -80,7 +81,8 @@ export function append(convId: string, input: MessageAppendDto): MessageDto {
     cacheReadTokens: input.cacheReadTokens,
     outTokens: input.outputTokens,
     sentTokens: input.sentTokens,
-    dispatch: input.dispatch
+    dispatch: input.dispatch,
+    segmentKind: input.segmentKind
   })
   convRepo.touch(convId) // bump updated_at so the history list re-sorts
   return toMsgDto(row)

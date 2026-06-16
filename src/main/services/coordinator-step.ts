@@ -94,6 +94,14 @@ export interface RunStepOptions {
   // Implementation-gated step (Gate B implementer / fail handler): the agent loop nudges once when the
   // run quiesces with zero file-editing tool calls (action-displacement guard).
   expectsFileChanges?: boolean
+  // closure-loop §3.2/§3.3: marks this step's segment identity. 'verifier' → the renderer renders it as an
+  // independent "<role> · Verifier" segment + persists the marker so it survives reload. Undefined = a normal step.
+  segmentKind?: string
+  // closure-loop: card-only execution. When true, runRoleStep does NOT open its own segment (no onStepStart /
+  // persisted message / onStepDone) and does NOT forward the inner loop's deltas or tool events — the caller
+  // renders the work via an explicit sub_tool card instead (panel subjects / refute votes fold into the
+  // verifier segment as PanelCard rows, never as their own prose segments). Usage is still recorded (billing).
+  quiet?: boolean
 }
 
 // Coordinator's system = a base prompt section (direct / synthesis) + his recalled memories + the running
@@ -106,7 +114,7 @@ export function withCoordinatorContext(base: string, memories: MemoryRow[], summ
 }
 
 export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; inputTokens: number; outputTokens: number; endpointId: string; model: string; writtenFiles: WrittenFile[] }> {
-  const { convId, roleId, prompt, dispatch, cb, signal, cwd, includeHistory = false, isSynthesis = false, isDirect = false, isParallelSynthesis = false, isCouncilSynthesis = false } = opts
+  const { convId, roleId, prompt, dispatch, cb, signal, cwd, includeHistory = false, isSynthesis = false, isDirect = false, isParallelSynthesis = false, isCouncilSynthesis = false, quiet = false, segmentKind } = opts
   const binding = rolesService.getBinding(roleId)
   if (!binding?.endpointId || !binding.model) {
     throw new LlmError('bad_request', `role "${roleId}" has no endpoint binding`)
@@ -135,7 +143,8 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
     summaryContent = summaryRepo.getLatest(convId)?.content ?? null
   }
 
-  cb.onStepStart(roleId, dispatch, binding.model)
+  // quiet (closure-loop): a card-only step opens NO segment — the caller renders it via an explicit sub_tool card.
+  if (!quiet) cb.onStepStart(roleId, dispatch, binding.model, segmentKind)
 
   // Agent-dispatched experts (engineer/shuri/generalist/analyst/scheduler) run a FULL tool-using agent
   // loop — the dispatch upgrade (doc 19 §11 phase 2), not a single llmChat turn. runDispatchedAgent owns
@@ -150,9 +159,14 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
     let text = ''
     const agentCb: agentService.AgentCallbacks = {
       onStream: (ev) => {
+        // quiet (closure-loop): card-only step — accumulate text for the return value (it becomes the caller's
+        // sub_tool card result) but forward NOTHING to the renderer (no segment to stream into; the inner loop's
+        // deltas + its own tool cards must not leak onto the verifier segment).
         if (ev.type === 'text') {
           text += ev.delta
-          cb.onDelta(roleId, ev.delta)
+          if (!quiet) cb.onDelta(roleId, ev.delta)
+        } else if (quiet) {
+          return
         } else if (ev.type === 'tool_use_start') {
           cb.onToolStart?.(roleId, ev.id, ev.name)
         } else if (ev.type === 'sub_tool_start' || ev.type === 'sub_tool_done') {
@@ -163,8 +177,8 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
           cb.onTurnFinalUsage?.(ev.usage)
         }
       },
-      onEvent: (ev) => cb.onToolEvent?.(roleId, ev),
-      onUsage: (inputTokens) => cb.onUsage?.(roleId, inputTokens), // bridge the agent loop's live ↑ to this segment's readout
+      onEvent: (ev) => { if (!quiet) cb.onToolEvent?.(roleId, ev) },
+      onUsage: (inputTokens) => { if (!quiet) cb.onUsage?.(roleId, inputTokens) }, // bridge the agent loop's live ↑ to this segment's readout
       onToolImage: (att) => cb.onToolImage?.(att), // a dispatched Georgia generated an image → surface it live
       // phase 4: coordinator self-approves via the safety classifier instead of popping the user (doc §8) —
       // green/yellow auto-run, red hard-denied + recorded for deferred approval.
@@ -215,7 +229,8 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
     }
     // Persist the step + any images its tools generated (Georgia) — text OR an attachment lands the message,
     // so a reopened conversation re-reads the image from the DB. Empty + image-only turns still persist.
-    if (text || res.attachments.length) {
+    // quiet (closure-loop): a card-only step persists NO segment of its own (it rides the caller's sub_tool card).
+    if (!quiet && (text || res.attachments.length)) {
       convService.append(convId, {
         author: 'expert',
         expertId: roleId,
@@ -223,6 +238,7 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
         content: text,
         attachments: res.attachments,
         dispatch: dispatch ?? undefined,
+        segmentKind,
         inputTokens: res.contextTokens, // DISPLAY: current context size (last turn, not accumulated). Billing below uses total.
         cacheReadTokens: res.cacheReadTokens, // cache-read share of that last turn — persistent "(+N cached)" note
         outputTokens: res.outTokens,
@@ -230,7 +246,7 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
       })
     }
     usageRepo.record({ conversationId: convId, expertId: roleId, model: binding.model, provider: ep.protocol, inTokens: res.inTokens, outTokens: res.outTokens })
-    cb.onStepDone(roleId, text, res.contextTokens, res.outTokens, res.inTokens)
+    if (!quiet) cb.onStepDone(roleId, text, res.contextTokens, res.outTokens, res.inTokens)
     // inputTokens returned to the caller = CURRENT context size (last turn's prompt) — same as the persisted
     // message (line 216), onStepDone, the tool-less return below, and agent.service. It feeds the "/ window"
     // meter + compression threshold, NOT the cumulative loop total (res.inTokens, already recorded for billing
@@ -285,7 +301,7 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
     messages: messages.filter((m) => m.role !== 'system').map((m) => ({ role: m.role, content: m.content })),
     smallModel: pickSmallModel(ep.protocol, ep.availableModels, binding.model)
   })
-  cb.onUsage?.(roleId, inputTokens) // live ↑ readout before the step's stream starts
+  if (!quiet) cb.onUsage?.(roleId, inputTokens) // live ↑ readout before the step's stream starts
 
   let text = ''
   const result = await llmChat(
@@ -293,10 +309,10 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
     (d) => {
       if (d.text) {
         text += d.text
-        cb.onDelta(roleId, d.text)
+        if (!quiet) cb.onDelta(roleId, d.text)
       }
-      if (d.usage) cb.onUsage?.(roleId, d.usage.inTokens, d.usage.outTokens, d.usage.cachedTokens) // live ↑in+↓out for tool-less steps too
-      if (d.turnFinalUsage) {
+      if (!quiet && d.usage) cb.onUsage?.(roleId, d.usage.inTokens, d.usage.outTokens, d.usage.cachedTokens) // live ↑in+↓out for tool-less steps too
+      if (!quiet && d.turnFinalUsage) {
         cb.onTurnFinalUsage?.({
           inputTokens: d.turnFinalUsage.inTokens,
           outputTokens: d.turnFinalUsage.outTokens,
@@ -312,20 +328,21 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
   // Persist this step as its own message (one per step), tagged with the chain so the renderer can
   // draw a single dispatch badge spanning the run. Skip persistence for empty replies — they'd produce
   // dead assistant rows that break Anthropic's strict no-empty-text-block rule on the NEXT turn's seed.
-  if (text) {
+  if (!quiet && text) {
     convService.append(convId, {
       author: 'expert',
       expertId: roleId,
       model: binding.model,
       content: text,
       dispatch: dispatch ?? undefined,
+      segmentKind,
       inputTokens,
       outputTokens: result.usage.outTokens,
       sentTokens: result.usage.inTokens // SETTLE ↑: this turn's upstream input usage = total sent (single round trip)
     })
   }
   usageRepo.record({ conversationId: convId, expertId: roleId, model: binding.model, provider: ep.protocol, inTokens: result.usage.inTokens, outTokens: result.usage.outTokens })
-  cb.onStepDone(roleId, text, inputTokens, result.usage.outTokens, result.usage.inTokens)
+  if (!quiet) cb.onStepDone(roleId, text, inputTokens, result.usage.outTokens, result.usage.inTokens)
 
   // Tool-less path (synthesis / direct / designer-translator-editor) never edits the tree → no event-bus files.
   return { text, inputTokens, outputTokens: result.usage.outTokens, endpointId: binding.endpointId, model: binding.model, writtenFiles: [] }

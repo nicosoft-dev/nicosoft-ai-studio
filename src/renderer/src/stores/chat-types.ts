@@ -34,6 +34,7 @@ export interface ChatMessage {
   // and draw a single dispatch badge spanning consecutive same-chain messages.
   expertId?: string | null
   dispatch?: string[] | null
+  segmentKind?: string | null // closure-loop: 'verifier' = an independent Gate B reviewer step → renders a "· Verifier" identity badge (live + across reload)
   inputTokens?: number // CURRENT context size for THIS turn (count_tokens) — per-message so collab experts each show their own; drives the composer "/ window" meter, NOT the settlement total
   cacheReadTokens?: number // cache-read share of inputTokens for THIS turn (persisted via MessageDto) — drives the finalized "(+N cached)" note after the live overlay clears + across reloads
   outputTokens?: number // real output tokens for THIS turn (upstream usage) — live ↓ readout fallback while streaming; NOT summed or shown after the turn ends (no settled summary — see chat-segment.tsx)

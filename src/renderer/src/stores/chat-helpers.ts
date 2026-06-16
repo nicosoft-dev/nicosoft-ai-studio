@@ -74,6 +74,22 @@ const summarizeValue = (v: unknown): string => {
   try { return JSON.stringify(v) } catch { return String(v) }
 }
 
+// Which message a coordinator sub_tool event belongs to. CARD-ANCHORED first: if the parent card (e.g. a
+// PanelExamine card, id=parentToolId) or this very sub-tool (toolUseId) already lives on a message, target
+// THAT message — a re-emit of a subject's final state, or a refute nesting, MUST land on the segment that
+// owns the card, NOT the latest same-role segment (closure-loop puts multiple verifier segments + an
+// implementer fix segment between the panel and its re-emit). Only the FIRST event for a brand-new card
+// (no card match yet) falls back to the latest assistant segment of roleId — which is where the card opens.
+export const locateSubToolMsgIndex = (msgs: ChatMessage[], roleId: string, parentToolId: string, toolUseId: string): number => {
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].tools?.some((t) => t.id === parentToolId || t.id === toolUseId)) return i
+  }
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role === 'assistant' && msgs[i].expertId === roleId) return i
+  }
+  return -1
+}
+
 export const applySubToolStart = (message: ChatMessage, parentToolId: string, toolUseId: string, name: string, input: unknown): ChatMessage => {
   const subTool: ToolCall = { id: toolUseId, name, input: input ?? {}, status: 'running' }
   const tools = upsertSubTool(message.tools, parentToolId, subTool)

@@ -295,6 +295,7 @@
   "conv.tokensSuffix": "tokens",
   "conv.requestFailedRetrying": "Request failed · retrying ({attempt}/{max})",
   "conv.synthesis": "synthesis",
+  "conv.verifier": "Verifier",
   "conv.collapse": "Collapse",
   "conv.viewFull": "View full",
   "conv.needAgentProto": "{name} is an agent — bind an Anthropic, OpenAI, or Gemini endpoint in its profile",

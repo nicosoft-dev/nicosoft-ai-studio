@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS messages (
   sent_tokens     INTEGER NOT NULL DEFAULT 0,    -- SETTLE ↑: cumulative input (total sent, billing) for the segment
   dispatch        TEXT,                           -- JSON string[] | null
   run_id          TEXT,                           -- agent run id (Engineer); links to transcript. null for plain chat
+  segment_kind    TEXT,                           -- closure-loop: 'verifier' (independent Gate B reviewer segment) | null (normal). Drives the "· Verifier" identity badge across reload.
   created_at      TEXT NOT NULL,
   FOREIGN KEY (conversation_id) REFERENCES conversations (id) ON DELETE CASCADE
 );

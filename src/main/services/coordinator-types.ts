@@ -40,7 +40,8 @@ export interface CoordinatorRunInput {
 
 export interface CoordinatorCallbacks {
   onDispatch: (chain: string[], reason: string) => void
-  onStepStart: (roleId: string, dispatch: string[] | null, model: string) => void
+  // segmentKind (closure-loop): 'verifier' streams this step as an independent "· Verifier" segment. Undefined = normal.
+  onStepStart: (roleId: string, dispatch: string[] | null, model: string, segmentKind?: string) => void
   onDelta: (roleId: string, text: string) => void
   onStepDone: (roleId: string, text: string, inputTokens: number, outputTokens?: number, sentTokens?: number) => void
   onUsage?: (roleId: string, inputTokens: number, outputTokens?: number, cachedTokens?: number) => void // live ↑in + ↓out per chunk (cachedTokens = cache-read share); roleId tags the dispatched step so the renderer isolates per-segment (coordinator path)

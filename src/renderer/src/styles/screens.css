@@ -65,6 +65,14 @@
   color: var(--accent); background: var(--accent-soft);
   padding: 1px 6px; border-radius: 4px;
 }
+/* closure-loop: the independent Gate B reviewer's "· Verifier" identity badge. Distinct from synthesis
+   (accent) — a neutral, slightly raised chip so the reviewer reads as a separate role, not Danny's merge. */
+.seg-head .verifier-tag {
+  font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-3); background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  padding: 0 6px; border-radius: 4px;
+}
 .seg-head .ts { font-size: 11px; color: var(--text-4); margin-left: auto; font-variant-numeric: tabular-nums; }
 /* Folding: dispatched-expert steps (parallel/council/pipeline) render in a fixed-height scroll window
    from the start; "View full" expands to full height. Coordinator intro/synthesis + single/direct never fold. */

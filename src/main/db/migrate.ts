@@ -12,6 +12,9 @@ export function runMigrations(db: DatabaseSync): void {
   ensureColumn(db, 'messages', 'run_id', 'TEXT')
   ensureColumn(db, 'messages', 'cache_read_tokens', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(db, 'messages', 'sent_tokens', 'INTEGER NOT NULL DEFAULT 0')
+  // closure-loop: the independent Gate B reviewer renders as its own "· Verifier" segment; this marks the
+  // persisted step so the identity survives reload. null on every existing row (a normal expert/coordinator step).
+  ensureColumn(db, 'messages', 'segment_kind', 'TEXT')
   ensureColumn(db, 'mcp_servers', 'args', "TEXT NOT NULL DEFAULT '[]'")
   ensureColumn(db, 'skills', 'when_to_use', 'TEXT')
   ensureColumn(db, 'skills', 'body', 'TEXT')

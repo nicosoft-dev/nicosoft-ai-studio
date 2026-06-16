@@ -359,6 +359,7 @@ export interface CoordinatorStepStart {
   roleId: string
   dispatch: string[] | null
   model: string
+  segmentKind?: string // closure-loop: 'verifier' = this step streams as an independent "· Verifier" segment
 }
 export interface CoordinatorStepDelta {
   streamId: string
@@ -577,6 +578,7 @@ export interface MessageDto {
   outputTokens: number // real output tokens for this turn (0 if unknown / user message) — live ↓ readout fallback; not summed/shown after the turn ends
   sentTokens: number // cumulative billing input for this turn incl. cache (0 if unknown / user message) — billing/accounting only, never displayed (no settled per-turn readout)
   dispatch: string[] | null // coordinator pipeline chain; null for single-expert / direct chat / agent turns
+  segmentKind: string | null // closure-loop: 'verifier' = independent Gate B reviewer segment (→ "· Verifier" badge); null = normal step
   createdAt: string
 }
 export interface MessageAppendDto {
@@ -591,6 +593,7 @@ export interface MessageAppendDto {
   outputTokens?: number // real output tokens for this turn (assistant messages)
   sentTokens?: number // cumulative billing input incl. cache (assistant messages) — billing/accounting record (not the ↑ display)
   dispatch?: string[] // set by coordinator.service for pipeline steps; renderer reads it via MessageDto.dispatch
+  segmentKind?: string // closure-loop: 'verifier' marks an independent Gate B reviewer step → "· Verifier" identity badge
 }
 export interface ConversationTitleInput {
   convId: string

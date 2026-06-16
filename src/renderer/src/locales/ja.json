@@ -295,6 +295,7 @@
   "conv.tokensSuffix": "tokens",
   "conv.requestFailedRetrying": "リクエスト失敗 · 再試行中 ({attempt}/{max})",
   "conv.synthesis": "統合",
+  "conv.verifier": "検証者",
   "conv.collapse": "折りたたむ",
   "conv.viewFull": "全文を表示",
   "conv.needAgentProto": "{name} はエージェントです — プロフィールで Anthropic、OpenAI、または Gemini エンドポイントをバインドしてください",
