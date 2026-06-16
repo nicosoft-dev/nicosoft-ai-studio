@@ -74,7 +74,10 @@ export interface AgentResult {
   // 'thrash_stop' = the repeated-failure loop guard wound the run down (same failure fingerprint hit
   // THRASH_STOP_AT); the model got a final wrap-up window, so messages still end with its own state
   // report — but the result must never be presented as a clean completion.
-  reason: 'completed' | 'max_turns' | 'aborted' | 'thrash_stop'
+  // 'incomplete' = an implementation-gated run (expectsFileChanges) ended via the empty-turn-after-work
+  // path with ZERO file edits: the upstream returned empty content (provider fault / mid-turn truncation),
+  // not the model deciding it was done. Must NOT read as a clean completion — see docs/empty-turn-after-work.md.
+  reason: 'completed' | 'max_turns' | 'aborted' | 'thrash_stop' | 'incomplete'
   messages: AgentMessage[]
   turns: number
   // Compaction firings this run (layer 2 / layer 3) — surfaced into run-stats so long-run behavior
@@ -239,6 +242,11 @@ export async function* runAgent(
   // one confirmation turn — acceptable.
   let sawFileChange = false
   let nudgedForFileChanges = false
+  // producedAssistantTurn: did the model ever commit a non-empty turn this run? Used by the empty-turn
+  // terminal branch to decide throw-vs-incomplete: `turns` counts only tool-result ROUNDS, so a gated run
+  // that replied with plan text or got FILE_CHANGE_NUDGE'd (turns stays 0) then truncated would wrongly hit
+  // the turns===0 hard throw. This flag distinguishes "produced output then truncated" from "literally nothing".
+  let producedAssistantTurn = false
   // Verify-before-done guard (loop-guards.ts): true while there's nothing unverified — flips false on
   // every successful file edit, back to true when a recognized verification command completes cleanly
   // AFTER it. On quiesce with it still false, inject ONE nudge (the deterministic backstop behind
@@ -329,6 +337,9 @@ export async function* runAgent(
       if (result?.reason === 'thrash_stop') {
         return `${last ? `${last}\n\n` : ''}(Note: sub-agent was stopped by the repeated-failure loop guard; result may be incomplete.)`
       }
+      // NB: 'incomplete' is intentionally NOT annotated here — it is only produced for an expectsFileChanges
+      // run, and sub-agent spawns do not thread that flag, so a child can never return it. If delegated
+      // implementation is ever gated, add the note here (and thread expectsFileChanges into the spawns).
       return last
     }
 
@@ -505,6 +516,11 @@ export async function* runAgent(
     // Anthropic rejects an empty-content assistant message — if the turn produced nothing usable,
     // end rather than push it (which would 400 the next request).
     if (assistant.content.length === 0) {
+      // A zero-content stream that resolves as the user cancels is an ABORT, not a completion/incompletion
+      // or upstream fault — short-circuit before any other verdict (mirrors the tool-path abort guard).
+      if (ctx.signal.aborted) {
+        return { reason: 'aborted', messages, turns, compactions }
+      }
       // A refusal (stop_reason: 'refusal') with no content would otherwise end on a silent empty turn that
       // reads as a successful "done". Surface it so the user sees the model declined (audit F20).
       if (assistant.stopReason === 'refusal') {
@@ -512,6 +528,17 @@ export async function* runAgent(
         messages.push(note)
         yield { type: 'assistant', message: note, usage: assistant.usage }
         return { reason: 'completed', messages, turns, compactions }
+      }
+      // A max_tokens turn whose ONLY block was a tool_use truncated mid-json had that block dropped by the
+      // llm layer, landing here content-less WITH stopReason==='max_tokens'. That is an output-size cap, not
+      // an upstream empty — escalate the ceiling once and re-send (same budget bump as the tool-path escalate
+      // below) instead of burning the empty-turn retries on the identical 16K request. (Only Anthropic emits
+      // this stopReason today; the OpenAI/Gemini adapter gap is noted in docs/empty-turn-after-work.md.)
+      if (assistant.stopReason === 'max_tokens' && !maxTokensEscalated && maxTokens < ESCALATED_MAX_TOKENS) {
+        maxTokensEscalated = true
+        maxTokens = ESCALATED_MAX_TOKENS
+        console.warn(`[agent] max_tokens escalate (empty content — dropped truncated tool_use) to ${ESCALATED_MAX_TOKENS} run=${ctx.runId} turn=${turns}`)
+        continue
       }
       // Zero content blocks on a non-refusal turn = an upstream anomaly (dogfood round8: a proxy channel
       // fault streamed empty 200s), not the model deciding to stop. The turn was never pushed, so a
@@ -522,14 +549,20 @@ export async function* runAgent(
         params.onRetry?.({ attempt: emptyTurnRetries, max: MAX_EMPTY_TURN_RETRIES, code: 'empty_response', waitMs: 0 })
         continue
       }
-      if (turns === 0) {
-        // The run produced literally nothing. Surfacing it as a successful empty "completed" voids the
-        // step downstream (a verifier with no verdict, a fail handler with no closure) — fail loudly so
-        // the caller can surface a real error instead.
+      // Throw-vs-incomplete keys off whether ANY model output landed (producedAssistantTurn), NOT `turns`,
+      // which counts only tool-result rounds — a gated run that replied with plan text or got
+      // FILE_CHANGE_NUDGE'd keeps turns at 0 yet did produce output. A gated run that produced output then
+      // truncated is the soft 'incomplete' case (labeled at coordinator-step → Gate B verifier sees it);
+      // a run that produced literally nothing still fails loudly so the caller surfaces a real upstream error.
+      if (!producedAssistantTurn) {
         throw new LlmError('upstream', 'upstream returned empty responses (zero content blocks) on every attempt')
       }
-      console.warn(`[agent] empty turn after ${turns} turns of real work — ending the run as completed run=${ctx.runId}`)
-      return { reason: 'completed', messages, turns, compactions }
+      // Gate on LANDED edits (ctx.writtenPaths, populated only inside successful Write/Edit/MultiEdit), NOT on
+      // sawFileChange — which flips true on a merely-ATTEMPTED edit, including one that errored — so a gated run
+      // whose only edit failed then truncated still reads as incomplete (docs/empty-turn-after-work.md).
+      const gatedNoEdits = Boolean(params.expectsFileChanges) && (ctx.writtenPaths?.size ?? 0) === 0
+      console.warn(`[agent] empty turn after real work — ending the run as ${gatedNoEdits ? 'incomplete (gated, zero edits landed — upstream likely truncated)' : 'completed'} run=${ctx.runId}`)
+      return { reason: gatedNoEdits ? 'incomplete' : 'completed', messages, turns, compactions }
     }
 
     // Loop continues iff the assistant requested ≥1 tool — NOT based on stop_reason (§2.1). Compute this
@@ -550,6 +583,7 @@ export async function* runAgent(
 
     const assistantMsg: AgentMessage = { role: 'assistant', content: assistant.content }
     messages.push(assistantMsg)
+    producedAssistantTurn = true // a non-empty turn landed — a later empty turn is "truncated after output", not "nothing"
     emptyTurnRetries = 0 // a real turn arrived — the next empty (if any) is a fresh incident
     lastUsage = assistant.usage
     lastUsageAt = messages.length // after the assistant push → slice(lastUsageAt) = tool_results below

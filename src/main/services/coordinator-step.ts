@@ -227,6 +227,12 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
     if (res.reason === 'thrash_stop') {
       text = `${text ? `${text}\n\n` : ''}[Loop guard: this step was wound down after repeated identical failures — treat the result as incomplete.]`
     }
+    // The implementer was cut off by an upstream interruption with zero file edits (loop.ts empty-turn-after-work
+    // path). Label it so the same downstream readers (persisted message, synthesis, Gate B's verifier reading
+    // the implementer summary) treat it as a truncated implementation, not a clean completion.
+    if (res.reason === 'incomplete') {
+      text = `${text ? `${text}\n\n` : ''}[Upstream interruption: this step was cut off with zero file edits — the implementation did not land; treat the result as incomplete.]`
+    }
     // Persist the step + any images its tools generated (Georgia) — text OR an attachment lands the message,
     // so a reopened conversation re-reads the image from the DB. Empty + image-only turns still persist.
     // quiet (closure-loop): a card-only step persists NO segment of its own (it rides the caller's sub_tool card).
