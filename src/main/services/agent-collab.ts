@@ -24,6 +24,7 @@ import type { AgentRunInput } from '../ipc/contracts'
 import { agentEvents } from './event-bus'
 import { manager as skillManager } from './skill.service'
 import { DEV_ROLES, E2E_TOOLS, toolsForAgentRole } from './agent-tools'
+import { createPanelHandle } from './examine/agent-panel'
 import { buildAgentSystem } from './agent-system'
 
 // One expert in a collaboration: who, the task it starts on, its endpoint + cwd. Same per-role binding the
@@ -147,6 +148,20 @@ export async function runCollabSession(
           collab,
           services: registry,
           lsp,
+          // panel_examine bridge (panel-examine §4.1): collab is precisely the from-scratch / cross-cutting work
+          // the tool targets, so DEV experts get it here too (without this, the tool was in their kit but ctx.panel
+          // was unset → it errored with a wrong reason). Captures the collab convId/cwd/sig + the expert's hooks.
+          panel: DEV_ROLES.has(x.roleId)
+            ? createPanelHandle({
+                convId,
+                callerRoleId: x.roleId,
+                cwd: x.cwd,
+                permissionMode: x.permissionMode ?? 'default',
+                signal: sig,
+                onStream: (ev) => hooks.onExpertStream(x.roleId, ev),
+                requestPermission: (req, s) => hooks.requestPermission(x.roleId, req, s)
+              })
+            : undefined,
           onSubAgentToolEvent: (ev) => hooks.onExpertStream(x.roleId, ev),
         }
         const gen = runAgent({

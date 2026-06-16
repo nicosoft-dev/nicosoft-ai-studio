@@ -110,6 +110,7 @@ function verbDone(t: ToolCall): string {
     case 'PanelExamine': return 'Examined across perspectives'
     case 'Subject': return 'Reviewed a perspective'
     case 'SubjectRefute': return 'Cross-checked a finding'
+    case 'panel_examine': return 'Ran a panel review'
     default: return t.name
   }
 }
@@ -137,6 +138,7 @@ function verbLive(t: ToolCall): string {
     case 'PanelExamine': return 'Examining across perspectives'
     case 'Subject': return 'Reviewing a perspective'
     case 'SubjectRefute': return 'Cross-checking a finding'
+    case 'panel_examine': return 'Running a panel review'
     default: return `Running ${t.name}`
   }
 }

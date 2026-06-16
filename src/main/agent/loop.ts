@@ -287,7 +287,9 @@ export async function* runAgent(
   // (and Task is filtered out), so it can't recurse further.
   // Drop plan-mode tools too: a sub-agent returns a summary, it doesn't need plan-approval semantics, and its
   // EnterPlanMode/ExitPlanMode would otherwise flip the PARENT's plan state / hit the parent's Gate A.
-  const subAgentTools = tools.filter((t) => t.name !== 'Task' && t.name !== 'EnterPlanMode' && t.name !== 'ExitPlanMode')
+  // panel_examine is denied too (panel-examine §7 Phase 4 P0): a sub-agent — or a panel reviewer — must NOT be
+  // able to recursively trigger another panel fan-out (bounds fan-out × depth). ctx.panel is also nulled below.
+  const subAgentTools = tools.filter((t) => t.name !== 'Task' && t.name !== 'EnterPlanMode' && t.name !== 'ExitPlanMode' && t.name !== 'panel_examine')
   const makeSpawnSubAgent =
     (signal: AbortSignal): SpawnSubAgent =>
     async ({ prompt, parentToolId }) => {
@@ -299,7 +301,7 @@ export async function* runAgent(
         system: SUBAGENT_SYSTEM,
         messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
         tools: subAgentTools,
-        ctx: { ...ctx, signal, readFileState: new Map(), todos: [], spawnSubAgent: undefined },
+        ctx: { ...ctx, signal, readFileState: new Map(), todos: [], spawnSubAgent: undefined, panel: undefined },
         maxTokens,
         maxTurns,
         onStream: emitChildStream(parentToolId),
@@ -334,7 +336,7 @@ export async function* runAgent(
   // runChild that runs one of a child's turns with the sub-agent tool set — no Task, no nested agent_*
   // (depth 1) — threading the child's persisted readFileState/todos. Sub-agents get subAgents: undefined.
   if (ctx.subAgents instanceof AsyncSubAgentPool) {
-    const asyncChildTools = tools.filter((t) => t.name !== 'Task' && !t.name.startsWith('agent_') && t.name !== 'EnterPlanMode' && t.name !== 'ExitPlanMode')
+    const asyncChildTools = tools.filter((t) => t.name !== 'Task' && !t.name.startsWith('agent_') && t.name !== 'EnterPlanMode' && t.name !== 'ExitPlanMode' && t.name !== 'panel_examine')
     const runChild: RunChild = async (childMessages, signal, readFileState, todos, parentToolId, subAgentId) => {
       const sub = runAgent({
         protocol: params.protocol,
@@ -344,7 +346,7 @@ export async function* runAgent(
         system: SUBAGENT_SYSTEM,
         messages: childMessages,
         tools: asyncChildTools,
-        ctx: { ...ctx, signal, readFileState, todos, spawnSubAgent: undefined, subAgents: undefined },
+        ctx: { ...ctx, signal, readFileState, todos, spawnSubAgent: undefined, subAgents: undefined, panel: undefined },
         maxTokens,
         maxTurns,
         onStream: emitChildStream(parentToolId, subAgentId),

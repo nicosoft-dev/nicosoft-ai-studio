@@ -8,6 +8,19 @@ import type { CollabHandle } from './collab'
 import type { ServiceHandle } from './service-registry'
 import type { LspHandle } from './lsp/manager'
 
+// panel_examine agent tool (panel-examine §4.1): the agent drives a multi-perspective review on an EXPLICIT
+// target (file paths). The handle (impl in services/examine/agent-panel.ts) captures the run's convId/cwd/signal
+// and adapts the agent's AgentCallbacks → the CoordinatorCallbacks the reviewer fan-out needs. `ok:false` carries
+// a clear reason (kill-switch off / no other bound reviewer role / no target) — NEVER a silent empty result.
+export interface PanelExamineResult {
+  ok: boolean
+  message: string
+  findings?: Array<{ subject: string; passed: boolean; refuted?: boolean; feedback: string }>
+}
+export interface PanelHandle {
+  examine(input: { paths?: string[]; text?: string; mode: 'review'; subjects?: string[] }): Promise<PanelExamineResult>
+}
+
 export interface ReadFileEntry {
   content: string
   mtimeMs: number
@@ -139,6 +152,10 @@ export interface AgentContext {
   // diagnostics on TS/JS. Set by runAgentLoop (lazily spawns typescript-language-server on first query);
   // undefined where there's no project to analyze. Shared with sub-agents so they can use it too.
   lsp?: LspHandle
+  // panel_examine agent tool (panel-examine §4): set by runAgentLoop (top-level run only). Undefined inside a
+  // sub-agent / a panel reviewer (depth guard, loop.ts) so a reviewer can't recursively trigger another panel
+  // → bounded fan-out×depth. The tool no-ops with a clear reason when this is absent.
+  panel?: PanelHandle
 }
 
 // What a tool needs to make its own LLM call (a content-extraction summary, a delegated search) or run a

@@ -19,6 +19,7 @@ import { CORE_TOOLS } from '../agent/registry'
 import { ServiceRegistry } from '../agent/service-registry'
 import { AsyncSubAgentPool } from '../agent/sub-agent-pool'
 import { LSPManager } from '../agent/lsp/manager'
+import { createPanelHandle } from './examine/agent-panel'
 import { lspTool } from '../agent/tools/lsp'
 import { disposeE2ESessionsOwnedBy } from '../agent/tools/e2e-browser'
 import type { Tool } from '../agent/tool'
@@ -142,6 +143,20 @@ export async function runAgentLoop(
     services: registry,
     subAgents,
     lsp,
+    // panel_examine bridge (panel-examine §4.1) — only DEV roles carry the tool; the handle captures this run's
+    // convId/cwd/signal + adapts cb (AgentCallbacks) → the CoordinatorCallbacks the reviewer fan-out needs.
+    panel: DEV_ROLES.has(loop.roleId)
+      ? createPanelHandle({
+          convId: loop.convId,
+          callerRoleId: loop.roleId,
+          cwd,
+          permissionMode: loop.permissionMode,
+          signal,
+          onStream: cb.onStream,
+          onToolImage: cb.onToolImage,
+          requestPermission: cb.requestPermission
+        })
+      : undefined,
     onSubAgentToolEvent: cb.onStream,
   }
 

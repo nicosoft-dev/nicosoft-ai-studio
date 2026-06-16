@@ -44,7 +44,11 @@ export function subjectEvidence(lv: SubjectFinding): string {
   return lv.refuteEvidence ? `${base}\n[${lv.refuteEvidence}]` : base
 }
 
-export async function runPanelExamine(roleId: string, opts: RunStepOptions, gate: { originalPrompt: string; approvedPlan?: string; acceptance?: string[] }, implementationText: string, stepId: string, baseRef: string, baseChanged: string[], implementerFiles: readonly WrittenFile[], signal?: AbortSignal): Promise<SubjectFinding[]> {
+// `override` is the agent-tool entry (panel-examine §4): instead of deriving the target from git+writtenFiles,
+// the caller supplies an explicit { changed, diff } target. The reviewer role is NOT overridden — chooseVerifierRole
+// is deterministic, so the bridge validates "a bound reviewer ≠ caller exists" (§4.2) and this re-picks the IDENTICAL
+// role. Gate B omits override → the git-derived target, byte-identical.
+export async function runPanelExamine(roleId: string, opts: RunStepOptions, gate: { originalPrompt: string; approvedPlan?: string; acceptance?: string[] }, implementationText: string, stepId: string, baseRef: string, baseChanged: string[], implementerFiles: readonly WrittenFile[], signal?: AbortSignal, override?: { target?: { changed: string[]; diff: string } }): Promise<SubjectFinding[]> {
   // Card id is deterministic from stepId (gate-b re-emits onto it after closure). `panelOpened` guards the
   // error path: if anything throws AFTER the parent sub_tool_start, the catch MUST close it (else the card
   // spins 'running' forever — no turn-end net flips a lingering running tool on a finished segment).
@@ -62,14 +66,15 @@ export async function runPanelExamine(roleId: string, opts: RunStepOptions, gate
     // hunks for tracked-modified files. This is the fix for greenfield triggering — a brand-new all-untracked
     // project that `git diff` reports as zero bytes now reaches the trigger with real file content. `baseChanged`
     // de-contaminates the git side from prior pipeline steps (P1a); event paths are already this-step-only.
-    const { changed, diff } = await buildChangedSet(opts.cwd, baseRef, baseChanged, implementerFiles)
+    const { changed, diff } = override?.target ?? (await buildChangedSet(opts.cwd, baseRef, baseChanged, implementerFiles))
     if (changed.length === 0) return []
     const selected = await selectSubjects(changed, diff, gate.originalPrompt, signal)
     if (selected.length === 0) return []
 
-    // All subjects borrow ONE independent verifier role (≠ implementer) for their model/endpoint — also used
-    // to key the per-endpoint limiter. No independent role bound → no subject (the floor already labels that
-    // case 'skipped'/unverified; subjects simply don't run).
+    // All subjects borrow ONE independent reviewer role (≠ caller) for their model/endpoint — also used to key
+    // the per-endpoint limiter + the refute votes + the subject fan-out, so all three agree (chooseVerifierRole is
+    // deterministic). No independent role → no subject (floor labels that 'skipped'; the agent entry's bridge
+    // gives an explicit "can't form a panel" tool-result via this same chooseVerifierRole check before reaching here).
     const verifierRoleId = chooseVerifierRole(roleId)
     if (verifierRoleId === roleId) return []
     const verifierEndpointId = rolesService.getBinding(verifierRoleId)?.endpointId ?? ''
