@@ -152,9 +152,11 @@ export interface AgentContext {
   // diagnostics on TS/JS. Set by runAgentLoop (lazily spawns typescript-language-server on first query);
   // undefined where there's no project to analyze. Shared with sub-agents so they can use it too.
   lsp?: LspHandle
-  // panel_examine agent tool (panel-examine §4): set by runAgentLoop (top-level run only). Undefined inside a
-  // sub-agent / a panel reviewer (depth guard, loop.ts) so a reviewer can't recursively trigger another panel
-  // → bounded fan-out×depth. The tool no-ops with a clear reason when this is absent.
+  // panel_examine agent tool (panel-examine §4 / closure-loop decision ⑤): set by runAgentLoop / collab iff the
+  // run's kit carries the panel_examine tool — every agent role now does (handle-presence ⟺ tool-presence).
+  // Undefined inside a sub-agent / a panel reviewer / any fixed-kit verifier (they have no panel_examine tool;
+  // sub-agents also null it explicitly in loop.ts) so a reviewer can't recursively trigger another panel →
+  // bounded fan-out×depth. The tool no-ops with a clear reason when this is absent.
   panel?: PanelHandle
 }
 

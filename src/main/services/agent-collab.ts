@@ -148,10 +148,11 @@ export async function runCollabSession(
           collab,
           services: registry,
           lsp,
-          // panel_examine bridge (panel-examine §4.1): collab is precisely the from-scratch / cross-cutting work
-          // the tool targets, so DEV experts get it here too (without this, the tool was in their kit but ctx.panel
-          // was unset → it errored with a wrong reason). Captures the collab convId/cwd/sig + the expert's hooks.
-          panel: DEV_ROLES.has(x.roleId)
+          // panel_examine bridge (panel-examine §4.1 / closure-loop decision ⑤): collab is precisely the
+          // from-scratch / cross-cutting work the tool targets. Inject the handle iff the expert's kit carries the
+          // panel_examine tool (every agent role now does) — handle-presence ⟺ tool-presence, same guard as the
+          // single-run path. Captures the collab convId/cwd/sig + the expert's hooks.
+          panel: tools.some((t) => t.name === 'panel_examine')
             ? createPanelHandle({
                 convId,
                 callerRoleId: x.roleId,

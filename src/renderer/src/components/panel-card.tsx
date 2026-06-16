@@ -14,6 +14,7 @@
 import { useState } from 'react'
 import type { ReactElement } from 'react'
 import { Icons } from '@/components/icons'
+import { Markdown } from '@/components/markdown'
 import type { ToolCall } from '@/stores/chat'
 
 type SubjectState = 'queued' | 'examining' | 'pass' | 'fail' | 'fixed' | 'false-positive' | 'unresolved' | 'unverified'
@@ -110,7 +111,7 @@ function PanelRow({ subjectKey, tool, refutes, understand }: { subjectKey: strin
           {inp.handlerName ? <div className="pe-nested-line">→ fixed by {inp.handlerName}</div> : null}
         </div>
       ) : null}
-      {open && tool?.result ? <pre className="tb-result pe-payload">{tool.result}</pre> : null}
+      {open && tool?.result ? <div className="tb-md pe-payload"><Markdown>{tool.result}</Markdown></div> : null}
     </div>
   )
 }

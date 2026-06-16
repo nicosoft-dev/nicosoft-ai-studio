@@ -143,9 +143,10 @@ export async function runAgentLoop(
     services: registry,
     subAgents,
     lsp,
-    // panel_examine bridge (panel-examine §4.1) — only DEV roles carry the tool; the handle captures this run's
-    // convId/cwd/signal + adapts cb (AgentCallbacks) → the CoordinatorCallbacks the reviewer fan-out needs.
-    panel: DEV_ROLES.has(loop.roleId)
+    // panel_examine bridge (panel-examine §4.1 / closure-loop decision ⑤) — inject the handle iff this run's kit
+    // actually carries the panel_examine tool (every agent role now does; a fixed-kit verifier / sub-agent does
+    // NOT). Handle-presence ⟺ tool-presence is the recursion guard: no tool → no handle, self-enforcing.
+    panel: loop.tools.some((t) => t.name === 'panel_examine')
       ? createPanelHandle({
           convId: loop.convId,
           callerRoleId: loop.roleId,
@@ -301,13 +302,9 @@ export async function runAgentLoop(
   }
 }
 
-// Roles that run a full agent loop (tools + multi-turn transcript) when dispatched by the coordinator,
-// rather than a single llmChat turn. Same set the renderer's chat store keys agent:run vs chat:send on —
-// kept in sync across the IPC boundary by hand (main can't import the renderer copy, nor the reverse).
-// coordinator never dispatches to itself. translator + editor + designer run the full gemini agent loop —
-// Louise localizes whole files, Miranda reads/distills documents, Georgia generates images + reads briefs —
-// so a dispatched Louise/Miranda/Georgia needs tools (Georgia's ns_generate_image included).
-export const AGENT_ROLE_IDS = new Set(['engineer', 'shuri', 'generalist', 'analyst', 'scheduler', 'translator', 'editor', 'designer'])
+// AGENT_ROLE_IDS now lives in agent-tools (the kit builder needs it without a cycle); re-exported here so the
+// many `agentService.AGENT_ROLE_IDS` callers (coordinator-step / -gate-b / -route / examine/verifier) are unchanged.
+export { AGENT_ROLE_IDS } from './agent-tools'
 
 // Run a coordinator-dispatched expert as a full agent loop (role coding prompt + tools + transcript),
 // instead of a single llmChat turn. The coordinator owns persistence (it tags the step with the dispatch

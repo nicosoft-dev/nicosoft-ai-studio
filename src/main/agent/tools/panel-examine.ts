@@ -1,8 +1,9 @@
-// panel_examine — the agent-driven multi-perspective review tool (panel-examine §4 / D4). Lets a dev agent
-// (engineer/shuri) escalate, on its own judgment, to the same fan-out Gate B runs internally: N independent
-// read-only reviewers each probing one risk axis + adversarial skeptics refuting false alarms. The actual
-// fan-out lives behind ctx.panel (services/examine/agent-panel.ts) — this file is the tool surface + the D4
-// guidance the model reads to decide WHEN to drive it.
+// panel_examine — the agent-driven multi-perspective fan-out tool (panel-examine §4 / closure-loop §3.5).
+// Lets ANY agent role escalate, on its OWN judgment, to a fan-out of independent read-only agents: 'review'
+// (N reviewers each probing one risk axis + adversarial skeptics refuting false alarms → PASS/FAIL+evidence)
+// or 'understand' (N readers each summarizing one file → a shared map). The actual fan-out lives behind
+// ctx.panel (services/examine/agent-panel.ts) — this file is the tool surface + the guidance the model reads
+// to decide on its own WHEN to drive it, WHICH mode, and HOW WIDE.
 
 import { z } from 'zod'
 import { buildTool } from '../tool'
@@ -21,19 +22,26 @@ export const panelExamineTool = buildTool<typeof inputSchema, PanelExamineResult
   name: 'panel_examine',
   inputSchema,
   prompt: () =>
-    'Fan out an INDEPENDENT, multi-perspective REVIEW of a body of work. Several independent read-only reviewers ' +
-    'each examine the target from ONE distinct risk angle (security, data-integrity, concurrency, error-handling, ' +
-    'migration-safety, perf, api-contract, test-quality), then adversarial skeptics try to refute each flagged ' +
-    'defect before it stands — far deeper than a single read.\n' +
-    'Reach for this when the work is large enough to genuinely benefit from several independent angles, and SCALE ' +
-    'your judgment to the work. Examples (not an exhaustive checklist): reviewing a long document or a multi-document ' +
-    'set, auditing a feature/module you just built, an end-of-project review of a from-scratch build, or a sizable ' +
-    'cross-cutting change. For a small, single-concern edit a normal read is enough — do NOT reach for this.\n' +
-    'Pass the file path(s); the panel itself picks which risk dimensions the content warrants. Returns each ' +
-    "perspective's PASS/FAIL with evidence (false alarms already filtered by the skeptics). Read-only — never edits.\n" +
-    "Set mode:'understand' instead to fan out parallel READERS that each summarize one file into a structured map " +
-    '— for getting up to speed on a long document or a multi-file/multi-doc set you have not internalized yet ' +
-    '(no pass/fail; the map is the result).',
+    'Fan a body of work out to SEVERAL independent, read-only agents that each examine it from one angle — far ' +
+    'deeper than reading it once yourself. YOU decide, on your own judgment, when a piece of work is big enough to ' +
+    'warrant it, which mode fits, and how wide to fan; you do not wait to be told.\n' +
+    'TWO MODES:\n' +
+    "• mode:'review' (default) — N reviewers each probe ONE distinct risk axis (security, data-integrity, " +
+    'concurrency, error-handling, migration-safety, perf, api-contract, test-quality), then adversarial skeptics try ' +
+    'to refute each flagged defect before it stands. Returns each axis as PASS/FAIL with evidence (false alarms ' +
+    'already filtered out). Use it to audit a feature/module you just built, an end-of-project review of a ' +
+    'from-scratch build, or a sizable cross-cutting change.\n' +
+    "• mode:'understand' — N readers each summarize one file into a shared, structured MAP (no pass/fail; the map " +
+    'IS the result). Use it to get up to speed FAST on material you have not internalized: a long document, a ' +
+    'multi-document set (e.g. 01-/02-/03- specs), or an unfamiliar multi-file module before you change it.\n' +
+    'WHEN TO REACH FOR IT: judge by the SHAPE of the work, not a fixed threshold — when it is large enough that ' +
+    'several independent angles (review) or parallel readers (understand) genuinely beat a single read. The examples ' +
+    'above are illustrations, not an exhaustive checklist. SCALE the fan-out to the work: a small change → a few ' +
+    'agents; a large green-field or multi-doc target → many (the panel sizes itself from the content; a limiter ' +
+    'backstops it, so you never do the math).\n' +
+    'WHEN NOT TO: a small, single-concern edit or a short file — a normal read is enough; do NOT reach for this.\n' +
+    'INPUT/OUTPUT: pass the target file path(s) + mode; the panel itself picks which dimensions/readers the content ' +
+    'warrants. Read-only — it never edits code.',
   isReadOnly: () => true,
   async call(input, ctx) {
     // ctx.panel is set only on a top-level dev run; absent inside a sub-agent / a panel reviewer (the depth

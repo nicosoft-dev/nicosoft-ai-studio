@@ -8,6 +8,7 @@ import { ENGINEER_SYSTEM_PROMPT, SHURI_SYSTEM_PROMPT } from '../agent/system-pro
 import { enterPlanModeTool } from '../agent/tools/enter-plan-mode'
 import { exitPlanModeTool } from '../agent/tools/exit-plan-mode'
 import { askUserQuestionTool } from '../agent/tools/ask-user-question'
+import { panelExamineTool } from '../agent/tools/panel-examine'
 import { startServiceTool, stopServiceTool, serviceLogsTool, listServicesTool } from '../agent/tools/service'
 import { agentSpawnTool, agentSendTool, agentWaitTool, agentCloseTool, agentBatchTool } from '../agent/tools/async-subagent'
 import { e2eBrowserTool } from '../agent/tools/e2e-browser'
@@ -22,6 +23,15 @@ export const ENGINEER_ROLE_ID = 'engineer'
 // coding-agent system prompt, and a required cwd (doc 19 phase 1).
 export const DEV_ROLES = new Set([ENGINEER_ROLE_ID, 'shuri'])
 export const DEV_PROMPT: Record<string, string> = { engineer: ENGINEER_SYSTEM_PROMPT, shuri: SHURI_SYSTEM_PROMPT }
+
+// Roles that run a full agent loop (tools + multi-turn transcript) when dispatched by the coordinator,
+// rather than a single llmChat turn. Same set the renderer's chat store keys agent:run vs chat:send on —
+// kept in sync across the IPC boundary by hand (main can't import the renderer copy, nor the reverse).
+// coordinator never dispatches to itself. translator + editor + designer run the full gemini agent loop —
+// Louise localizes whole files, Miranda reads/distills documents, Georgia generates images + reads briefs —
+// so a dispatched Louise/Miranda/Georgia needs tools (Georgia's ns_generate_image included). Lives here (not
+// agent-dispatch) so the kit builder can reference it without a cycle; agent-dispatch re-exports it.
+export const AGENT_ROLE_IDS = new Set(['engineer', 'shuri', 'generalist', 'analyst', 'scheduler', 'translator', 'editor', 'designer'])
 
 // CORE tool subset per agent role (doc 16 §5). Engineer = full set; other roles get a tailored baseline.
 // Writes / exec / orchestration (Edit/MultiEdit/Bash/Task/TodoWrite) stay Engineer-only. WebSearch now works
@@ -54,6 +64,12 @@ const ROLE_CORE_TOOLS: Record<string, readonly string[]> = {
 // Plan-mode tools (EnterPlanMode/ExitPlanMode) — every agent role gets them (doc 17). They're
 // read-only (mode switch + plan presentation), so they're never gated by the plan-mode mutation deny.
 const PLAN_TOOLS = [enterPlanModeTool, exitPlanModeTool] as unknown as Tool[]
+// panel_examine (closure-loop §3.5 / decision ⑤) is a UNIVERSAL-tier tool like the plan-mode tools — NOT part
+// of the filterable CORE_TOOLS. It is appended to EVERY agent role (review + understand both open, not just the
+// dev roles); the runtime chooseVerifierRole gate decides whether a panel can actually form. It carries ctx.panel:
+// the injection sites (runAgentLoop / collab) key off the kit containing this tool, so handle-presence ⟺
+// tool-presence — a fixed-kit verifier / sub-agent (no panel_examine) automatically gets no handle (recursion guard).
+const PANEL_TOOLS = [panelExamineTool] as unknown as Tool[]
 // Dev roles (Flynn/Shuri) get the service tools in the SINGLE-agent path too (collab already had them),
 // so they run dev servers via start_service — detached + readiness-probed + tree-killed — instead of a
 // blocking `Bash ... &` that wedges the loop and leaks the process.
@@ -75,5 +91,8 @@ export function toolsForAgentRole(roleId: string): Tool[] {
     core = core.filter((t) => t.name !== 'ns_generate_image')
   }
   const skill = skillManager.skillTool(roleId)
-  return [...core, ...PLAN_TOOLS, askUserQuestionTool as unknown as Tool, ...mcpManager.toolsForRole(roleId), ...(skill ? [skill] : [])]
+  // panel_examine for every agent role (decision ⑤). coordinator's read-only DIRECT kit is not an agent role,
+  // so it does not get it; the runtime gate handles whether an independent reviewer can be formed.
+  const panel = AGENT_ROLE_IDS.has(roleId) ? PANEL_TOOLS : []
+  return [...core, ...PLAN_TOOLS, askUserQuestionTool as unknown as Tool, ...panel, ...mcpManager.toolsForRole(roleId), ...(skill ? [skill] : [])]
 }

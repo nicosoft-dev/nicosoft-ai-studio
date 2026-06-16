@@ -56,7 +56,7 @@ export default function App(): ReactElement {
   const persisted = loadState()
 
   const [view, setView] = useState<string>(persisted.view || 'onboarding')
-  const [activeExpert, setActiveExpert] = useState<string>(persisted.activeExpert || 'engineer')
+  const [activeExpert, setActiveExpert] = useState<string>(persisted.activeExpert || 'coordinator')
   const [settingsTab, setSettingsTab] = useState<string>(persisted.settingsTab || 'endpoints')
   const [cmdk, setCmdk] = useState(false)
   // "New conversation" role picker: a new conversation is a conversation WITH someone — the user picks
@@ -76,7 +76,7 @@ export default function App(): ReactElement {
   // once on mount. Until each store's load() completes, the sidebar shows built-ins only; customs
   // appear once the list resolves (typically one frame).
   useEffect(() => {
-    const startupExpert = persisted.activeExpert || 'engineer'
+    const startupExpert = persisted.activeExpert || 'coordinator'
     void chat.loadConversations().then(() => {
       // Land startup on the last chat's history, not the empty greeting. The persisted view restores the
       // active expert (e.g. Georgia) but not its conversation, so the chat opened on the greeting until

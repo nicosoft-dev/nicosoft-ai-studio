@@ -13,7 +13,6 @@ import { lsTool } from './tools/ls'
 import { multiEditTool } from './tools/multiedit'
 import { readTool } from './tools/read'
 import { taskTool } from './tools/task'
-import { panelExamineTool } from './tools/panel-examine'
 import { todoTool } from './tools/todo'
 import { viewImageTool } from './tools/view-image'
 import { webFetchTool } from './tools/web-fetch'
@@ -39,7 +38,6 @@ export const CORE_TOOLS: readonly Tool[] = [
   webSearchTool,
   todoTool,
   taskTool,
-  panelExamineTool,
   scheduleCreateTool,
   scheduleListTool,
   scheduleDeleteTool,
