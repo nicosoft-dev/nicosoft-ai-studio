@@ -74,19 +74,28 @@ const summarizeValue = (v: unknown): string => {
   try { return JSON.stringify(v) } catch { return String(v) }
 }
 
-// Which message a coordinator sub_tool event belongs to. CARD-ANCHORED first: if the parent card (e.g. a
-// PanelExamine card, id=parentToolId) or this very sub-tool (toolUseId) already lives on a message, target
-// THAT message — a re-emit of a subject's final state, or a refute nesting, MUST land on the segment that
-// owns the card, NOT the latest same-role segment (closure-loop puts multiple verifier segments + an
-// implementer fix segment between the panel and its re-emit). Only the FIRST event for a brand-new card
-// (no card match yet) falls back to the latest assistant segment of roleId — which is where the card opens.
+// Which message a sub_tool event belongs to — for BOTH the coordinator path (roleId given) and the agent/solo
+// path (roleId === ''). CARD-ANCHORED first: if the parent card (e.g. a PanelExamine card, id=parentToolId) or
+// this very sub-tool (toolUseId) already lives on a message, target THAT message — a re-emit of a subject's
+// final state, or a refute nesting, MUST land on the message that owns the card, NOT some other message. This
+// is also the fix for the agent path's old `.map(applySubToolStart over EVERY message)` bug: a sentinel parent
+// (panel_examine's 'coordinator-gate-b') matched nothing, so the orphan-append ran on every message → a panel
+// card duplicated after every block. Fallback for the FIRST event of a new card (no card match yet): the
+// coordinator path opens it on the latest segment of roleId; the agent path (no roleId) opens it on the current
+// streaming assistant message, else the latest assistant.
 export const locateSubToolMsgIndex = (msgs: ChatMessage[], roleId: string, parentToolId: string, toolUseId: string): number => {
   for (let i = msgs.length - 1; i >= 0; i--) {
     if (msgs[i].tools?.some((t) => t.id === parentToolId || t.id === toolUseId)) return i
   }
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    if (msgs[i].role === 'assistant' && msgs[i].expertId === roleId) return i
+  if (roleId) {
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === 'assistant' && msgs[i].expertId === roleId) return i
+    }
+    return -1
   }
+  // Agent / solo path (no per-event roleId): the sub-tool belongs to the turn in flight.
+  for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'assistant' && msgs[i].streaming) return i
+  for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'assistant') return i
   return -1
 }
 

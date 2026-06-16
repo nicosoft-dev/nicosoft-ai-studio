@@ -209,29 +209,29 @@ export const useChat = create<ChatState>((set, get) => {
         return { byConversation: { ...s.byConversation, [meta.convId]: msgs } }
       })
     })
+    // Card-anchored to ONE message (locateSubToolMsgIndex), NOT mapped over EVERY message — the old `.map`
+    // applied each sub-tool to all messages, so panel_examine's sentinel parent ('coordinator-gate-b', matched
+    // by nothing) hit the orphan-append on every message → a panel card duplicated after every block. Same
+    // routing the coordinator path uses; '' roleId → the agent path's streaming-message fallback.
     ag.onSubToolStart((d) => {
       const meta = agentMeta.get(d.streamId)
       if (!meta) return
-      set((s) => ({
-        byConversation: {
-          ...s.byConversation,
-          [meta.convId]: (s.byConversation[meta.convId] ?? []).map((m) =>
-            applySubToolStart(m, d.parentToolId, d.toolUseId, d.name, d.input)
-          ),
-        },
-      }))
+      set((s) => {
+        const msgs = (s.byConversation[meta.convId] ?? []).map((m) => ({ ...m }))
+        const i = locateSubToolMsgIndex(msgs, '', d.parentToolId, d.toolUseId)
+        if (i >= 0) msgs[i] = applySubToolStart(msgs[i], d.parentToolId, d.toolUseId, d.name, d.input)
+        return { byConversation: { ...s.byConversation, [meta.convId]: msgs } }
+      })
     })
     ag.onSubToolDone((d) => {
       const meta = agentMeta.get(d.streamId)
       if (!meta) return
-      set((s) => ({
-        byConversation: {
-          ...s.byConversation,
-          [meta.convId]: (s.byConversation[meta.convId] ?? []).map((m) =>
-            applySubToolDone(m, d.parentToolId, d.toolUseId, d.name, d.result, d.isError, d.input)
-          ),
-        },
-      }))
+      set((s) => {
+        const msgs = (s.byConversation[meta.convId] ?? []).map((m) => ({ ...m }))
+        const i = locateSubToolMsgIndex(msgs, '', d.parentToolId, d.toolUseId)
+        if (i >= 0) msgs[i] = applySubToolDone(msgs[i], d.parentToolId, d.toolUseId, d.name, d.result, d.isError, d.input)
+        return { byConversation: { ...s.byConversation, [meta.convId]: msgs } }
+      })
     })
     ag.onAssistant((d) => {
       const meta = agentMeta.get(d.streamId)
