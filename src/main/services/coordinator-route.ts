@@ -268,6 +268,45 @@ export async function selectSubjects(changedPaths: string[], diff: string, task:
   return deriveSubjects(changedPaths, diff, task, signal)
 }
 
+// --- D1 escalation judgment (panel-examine §2 D1 / §7 Phase 3) ------------------------------------
+
+const ESCALATE_INSTRUCTION = `An independent FLOOR reviewer already verified this code change (its verdict is below). You now decide whether to ESCALATE to a multi-perspective PANEL — several independent reviewers each probing a distinct risk axis (security / data-integrity / concurrency / migration-safety / …) the floor does not scrutinize at depth. The panel is an AMPLIFIER for SUBSTANTIAL work; a small, contained change is already adequately covered by the floor alone.
+
+Judge from the WORKLOAD and the floor's own read — there is NO fixed file-count threshold:
+- How much was changed (files touched, how many distinct modules / areas spanned)?
+- Is this a from-scratch build or a multi-module / multi-document effort (broad surface area), or a small, single-area edit?
+- Did the floor reviewer itself describe the change as large, complex, cross-cutting, or risky?
+
+A broad, cross-cutting, or risk-laden change → ESCALATE: YES. A small, single-area, low-risk edit the floor already covers → ESCALATE: NO. When genuinely unsure, prefer YES (the floor is the safety net either way). End your reply with exactly one final line: \`ESCALATE: YES\` or \`ESCALATE: NO\` — nothing after it.`
+
+// Should the gated step run the panel amplifier ON TOP of the floor, or stay floor-only? A SOFT judgment driven
+// by the change's WORKLOAD (touched files / spanned modules / task shape) — NOT git state, NOT a hardcoded
+// threshold — with the floor verifier's own verdict as an auxiliary signal (it already saw the whole change).
+// Property A is unaffected: the floor ALWAYS ran before this; declining to escalate only forgoes the Property-B
+// amplifier on a small change. Fail-OPEN (default escalate) so a judge fault never silently drops the amplifier.
+export async function decideEscalation(writtenFiles: readonly { path: string }[], task: string, floorFeedback: string, signal?: AbortSignal): Promise<{ escalate: boolean; reason: string }> {
+  const binding = rolesService.getBinding('coordinator')
+  if (!binding?.endpointId || !binding.model) return { escalate: true, reason: 'no coordinator binding — default escalate' }
+  const ep = endpointRepo.getById(binding.endpointId)
+  if (!ep || !ep.enabled) return { escalate: true, reason: 'coordinator endpoint unavailable — default escalate' }
+  const apiKey = keychain.getApiKey(binding.endpointId)
+  if (!apiKey) return { escalate: true, reason: 'no api key — default escalate' }
+  try {
+    const paths = writtenFiles.map((f) => f.path)
+    const areas = [...new Set(paths.map((p) => (p.includes('/') ? p.slice(0, p.indexOf('/')) : '.')))]
+    const workload = `Files touched this step: ${paths.length}\nDistinct top-level areas: ${areas.length}${areas.length ? ` (${areas.slice(0, 12).join(', ')})` : ''}`
+    const text = await chatOnce(ep, apiKey, binding.model, [
+      { role: 'user', content: `${ESCALATE_INSTRUCTION}\n\nTask:\n${task.slice(0, 4000)}\n\n${workload}\n\nFloor reviewer's verdict + notes:\n${floorFeedback.slice(0, 4000)}` }
+    ], { signal })
+    const m = [...text.matchAll(/^\s*[#*>•-]*\s*ESCALATE:\s*(YES|NO)\b/gim)].pop()?.[1]
+    const escalate = m ? m.toUpperCase() === 'YES' : true // no contract → default escalate (don't silently drop the amplifier)
+    return { escalate, reason: text.trim().slice(-300) }
+  } catch (e) {
+    console.warn('[coordinator] escalation decision failed — default escalate:', e instanceof Error ? e.message : e)
+    return { escalate: true, reason: 'escalation judge failed — default escalate' }
+  }
+}
+
 export function isNonTrivialTask(prompt: string): boolean {
   const text = prompt.trim()
   if (!text) return false

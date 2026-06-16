@@ -6,9 +6,10 @@
 import * as rolesService from './roles.service'
 import * as agentService from './agent-dispatch'
 import * as memoryService from './memory.service'
+import * as settingsService from './settings.service'
 import * as gateOutcomeRepo from '../repos/gate-outcome.repo'
 import { displayName } from '../agent/roles/prompts'
-import { deriveAcceptanceCriteria, route } from './coordinator-route'
+import { deriveAcceptanceCriteria, route, decideEscalation } from './coordinator-route'
 import { gitHead, changedPathsSince, buildChangedSet } from './examine/diff'
 import type { WrittenFile } from '../agent/context'
 import { subjectMeta, type ReviewSubject } from './examine/subjects'
@@ -170,11 +171,24 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
     }
   }
 
-  // M3 panel amplifier (panel-examine §4): the floor gave a real verdict (PASS/FAIL), so fan out the
-  // content-triggered per-dimension subjects ON TOP of it. Each subject is an ADDITIVE read-only check sharing one
-  // build; the floor verdict is never bypassed (§2 invariant). Best-effort: a degraded fan-out returns [] →
-  // floor-only, exactly today's behavior.
-  const subjectFindings = await runPanelExamine(roleId, opts, gate, result.text, stepId, baseRef, baseChanged, result.writtenFiles, signal)
+  // D1 escalation (panel-examine §2 / §7 Phase 3): the floor already gave a real verdict (PASS/FAIL) and ALWAYS
+  // ran — Property A. The panel amplifier runs ON TOP only when the main agent judges the change SUBSTANTIAL
+  // enough (soft, workload-driven; floor verdict is the auxiliary signal). A small change stays floor-only —
+  // forgoing the Property-B amplifier, never Property A. Gated behind the kill-switch so a floor-only A/B baseline
+  // (or a small change) spends no escalation/panel cost. A degraded fan-out still returns [] → floor-only.
+  // !verdict.skipped: a SKIPPED floor means no independent verifier role is bound — the panel can never fan out
+  // (chooseVerifierRole would resolve to the implementer → runPanelExamine returns []), so don't spend an
+  // escalation (or selectSubjects) call deciding about a panel that physically cannot run.
+  const panelEnabled = settingsService.get<boolean>('gateB.panelExamine.enabled') !== false
+  let subjectFindings: SubjectFinding[] = []
+  if (panelEnabled && !verdict.skipped) {
+    const escalation = await decideEscalation(result.writtenFiles, gate.originalPrompt, verdict.feedback, signal ?? opts.signal)
+    if (escalation.escalate) {
+      subjectFindings = await runPanelExamine(roleId, opts, gate, result.text, stepId, baseRef, baseChanged, result.writtenFiles, signal)
+    } else {
+      console.log(`[panel-examine] step ${stepId}: floor-only (not escalated) — ${escalation.reason}`)
+    }
+  }
   for (const lv of subjectFindings) {
     inputTokens += lv.inputTokens
     outputTokens += lv.outputTokens
