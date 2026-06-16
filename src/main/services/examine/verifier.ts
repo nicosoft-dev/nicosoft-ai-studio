@@ -1,6 +1,6 @@
 // Panel examine — the SHARED independent-verifier primitive (panel-examine §7 Phase 1). Extracted
-// VERBATIM from coordinator-gate-b so the FLOOR verifier (runGatedRoleStep + closeDomain re-verify) and
-// the PANEL fan-out (examine/panel.ts) call the IDENTICAL function — there is exactly ONE verifier body in
+// VERBATIM from coordinator-gate-b so the FLOOR verifier (runGatedRoleStep + closeFloor + the subject
+// integrator re-verify) and the PANEL fan-out (examine/panel.ts) call the IDENTICAL function — one verifier body in
 // the codebase. Copying it would let floor and panel drift and break floor byte-identity (Property A), so
 // this module owns it and both sides import it. No behavior change vs the in-gate-b version.
 
@@ -36,8 +36,8 @@ export interface SubjectContext {
   // floor verifier never sets these).
   panelId?: string
   why?: string
-  // closeDomain re-verify: confirm the claimed fix WITHOUT emitting a duplicate subject bubble (it reuses the
-  // subject's stable toolUseId, so an event would clobber the original FAIL row the card needs to keep).
+  // The subject integrator's re-verify: confirm the claimed fix WITHOUT emitting a duplicate subject bubble (it
+  // reuses the subject's stable toolUseId, so an event would clobber the original FAIL row the card needs to keep).
   quiet?: boolean
 }
 
@@ -54,7 +54,7 @@ export async function runVerifierStep(implementerRoleId: string, opts: RunStepOp
   const toolName = subject ? 'Subject' : 'IndependentVerifier'
   // Subject events nest under the panel card (parentToolId=panelId) when the caller is the panel fan-out; the
   // FLOOR keeps 'coordinator-gate-b' (no match → surfaces as its own top-level verifier card), byte-identical
-  // to before. A quiet re-verify (closeDomain) emits nothing so it can't clobber the original subject row.
+  // to before. A quiet re-verify (the subject integrator) emits nothing so it can't clobber the original row.
   const parentToolId = subject?.panelId ?? 'coordinator-gate-b'
   const emitEvents = !subject?.quiet
   if (emitEvents) opts.cb.onToolEvent?.(implementerRoleId, { type: 'sub_tool_start', toolUseId: toolId, parentToolId, name: toolName, input: subject ? { verifierRoleId, subject: subject.key, mode: 'review', why: subject.why ?? '' } : { verifierRoleId } })
