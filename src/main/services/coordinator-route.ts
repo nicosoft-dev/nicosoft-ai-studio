@@ -204,7 +204,7 @@ export interface SelectedSubject {
   why: string
 }
 
-const SUBJECT_SELECT_INSTRUCTION = `You decide which independent review SUBJECTS a code change needs, BEYOND the standard correctness review that already runs. Judge from the DIFF CONTENT below (what the change actually does), NOT from file names — a risk lives in the edit's meaning (an edit weakening a token check = security; one adding a lock = concurrency), not in what a file is called. Pick ZERO OR MORE dimensions from this CLOSED list — only ones a real, pointable risk in THIS diff justifies:
+const SUBJECT_SELECT_INSTRUCTION = `You decide which independent review SUBJECTS a body of code needs, BEYOND the standard correctness review that already runs. Judge from the DIFF and/or the TARGET FILE CONTENT below (what the change does, and the code as it stands), NOT from file names — a risk lives in the code's meaning (a token check that can be bypassed = security; a shared write without a lock = concurrency), not in what a file is called. When a review is explicitly requested with little or no diff, judge the FILE CONTENT directly. Pick ONE OR MORE dimensions from this CLOSED list — every dimension a real, pointable risk in this code justifies:
 ${DEFAULT_REVIEW_SUBJECTS.map((d) => `- ${d.key}: ${d.focus}`).join('\n')}
 
 Return ONLY a JSON array of {"key":"<a dimension key from the list>","why":"<one line citing the specific change — a file:hunk or concrete behavior — that risks that dimension>"}. Choose a dimension ONLY when the diff genuinely risks it; an empty array [] is the right answer for a low-risk change. NEVER invent a key outside the list. Output ONLY the JSON array — no prose, no markdown fence.`
@@ -214,7 +214,7 @@ Return ONLY a JSON array of {"key":"<a dimension key from the list>","why":"<one
 // and broke on the next; see examine/subjects.ts). Keys are validated against the closed enum in CODE
 // (REVIEW_SUBJECT_KEYS) and deduped by key — the model proposes, code constrains. Best-effort: any failure →
 // [] (the step stays floor-only). Mirrors deriveAcceptanceCriteria's binding/chatOnce/try-catch shape.
-async function deriveSubjects(changedPaths: string[], diff: string, task: string, signal?: AbortSignal): Promise<SelectedSubject[]> {
+async function deriveSubjects(changedPaths: string[], diff: string, task: string, signal?: AbortSignal, content?: string): Promise<SelectedSubject[]> {
   const binding = rolesService.getBinding('coordinator')
   if (!binding?.endpointId || !binding.model) return []
   const ep = endpointRepo.getById(binding.endpointId)
@@ -224,9 +224,12 @@ async function deriveSubjects(changedPaths: string[], diff: string, task: string
   try {
     const fileList = changedPaths.slice(0, 100).join('\n')
     // The diff is the primary signal; the file list covers brand-new files whose body git diff can't show.
-    const diffBlock = diff.trim() ? `Diff:\n${diff}` : '(no textual diff available — judge from the changed-file list and task)'
+    const diffBlock = diff.trim() ? `Diff:\n${diff}` : '(no textual diff available — judge from the file content below and the changed-file list)'
+    // File content fed alongside the diff: when the diff is thin/absent (agent-driven review, surgical change),
+    // the selector judges risk dimensions from the code as it stands rather than starving on an empty diff.
+    const contentBlock = content && content.trim() ? `\n\nTarget file content (the code as it stands):\n${content}` : ''
     const text = await chatOnce(ep, apiKey, binding.model, [
-      { role: 'user', content: `${SUBJECT_SELECT_INSTRUCTION}\n\nTask:\n${task.slice(0, 4000)}\n\nChanged files:\n${fileList}\n\n${diffBlock}` }
+      { role: 'user', content: `${SUBJECT_SELECT_INSTRUCTION}\n\nTask:\n${task.slice(0, 4000)}\n\nChanged files:\n${fileList}\n\n${diffBlock}${contentBlock}` }
     ], { signal })
     const start = text.indexOf('[')
     const end = text.lastIndexOf(']')
@@ -263,9 +266,13 @@ const NO_RISK_PATH = /(\.md|\.markdown|\.txt|\.rst|\.adoc)$|(^|\/)(LICENSE|CHANG
 // file-name heuristic). Best-effort: a failed/empty LLM layer → [] (the step stays floor-only). Cost
 // pre-filter: an empty change, or one where EVERY changed path is no-risk (docs/prose), short-circuits in
 // CODE with no LLM spend; any code-bearing change reaches the trigger, which reads the diff and judges on merit.
-export async function selectSubjects(changedPaths: string[], diff: string, task: string, signal?: AbortSignal): Promise<SelectedSubject[]> {
+// `content` (optional): the actual file CONTENT of the target, fed alongside the diff so the selector can judge
+// risk dimensions even when the diff is thin or absent (the agent-driven panel entry has no diff; a surgical
+// change has a tiny one). Without it, an empty/thin diff starved the selector → it picked nothing → the panel
+// declined to fan out even when explicitly invoked. With the code in hand it judges from what the code does.
+export async function selectSubjects(changedPaths: string[], diff: string, task: string, signal?: AbortSignal, content?: string): Promise<SelectedSubject[]> {
   if (changedPaths.length === 0 || changedPaths.every((p) => NO_RISK_PATH.test(p))) return []
-  return deriveSubjects(changedPaths, diff, task, signal)
+  return deriveSubjects(changedPaths, diff, task, signal, content)
 }
 
 // --- D1 escalation judgment (panel-examine §2 D1 / §7 Phase 3) ------------------------------------

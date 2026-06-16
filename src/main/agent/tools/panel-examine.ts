@@ -34,12 +34,15 @@ export const panelExamineTool = buildTool<typeof inputSchema, PanelExamineResult
     "• mode:'understand' — N readers each summarize one file into a shared, structured MAP (no pass/fail; the map " +
     'IS the result). Use it to get up to speed FAST on material you have not internalized: a long document, a ' +
     'multi-document set (e.g. 01-/02-/03- specs), or an unfamiliar multi-file module before you change it.\n' +
-    'WHEN TO REACH FOR IT: judge by the SHAPE of the work, not a fixed threshold — when it is large enough that ' +
-    'several independent angles (review) or parallel readers (understand) genuinely beat a single read. The examples ' +
-    'above are illustrations, not an exhaustive checklist. SCALE the fan-out to the work: a small change → a few ' +
+    'WHEN TO REACH FOR IT: judge by the SHAPE of the work, and DEFAULT to running it before you call substantial ' +
+    'work done — a feature/module/endpoint built from scratch, a change touching many files or a shared contract, ' +
+    'high-stakes code (billing, auth, data-integrity, migrations), an audit / "is this sound?" pass, or a subsystem ' +
+    'you have not internalized (understand mode first). On work shaped like that, a single read is not enough — ' +
+    'reach for this by default rather than waiting to be told. SCALE the fan-out to the work: a small change → a few ' +
     'agents; a large green-field or multi-doc target → many (the panel sizes itself from the content; a limiter ' +
     'backstops it, so you never do the math).\n' +
-    'WHEN NOT TO: a small, single-concern edit or a short file — a normal read is enough; do NOT reach for this.\n' +
+    'WHEN NOT TO: a genuinely small, single-concern edit or a short file — a one-line fix, a rename, a copy tweak — ' +
+    'a normal read is enough; do NOT reach for this. The call is yours, but lean toward reviewing on substantial work.\n' +
     'INPUT/OUTPUT: pass the target file path(s) + mode; the panel itself picks which dimensions/readers the content ' +
     'warrants. Read-only — it never edits code.',
   isReadOnly: () => true,

@@ -11,6 +11,7 @@ import * as settingsService from '../settings.service'
 import { chooseVerifierRole } from './verifier'
 import { runPanelExamine } from './panel'
 import { runUnderstand } from './understand'
+import { gitHead, diffSince } from './diff'
 import type { RunStepOptions } from '../coordinator-step'
 import type { CoordinatorCallbacks } from '../coordinator-types'
 import type { AgentEvent } from '../../agent/loop'
@@ -98,8 +99,12 @@ export function createPanelHandle(deps: PanelHandleDeps): PanelHandle {
         return { ok: false, message: 'panel_examine (review) needs at least one other configured expert besides you to act as an independent reviewer, but none is bound. Configure another expert (e.g. Analyst/Shuri/Flynn) and retry.' }
       }
       const gate = { originalPrompt: `Independent multi-perspective review requested. Review the following ${paths.length} file(s) for defects, each reviewer from its OWN assigned perspective only: ${paths.join(', ')}.`, acceptance: [] as string[] }
-      // Explicit target: the reviewers read the files themselves (read-only kit), so the diff is left empty and
-      // the file list rides in the task prompt above. selectSubjects picks the risk dimensions from that.
+      // Explicit target (closure-loop P1): give the selector a REAL diff — the caller's own uncommitted changes
+      // to these paths (working tree vs HEAD) — instead of the empty diff that starved selectSubjects. If the
+      // target has no changes (reviewing existing code), the diff is empty and runPanelExamine's content read
+      // (the file bodies) carries the selection. The reviewers still read the files themselves (read-only kit).
+      const base = await gitHead(deps.cwd)
+      const diff = base ? await diffSince(deps.cwd, base, paths) : ''
       const findings = await runPanelExamine(
         deps.callerRoleId,
         opts,
@@ -110,7 +115,7 @@ export function createPanelHandle(deps: PanelHandleDeps): PanelHandle {
         [],
         [],
         deps.signal,
-        { target: { changed: paths, diff: '' } }
+        { target: { changed: paths, diff } }
       )
 
       const produced = findings.filter((f) => f.produced)

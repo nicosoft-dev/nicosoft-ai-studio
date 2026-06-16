@@ -4,12 +4,14 @@
 // the floor — never copies it. Phase 1 keeps the CURRENT integration logic (D2 integrator is Phase 2); only
 // the location moved. No behavior change vs the in-gate-b version.
 
+import { readFile } from 'node:fs/promises'
 import * as rolesService from '../roles.service'
 import * as settingsService from '../settings.service'
 import { selectSubjects } from '../coordinator-route'
 import { refutePrompt } from '../../agent/roles/prompts'
 import { runRoleStep, type RunStepOptions } from '../coordinator-step'
 import type { WrittenFile } from '../../agent/context'
+import { confineReal } from '../../agent/confine'
 import { buildChangedSet } from './diff'
 import { subjectMeta, type ReviewSubject } from './subjects'
 import { runBuildOnce, type SharedBuild } from './build'
@@ -44,6 +46,31 @@ export function subjectEvidence(lv: SubjectFinding): string {
   return lv.refuteEvidence ? `${base}\n[${lv.refuteEvidence}]` : base
 }
 
+// Read the target files' content (capped) so selectSubjects can pick risk dimensions from the CODE itself, not
+// only the diff — essential for the agent-driven entry (no diff) and surgical changes (thin diff), where a
+// diff-only selector starved and declined to fan out. Skips unreadable / out-of-bounds paths (confineReal);
+// caps per-file + total so a large target can't bloat the selection prompt.
+async function readTargetContent(cwd: string | undefined, paths: readonly string[], maxTotal = 24_000): Promise<string> {
+  if (!cwd) return ''
+  const parts: string[] = []
+  let total = 0
+  for (const p of paths.slice(0, 40)) {
+    if (total >= maxTotal) break
+    try {
+      const abs = await confineReal(cwd, p)
+      let body = await readFile(abs, 'utf-8')
+      if (body.length > 8_000) body = body.slice(0, 8_000) + `\n…[${p} truncated]`
+      const block = `--- ${p} ---\n${body}`
+      parts.push(block)
+      total += block.length
+    } catch {
+      /* unreadable / out-of-bounds path — skip */
+    }
+  }
+  const out = parts.join('\n\n')
+  return out.length > maxTotal ? out.slice(0, maxTotal) + '\n…[content truncated for subject selection]' : out
+}
+
 // `override` is the agent-tool entry (panel-examine §4): instead of deriving the target from git+writtenFiles,
 // the caller supplies an explicit { changed, diff } target. The reviewer role is NOT overridden — chooseVerifierRole
 // is deterministic, so the bridge validates "a bound reviewer ≠ caller exists" (§4.2) and this re-picks the IDENTICAL
@@ -74,7 +101,11 @@ export async function runPanelExamine(roleId: string, opts: RunStepOptions, gate
     // de-contaminates the git side from prior pipeline steps (P1a); event paths are already this-step-only.
     const { changed, diff } = override?.target ?? (await buildChangedSet(opts.cwd, baseRef, baseChanged, implementerFiles))
     if (changed.length === 0) return []
-    const selected = await selectSubjects(changed, diff, gate.originalPrompt, signal)
+    // Feed the target's CONTENT (not just the diff) to the selector — both the agent entry (often no diff) and
+    // Gate B (a surgical change has a thin diff). Without it the selector starved on an empty/thin diff and
+    // declined to fan out even when the review was explicitly invoked. Read-only, capped.
+    const content = await readTargetContent(opts.cwd, changed)
+    const selected = await selectSubjects(changed, diff, gate.originalPrompt, signal, content)
     if (selected.length === 0) return []
 
     // All subjects borrow the ONE independent reviewer role (verifierRoleId, hoisted above) for their
