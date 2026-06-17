@@ -8,6 +8,7 @@
 import { z } from 'zod'
 import { buildTool } from '../tool'
 import type { ToolResultBlock } from '../types'
+import { withJsonDirective, jsonRetryDirective, parseJsonReply, asStructuredResult } from './subagent-output'
 
 const idSchema = z.strictObject({
   id: z.string().describe('The sub-agent id returned by agent_spawn (e.g. "sub-1")'),
@@ -86,33 +87,47 @@ export const agentCloseTool = buildTool({
   mapResult: stringResult,
 })
 
-export const agentBatchTool = buildTool<
-  z.ZodObject<{ prompts: z.ZodArray<z.ZodString> }>,
-  { task: number; reply: string }[]
->({
+const batchInputSchema = z.strictObject({
+  prompts: z
+    .array(z.string())
+    .min(1)
+    .max(8)
+    .describe('Independent sub-tasks to run concurrently; each becomes its own one-shot sub-agent'),
+  // Optional structured output: each sub-agent returns ONLY JSON of this shape (validated, one retry).
+  outputSchema: z
+    .string()
+    .optional()
+    .describe("Optional: the JSON shape each sub-agent should return, e.g. '{file: string, findings: string[]}'. Each returns ONLY that JSON."),
+})
+
+export const agentBatchTool = buildTool<typeof batchInputSchema, { task: number; reply: string }[]>({
   name: 'agent_batch',
-  inputSchema: z.strictObject({
-    prompts: z
-      .array(z.string())
-      .min(1)
-      .max(8)
-      .describe('Independent sub-tasks to run concurrently; each becomes its own one-shot sub-agent'),
-  }),
+  inputSchema: batchInputSchema,
   prompt: () =>
     'Run many independent sub-tasks concurrently and return all their results together. Each prompt ' +
     'becomes its own one-shot sub-agent; this blocks until all finish. Use for parallel fan-out (e.g. ' +
-    "summarize 5 files, probe 3 endpoints) where the tasks don't depend on each other.",
+    "summarize 5 files, probe 3 endpoints) where the tasks don't depend on each other. Pass `outputSchema` " +
+    'when you need each result machine-readable (each sub-agent then returns ONLY that JSON).',
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
   async call(input, ctx) {
     const pool = ctx.subAgents
     if (!pool) throw new Error('Background sub-agents are not available in this context.')
-    const ids = input.prompts.map((p) => pool.spawn(p, ctx.currentToolUseId))
+    const schema = input.outputSchema?.trim() ? input.outputSchema : undefined
+    // Each task runs its own spawn → wait → (one corrective retry) concurrently under Promise.all; pool.spawn
+    // is non-blocking so all start together, same fan-out as before.
+    const runOnce = async (prompt: string): Promise<string> => {
+      const id = pool.spawn(prompt, ctx.currentToolUseId)
+      const reply = await pool.wait(id)
+      pool.close(id)
+      return reply
+    }
     const results = await Promise.all(
-      ids.map(async (id, i) => {
-        const reply = await pool.wait(id)
-        pool.close(id)
-        return { task: i + 1, reply }
+      input.prompts.map(async (p, i) => {
+        if (!schema) return { task: i + 1, reply: await runOnce(p) }
+        let reply = await runOnce(withJsonDirective(p, schema))
+        if (!parseJsonReply(reply).ok) reply = await runOnce(`${withJsonDirective(p, schema)}\n\n${jsonRetryDirective(schema)}`)
+        return { task: i + 1, reply: asStructuredResult(reply, schema) }
       })
     )
     return { data: results }

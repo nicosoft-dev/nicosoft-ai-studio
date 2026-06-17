@@ -86,8 +86,13 @@ export interface AgentResult {
 }
 
 const SUBAGENT_SYSTEM =
-  'You are a sub-agent spawned to complete a focused subtask. Use the tools to do it, then give a ' +
-  'concise summary of what you found or did as your final message — that summary is all the parent sees.'
+  'You are a sub-agent spawned to complete a focused subtask. Use the tools to do it, then end with your ' +
+  'result as the final message.\n\n' +
+  'Your final message is the ONLY thing the parent agent receives — it is consumed by another agent, not ' +
+  'shown to a human. Make it self-contained and information-dense: lead with the answer/outcome, cite ' +
+  'concrete facts (file:line, decisions, what changed), and omit process narration and pleasantries.\n\n' +
+  'Work autonomously: there is no interactive user to ask, so do not wait on clarification — make the most ' +
+  'reasonable assumption, state it briefly, and proceed. Stop only when the subtask is done or genuinely blocked.'
 
 // Action-displacement guard (see expectsFileChanges). NotebookEdit intentionally included for parity
 // with the full kit even though most dispatched roles don't carry it.
@@ -309,7 +314,10 @@ export async function* runAgent(
         system: SUBAGENT_SYSTEM,
         messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
         tools: subAgentTools,
-        ctx: { ...ctx, signal, readFileState: new Map(), todos: [], spawnSubAgent: undefined, panel: undefined },
+        // askUser nulled (like the headless scheduler): a sub-agent has no interactive surface — without this
+        // it would inherit the parent's live askUser and could pop a blocking question dialog to the real user,
+        // contradicting SUBAGENT_SYSTEM's "no interactive user to ask". Nulled → AskUserQuestion errors cleanly.
+        ctx: { ...ctx, signal, readFileState: new Map(), todos: [], spawnSubAgent: undefined, panel: undefined, askUser: undefined },
         maxTokens,
         maxTurns,
         onStream: emitChildStream(parentToolId),
@@ -357,7 +365,9 @@ export async function* runAgent(
         system: SUBAGENT_SYSTEM,
         messages: childMessages,
         tools: asyncChildTools,
-        ctx: { ...ctx, signal, readFileState, todos, spawnSubAgent: undefined, subAgents: undefined, panel: undefined },
+        // askUser nulled (see the Task spawn above): a background sub-agent has no interactive surface, and
+        // under agent_batch several run concurrently — nulling prevents a child popping a blocking user dialog.
+        ctx: { ...ctx, signal, readFileState, todos, spawnSubAgent: undefined, subAgents: undefined, panel: undefined, askUser: undefined },
         maxTokens,
         maxTurns,
         onStream: emitChildStream(parentToolId, subAgentId),
