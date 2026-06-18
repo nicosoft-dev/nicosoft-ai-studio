@@ -418,5 +418,6 @@
   "terminal.new": "新しいターミナル",
   "terminal.unavailable": "ターミナルを利用できません — ネイティブモジュールの読み込みに失敗しました。",
   "files.copy": "コピー",
-  "files.copied": "コピーしました"
+  "files.copied": "コピーしました",
+  "files.resize": "ドラッグでサイズ変更"
 }

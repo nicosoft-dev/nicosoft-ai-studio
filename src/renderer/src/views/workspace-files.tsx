@@ -28,6 +28,7 @@ interface MenuState {
 export function WorkspaceFiles({ conv, activeExpert }: { conv: ConversationDto | null; activeExpert: string }): ReactElement {
   const t = useT()
   const cwdByExpert = useWorkspace((s) => s.cwdByExpert)
+  const setExpandedForCwd = useWorkspace((s) => s.setExpandedForCwd)
   const [rootCwd, setRootCwd] = useState<string | null>(null)
   const [resolving, setResolving] = useState(true)
   const [children, setChildren] = useState<Record<string, FsEntry[]>>({})
@@ -85,9 +86,15 @@ export function WorkspaceFiles({ conv, activeExpert }: { conv: ConversationDto |
     }
   }, [conv, activeExpert, cwdByExpert])
 
-  // Load the tree root once the cwd resolves (loadDir re-binds when rootCwd changes).
+  // Load the tree root once the cwd resolves, and restore the previously-expanded folders for this root
+  // (persisted per cwd) so the tree reopens where you left it. getState() reads the saved set without
+  // making it a dep — restore happens once per root change.
   useEffect(() => {
-    if (rootCwd) void loadDir('').catch(() => {})
+    if (!rootCwd) return
+    const saved = useWorkspace.getState().expandedByCwd[rootCwd] ?? []
+    setExpanded(new Set(saved))
+    void loadDir('').catch(() => {})
+    for (const d of saved) void loadDir(d).catch(() => {})
   }, [rootCwd, loadDir])
 
   // Re-load the currently-shown dirs in place (no clear → no flicker). Kept in a ref so the watch effect
@@ -120,6 +127,7 @@ export function WorkspaceFiles({ conv, activeExpert }: { conv: ConversationDto |
         next.add(relPath)
         if (!children[relPath]) void loadDir(relPath).catch(() => {})
       }
+      if (rootCwd) setExpandedForCwd(rootCwd, [...next]) // persist so the open state survives reopen
       return next
     })
   }

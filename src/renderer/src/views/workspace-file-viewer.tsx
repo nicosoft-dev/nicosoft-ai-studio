@@ -13,6 +13,8 @@ import { toast } from '@/stores/toast'
 import type { FsReadForView } from '@/lib/api'
 
 const MD_RE = /\.(md|markdown|mdx)$/i
+const MIN_W = 420
+const MIN_H = 280
 
 export function FileViewer({
   cwd,
@@ -57,6 +59,68 @@ export function FileViewer({
     void window.api.fs.reveal(cwd, relPath).catch(() => toast.error(t('files.revealFailed')))
   }
 
+  // Floating, draggable, resizable window — an independent window, NOT a modal: no backdrop, no
+  // outside-click dismiss (close only via ✕ / Esc). Position + size live here, centered on open.
+  const [rect, setRect] = useState(() => {
+    const w = Math.min(1100, Math.round(window.innerWidth * 0.82))
+    const h = Math.min(860, Math.round(window.innerHeight * 0.82))
+    return {
+      x: Math.max(20, Math.round((window.innerWidth - w) / 2)),
+      y: Math.max(20, Math.round((window.innerHeight - h) / 2)),
+      w,
+      h
+    }
+  })
+
+  const startDrag = (e: React.MouseEvent): void => {
+    if ((e.target as HTMLElement).closest('.fv-actions')) return // header buttons aren't a drag handle
+    e.preventDefault()
+    const sx = e.clientX
+    const sy = e.clientY
+    const base = { x: rect.x, y: rect.y }
+    document.body.style.userSelect = 'none'
+    const onMove = (ev: MouseEvent): void => {
+      const nx = base.x + (ev.clientX - sx)
+      const ny = base.y + (ev.clientY - sy)
+      // keep a grabbable strip of the window on screen
+      setRect((r) => ({
+        ...r,
+        x: Math.min(Math.max(nx, 24 - r.w), window.innerWidth - 80),
+        y: Math.min(Math.max(ny, 0), window.innerHeight - 36)
+      }))
+    }
+    const onUp = (): void => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.userSelect = ''
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+
+  const startResize = (e: React.MouseEvent): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    const sx = e.clientX
+    const sy = e.clientY
+    const base = { w: rect.w, h: rect.h }
+    document.body.style.userSelect = 'none'
+    const onMove = (ev: MouseEvent): void => {
+      setRect((r) => ({
+        ...r,
+        w: Math.max(MIN_W, Math.min(base.w + (ev.clientX - sx), window.innerWidth - r.x - 8)),
+        h: Math.max(MIN_H, Math.min(base.h + (ev.clientY - sy), window.innerHeight - r.y - 8))
+      }))
+    }
+    const onUp = (): void => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.userSelect = ''
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+
   let body: ReactElement
   if (error) body = <div className="ws-empty">{t('files.viewFailed')}</div>
   else if (!data) body = <div className="ws-empty">{t('files.loading')}</div>
@@ -84,10 +148,9 @@ export function FileViewer({
     )
 
   return createPortal(
-    <div className="fv-backdrop" onClick={onClose}>
-      <div className="fv-window" onClick={(e) => e.stopPropagation()}>
-        <div className="fv-head">
-          <span className="fv-name" title={relPath}>{name}</span>
+    <div className="fv-window" style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}>
+      <div className="fv-head" onMouseDown={startDrag}>
+        <span className="fv-name" title={relPath}>{name}</span>
           <div className="fv-actions">
             {data?.kind === 'text' && (
               <button
@@ -112,8 +175,8 @@ export function FileViewer({
             </button>
           </div>
         </div>
-        <div className="fv-body">{body}</div>
-      </div>
+      <div className="fv-body">{body}</div>
+      <div className="fv-resize" onMouseDown={startResize} title={t('files.resize')} />
     </div>,
     document.body
   )

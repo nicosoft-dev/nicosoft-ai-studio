@@ -10,10 +10,15 @@ interface WorkspaceState {
   setCwd: (expertId: string, cwd: string) => void
   modeByExpert: Record<string, AgentMode>
   setMode: (expertId: string, mode: AgentMode) => void
+  // Files panel: which folders are expanded, keyed by root cwd — so the tree restores its open state when
+  // you reopen the panel / switch back to a project.
+  expandedByCwd: Record<string, string[]>
+  setExpandedForCwd: (cwd: string, expanded: string[]) => void
 }
 
 const LS_KEY = 'nicosoft-studio-cwd-by-expert'
 const MODE_KEY = 'nicosoft-studio-mode-by-expert'
+const EXPANDED_KEY = 'nicosoft-studio-files-expanded'
 function load<T>(key: string): Record<string, T> {
   try {
     return JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, T>
@@ -43,5 +48,12 @@ export const useWorkspace = create<WorkspaceState>((set) => ({
       const next = { ...s.modeByExpert, [expertId]: mode }
       persist(MODE_KEY, next)
       return { modeByExpert: next }
+    }),
+  expandedByCwd: load<string[]>(EXPANDED_KEY),
+  setExpandedForCwd: (cwd, expanded) =>
+    set((s) => {
+      const next = { ...s.expandedByCwd, [cwd]: expanded }
+      persist(EXPANDED_KEY, next)
+      return { expandedByCwd: next }
     })
 }))

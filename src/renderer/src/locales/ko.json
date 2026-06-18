@@ -418,5 +418,6 @@
   "terminal.new": "새 터미널",
   "terminal.unavailable": "터미널을 사용할 수 없습니다 — 네이티브 모듈을 불러오지 못했습니다.",
   "files.copy": "복사",
-  "files.copied": "복사됨"
+  "files.copied": "복사됨",
+  "files.resize": "드래그하여 크기 조절"
 }

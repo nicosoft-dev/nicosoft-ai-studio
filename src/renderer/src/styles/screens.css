@@ -1253,16 +1253,17 @@
 }
 
 /* — Files viewer overlay (wide, decoupled from the narrow drawer) — */
-.fv-backdrop {
-  position: fixed; inset: 0; z-index: 1200; display: flex; align-items: center; justify-content: center;
-  padding: 5vh 5vw; background: rgba(0, 0, 0, 0.55);
-}
+/* Independent floating window — position/size driven by inline style (drag + resize), not a modal: no
+   backdrop, stays open until ✕/Esc, the app behind stays interactive. */
 .fv-window {
-  width: min(1100px, 92vw); height: min(86vh, 900px); display: flex; flex-direction: column;
+  position: fixed; z-index: 1200; display: flex; flex-direction: column;
   background: var(--bg-1); border: 1px solid var(--border-2); border-radius: 12px; overflow: hidden;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
 }
-.fv-head { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 10px 0 16px; border-bottom: 1px solid var(--border-1); }
+.fv-head { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 10px 0 16px; border-bottom: 1px solid var(--border-1); cursor: move; user-select: none; }
+.fv-head .icon-btn { cursor: pointer; }
+.fv-resize { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; }
+.fv-resize::after { content: ''; position: absolute; right: 3px; bottom: 3px; width: 7px; height: 7px; border-right: 2px solid var(--text-4); border-bottom: 2px solid var(--text-4); opacity: 0.6; }
 .fv-name { flex: 1; min-width: 0; font-size: 13px; color: var(--text-1); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fv-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
 .fv-body { flex: 1; overflow: auto; padding: 16px; }
