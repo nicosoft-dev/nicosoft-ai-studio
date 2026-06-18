@@ -416,5 +416,7 @@
   "common.close": "Close",
   "terminal.tab": "Terminal {n}",
   "terminal.new": "New terminal",
-  "terminal.unavailable": "Terminal unavailable — the native module failed to load."
+  "terminal.unavailable": "Terminal unavailable — the native module failed to load.",
+  "files.copy": "Copy",
+  "files.copied": "Copied"
 }

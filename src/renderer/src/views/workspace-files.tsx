@@ -6,7 +6,7 @@
    shows the moment a folder is picked — before any message. Every fs op goes through confined fs:* IPC
    (the resolved absolute root + a relative path; main confineReal keeps relPath under the root).
    ============================================================ */
-import { useCallback, useEffect, useState, type ReactElement } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 import { Icons } from '@/components/icons'
 import { useT } from '@/stores/locale'
@@ -89,6 +89,28 @@ export function WorkspaceFiles({ conv, activeExpert }: { conv: ConversationDto |
   useEffect(() => {
     if (rootCwd) void loadDir('').catch(() => {})
   }, [rootCwd, loadDir])
+
+  // Re-load the currently-shown dirs in place (no clear → no flicker). Kept in a ref so the watch effect
+  // (keyed on rootCwd only) always runs the latest closure — current expanded set — without re-arming the
+  // watcher on every expand/collapse.
+  const refreshRef = useRef<() => void>(() => {})
+  refreshRef.current = (): void => {
+    for (const d of ['', ...expanded]) void loadDir(d).catch(() => {})
+  }
+
+  // Live refresh: watch the open root in main; reload when its contents change (file added by an agent /
+  // terminal / external editor — so an empty folder fills in without a manual refresh).
+  useEffect(() => {
+    if (!rootCwd) return
+    void window.api.fs.watch(rootCwd).catch(() => {})
+    const off = window.api.onFsChanged((d) => {
+      if (d.cwd === rootCwd) refreshRef.current()
+    })
+    return () => {
+      off()
+      void window.api.fs.unwatch().catch(() => {})
+    }
+  }, [rootCwd])
 
   const toggleDir = (relPath: string): void => {
     setExpanded((ex) => {

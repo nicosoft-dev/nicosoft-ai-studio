@@ -17,6 +17,7 @@ import type {
   AppInfo,
   FsListDirResult,
   FsReadForViewResult,
+  FsChanged,
   WorkspaceTaskHistoryDto,
   TasksHistoryChanged,
   TerminalCreateInput,
@@ -140,8 +141,12 @@ const api = {
       ipcRenderer.invoke('fs:readForView', cwd, relPath),
     openDefault: (cwd: string, relPath: string): Promise<void> =>
       ipcRenderer.invoke('fs:openDefault', cwd, relPath),
-    reveal: (cwd: string, relPath: string): Promise<void> => ipcRenderer.invoke('shell:reveal', cwd, relPath)
+    reveal: (cwd: string, relPath: string): Promise<void> => ipcRenderer.invoke('shell:reveal', cwd, relPath),
+    watch: (cwd: string): Promise<void> => ipcRenderer.invoke('fs:watch', cwd),
+    unwatch: (): Promise<void> => ipcRenderer.invoke('fs:unwatch')
   },
+  // Files tree live-refresh: main fires this (debounced) when the watched root's contents change.
+  onFsChanged: (cb: (d: FsChanged) => void): (() => void) => agentListen('fs:changed', cb),
 
   // Workspace Tasks panel history (completed-phase snapshots + panel_examine verdicts), per conversation.
   tasks: {

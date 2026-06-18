@@ -416,5 +416,7 @@
   "common.close": "关闭",
   "terminal.tab": "终端 {n}",
   "terminal.new": "新建终端",
-  "terminal.unavailable": "终端不可用 — 原生模块加载失败。"
+  "terminal.unavailable": "终端不可用 — 原生模块加载失败。",
+  "files.copy": "复制",
+  "files.copied": "已复制"
 }

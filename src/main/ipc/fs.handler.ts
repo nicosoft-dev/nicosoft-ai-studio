@@ -9,4 +9,8 @@ export function registerFsHandlers(): void {
   ipcMain.handle('fs:readForView', (_e, cwd: string, relPath: string) => filesService.readForView(cwd, relPath))
   ipcMain.handle('fs:openDefault', (_e, cwd: string, relPath: string) => filesService.openDefault(cwd, relPath))
   ipcMain.handle('shell:reveal', (_e, cwd: string, relPath: string) => filesService.reveal(cwd, relPath))
+  // Live refresh: watch the open root (per sender), emit fs:changed (debounced) so the tree updates when
+  // files are created/deleted by an agent / terminal / external editor.
+  ipcMain.handle('fs:watch', (e, cwd: string) => filesService.watchDir(cwd, e.sender))
+  ipcMain.handle('fs:unwatch', (e) => filesService.unwatchDir(e.sender))
 }

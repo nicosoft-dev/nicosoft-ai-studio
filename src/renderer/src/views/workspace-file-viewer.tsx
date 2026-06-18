@@ -67,7 +67,10 @@ export function FileViewer({
         <Markdown>{data.text ?? ''}</Markdown>
       </div>
     ) : (
-      <CodeBlock lang={data.lang ?? 'text'} code={data.text ?? ''} />
+      // `bare` drops CodeBlock's own container + lang/Copy head (the inner box); .fv-code adds line numbers.
+      <div className="fv-code">
+        <CodeBlock lang={data.lang ?? 'text'} code={data.text ?? ''} bare />
+      </div>
     )
   else
     body = (
@@ -86,6 +89,18 @@ export function FileViewer({
         <div className="fv-head">
           <span className="fv-name" title={relPath}>{name}</span>
           <div className="fv-actions">
+            {data?.kind === 'text' && (
+              <button
+                className="icon-btn"
+                title={t('files.copy')}
+                onClick={() => {
+                  void navigator.clipboard.writeText(data.text ?? '')
+                  toast.success(t('files.copied'))
+                }}
+              >
+                <Icons.copy size={15} />
+              </button>
+            )}
             <button className="icon-btn" title={t('files.reveal')} onClick={reveal}>
               <Icons.folder size={15} />
             </button>

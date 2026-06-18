@@ -416,5 +416,7 @@
   "common.close": "關閉",
   "terminal.tab": "終端機 {n}",
   "terminal.new": "新增終端機",
-  "terminal.unavailable": "終端機無法使用 — 原生模組載入失敗。"
+  "terminal.unavailable": "終端機無法使用 — 原生模組載入失敗。",
+  "files.copy": "複製",
+  "files.copied": "已複製"
 }

@@ -581,6 +581,9 @@ export interface FsListDirResult {
   entries: FsEntryDto[]
   truncated: boolean
 }
+export interface FsChanged {
+  cwd: string // the watched root that changed — the Files panel reloads if it matches its current root
+}
 export type FsViewKind = 'text' | 'image' | 'binary' | 'toolarge'
 export interface FsReadForViewResult {
   kind: FsViewKind

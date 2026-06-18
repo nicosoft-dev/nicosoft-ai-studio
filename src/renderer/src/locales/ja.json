@@ -416,5 +416,7 @@
   "common.close": "閉じる",
   "terminal.tab": "ターミナル {n}",
   "terminal.new": "新しいターミナル",
-  "terminal.unavailable": "ターミナルを利用できません — ネイティブモジュールの読み込みに失敗しました。"
+  "terminal.unavailable": "ターミナルを利用できません — ネイティブモジュールの読み込みに失敗しました。",
+  "files.copy": "コピー",
+  "files.copied": "コピーしました"
 }

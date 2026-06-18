@@ -6,8 +6,9 @@
    check — symlink/escape-safe) before any I/O, so relPath can never escape the chosen root. Picking the
    root is the user's own folder choice; confine only stops a relative path from climbing out of it.
    ============================================================ */
-import { shell } from 'electron'
+import { shell, type WebContents } from 'electron'
 import { readdir, stat, readFile } from 'node:fs/promises'
+import { watch, type FSWatcher } from 'node:fs'
 import { basename, extname } from 'node:path'
 import { confineReal } from '../agent/confine'
 import type { FsListDirResult, FsReadForViewResult, FsEntryDto } from '../ipc/contracts'
@@ -119,4 +120,62 @@ export async function openDefault(cwd: string, relPath: string): Promise<void> {
 export async function reveal(cwd: string, relPath: string): Promise<void> {
   const abs = await confineReal(requireCwd(cwd), relPath)
   shell.showItemInFolder(abs)
+}
+
+// — Live refresh — watch the open root so files created/deleted (by an agent, a terminal, or an external
+// editor) appear without a manual refresh. One watcher per window (the Files panel has one root at a
+// time); debounced so a burst of writes coalesces into a single fs:changed. Recursive where the platform
+// supports it (macOS/Windows) — elsewhere a root-level watch still catches the common "add a file" case.
+const watchers = new Map<number, FSWatcher>()
+const watchDebounce = new Map<number, ReturnType<typeof setTimeout>>()
+const watchCleanup = new Set<number>() // webContents ids with a destroyed-listener already registered
+
+export function unwatchDir(sender: WebContents): void {
+  const id = sender.id
+  const w = watchers.get(id)
+  if (w) {
+    try {
+      w.close()
+    } catch {
+      /* already closed */
+    }
+    watchers.delete(id)
+  }
+  const t = watchDebounce.get(id)
+  if (t) {
+    clearTimeout(t)
+    watchDebounce.delete(id)
+  }
+}
+
+export function watchDir(cwd: string, sender: WebContents): void {
+  unwatchDir(sender) // replace any previous root for this window
+  if (!cwd) return
+  const recursive = process.platform === 'darwin' || process.platform === 'win32'
+  try {
+    const w = watch(cwd, { recursive }, () => {
+      const id = sender.id
+      const prev = watchDebounce.get(id)
+      if (prev) clearTimeout(prev)
+      watchDebounce.set(
+        id,
+        setTimeout(() => {
+          watchDebounce.delete(id)
+          if (!sender.isDestroyed()) sender.send('fs:changed', { cwd })
+        }, 300)
+      )
+    })
+    w.on('error', () => unwatchDir(sender)) // dir deleted / watch limit hit → drop it silently (manual refresh still works)
+    watchers.set(sender.id, w)
+    // Register the window-gone cleanup exactly once per sender (not per watchDir call → no listener pileup).
+    if (!watchCleanup.has(sender.id)) {
+      watchCleanup.add(sender.id)
+      sender.once('destroyed', () => {
+        unwatchDir(sender)
+        watchCleanup.delete(sender.id)
+      })
+    }
+  } catch {
+    /* cwd missing / unwatchable — Files just won't auto-refresh (manual refresh still works) */
+  }
 }
