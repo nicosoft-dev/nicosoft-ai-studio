@@ -131,16 +131,16 @@ const api = {
   // visualization can flash the recalled nodes in real time.
   onMemoryRecalled: (cb: (d: MemoryRecalledEvent) => void): (() => void) => agentListen('memory:recalled', cb),
 
-  // Workspace Files panel — confined, conversation-scoped file access (design §3). The renderer passes
-  // (convId, relPath) only; the main process resolves convId → cwd and confines under it.
+  // Workspace Files panel — confined file access (design §3). The renderer resolves the root cwd for the
+  // active expert (cwdByExpert[role]) and passes (cwd, relPath); the main process confines relPath under cwd.
   fs: {
-    listDir: (convId: string, relPath: string): Promise<FsListDirResult> =>
-      ipcRenderer.invoke('fs:listDir', convId, relPath),
-    readForView: (convId: string, relPath: string): Promise<FsReadForViewResult> =>
-      ipcRenderer.invoke('fs:readForView', convId, relPath),
-    openDefault: (convId: string, relPath: string): Promise<void> =>
-      ipcRenderer.invoke('fs:openDefault', convId, relPath),
-    reveal: (convId: string, relPath: string): Promise<void> => ipcRenderer.invoke('shell:reveal', convId, relPath)
+    listDir: (cwd: string, relPath: string): Promise<FsListDirResult> =>
+      ipcRenderer.invoke('fs:listDir', cwd, relPath),
+    readForView: (cwd: string, relPath: string): Promise<FsReadForViewResult> =>
+      ipcRenderer.invoke('fs:readForView', cwd, relPath),
+    openDefault: (cwd: string, relPath: string): Promise<void> =>
+      ipcRenderer.invoke('fs:openDefault', cwd, relPath),
+    reveal: (cwd: string, relPath: string): Promise<void> => ipcRenderer.invoke('shell:reveal', cwd, relPath)
   },
 
   // Workspace Tasks panel history (completed-phase snapshots + panel_examine verdicts), per conversation.
@@ -340,8 +340,6 @@ const api = {
       ipcRenderer.invoke('conversations:pin', convId, pinned),
     archive: (convId: string, archived: boolean): Promise<void> =>
       ipcRenderer.invoke('conversations:archive', convId, archived),
-    setCwd: (convId: string, cwd: string): Promise<void> =>
-      ipcRenderer.invoke('conversations:setCwd', convId, cwd),
     title: (input: ConversationTitleInput): Promise<string> =>
       ipcRenderer.invoke('conversations:title', input),
     remove: (convId: string): Promise<void> => ipcRenderer.invoke('conversations:remove', convId),

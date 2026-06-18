@@ -15,12 +15,12 @@ import type { FsReadForView } from '@/lib/api'
 const MD_RE = /\.(md|markdown|mdx)$/i
 
 export function FileViewer({
-  convId,
+  cwd,
   relPath,
   name,
   onClose
 }: {
-  convId: string
+  cwd: string
   relPath: string
   name: string
   onClose: () => void
@@ -34,13 +34,13 @@ export function FileViewer({
     setData(null)
     setError(false)
     window.api.fs
-      .readForView(convId, relPath)
+      .readForView(cwd, relPath)
       .then((d) => alive && setData(d))
       .catch(() => alive && setError(true))
     return () => {
       alive = false
     }
-  }, [convId, relPath])
+  }, [cwd, relPath])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -51,10 +51,10 @@ export function FileViewer({
   }, [onClose])
 
   const openDefault = (): void => {
-    void window.api.fs.openDefault(convId, relPath).catch(() => toast.error(t('files.openFailed')))
+    void window.api.fs.openDefault(cwd, relPath).catch(() => toast.error(t('files.openFailed')))
   }
   const reveal = (): void => {
-    void window.api.fs.reveal(convId, relPath).catch(() => toast.error(t('files.revealFailed')))
+    void window.api.fs.reveal(cwd, relPath).catch(() => toast.error(t('files.revealFailed')))
   }
 
   let body: ReactElement

@@ -50,7 +50,6 @@ CREATE TABLE IF NOT EXISTS conversations (
   project_id      TEXT,
   pinned          INTEGER NOT NULL DEFAULT 0,     -- 1 = pinned to the top of History
   archived        INTEGER NOT NULL DEFAULT 0,     -- 1 = moved to the Archived group
-  cwd             TEXT,                            -- workspace Files panel confine root (design §3)
   created_at      TEXT NOT NULL,
   updated_at      TEXT NOT NULL
 );

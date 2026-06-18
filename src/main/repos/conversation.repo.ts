@@ -13,7 +13,6 @@ export interface ConversationRow {
   projectId: string | null
   pinned: boolean
   archived: boolean
-  cwd: string | null
   createdAt: string
   updatedAt: string
 }
@@ -66,7 +65,6 @@ interface ConversationRaw {
   project_id: string | null
   pinned: number
   archived: number
-  cwd: string | null
   created_at: string
   updated_at: string
 }
@@ -98,7 +96,6 @@ function mapConversation(raw: ConversationRaw): ConversationRow {
     projectId: raw.project_id,
     pinned: raw.pinned === 1,
     archived: raw.archived === 1,
-    cwd: raw.cwd,
     createdAt: raw.created_at,
     updatedAt: raw.updated_at
   }
@@ -143,7 +140,6 @@ export function create(input: ConversationCreateInput): ConversationRow {
     projectId: input.projectId ?? null,
     pinned: false,
     archived: false,
-    cwd: null,
     createdAt: now,
     updatedAt: now
   }
@@ -176,13 +172,6 @@ export function setPinned(id: string, pinned: boolean): void {
 
 export function setArchived(id: string, archived: boolean): void {
   getDb().prepare('UPDATE conversations SET archived = ? WHERE id = ?').run(archived ? 1 : 0, id)
-}
-
-// Set the conversation's workspace cwd (the Files-panel confine root). Like pin/archive, deliberately
-// does NOT touch updated_at — choosing a working directory shouldn't reorder History. Empty/blank → null.
-export function setCwd(id: string, cwd: string): void {
-  const value = cwd.trim() || null
-  getDb().prepare('UPDATE conversations SET cwd = ? WHERE id = ?').run(value, id)
 }
 
 // Link a conversation to a project (Coordinator 2.0 — doc 19 §1). Set when a collaborate turn creates

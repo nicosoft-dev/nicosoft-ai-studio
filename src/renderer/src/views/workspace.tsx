@@ -22,6 +22,7 @@ const maxW = (): number => Math.round(window.innerWidth * 0.6)
 export function WorkspaceDrawer({
   onClose,
   activeConv,
+  activeExpert,
   panel,
   onPanel,
   width,
@@ -29,6 +30,7 @@ export function WorkspaceDrawer({
 }: {
   onClose: () => void
   activeConv: string | null
+  activeExpert: string
   panel: WorkspacePanel
   onPanel: (p: WorkspacePanel) => void
   width: number
@@ -89,9 +91,9 @@ export function WorkspaceDrawer({
       ) : panel === 'tasks' ? (
         <WorkspaceTasks activeConv={activeConv} />
       ) : panel === 'files' ? (
-        <WorkspaceFiles conv={conv} />
+        <WorkspaceFiles conv={conv} activeExpert={activeExpert} />
       ) : (
-        <WorkspaceTerminal conv={conv} />
+        <WorkspaceTerminal conv={conv} activeExpert={activeExpert} />
       )}
     </div>
   )

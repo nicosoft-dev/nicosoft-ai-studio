@@ -2,9 +2,9 @@
    Workspace · Terminal panel — multi-session xterm (design §4).
    Sessions live in the global terminals store (survive conversation/panel switches). This panel renders
    the tab bar + re-parents the active session's host element into its mount; it fits on resize. A new
-   session opens at the conversation's cwd, resolved the SAME way the Files panel resolves its root
-   (persisted conv.cwd → primary expert cwd → first participating dispatched-role cwd) so Terminal and
-   Files agree; main falls back to the user's home dir when nothing resolves.
+   session opens at the resolved root cwd, the SAME way the Files panel resolves it (a conversation → its
+   primary role's cwd, with a collab messages fallback; an expert greeting → the active expert's cwd) so
+   Terminal and Files agree; main falls back to the user's home dir when nothing resolves.
    ============================================================ */
 import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { Icons } from '@/components/icons'
@@ -14,7 +14,7 @@ import { useTerminals, hostOf, fitSession } from '@/stores/terminals'
 import { resolveConvCwd } from '@/lib/resolve-cwd'
 import type { ConversationDto } from '@/lib/api'
 
-export function WorkspaceTerminal({ conv }: { conv: ConversationDto | null }): ReactElement {
+export function WorkspaceTerminal({ conv, activeExpert }: { conv: ConversationDto | null; activeExpert: string }): ReactElement {
   const t = useT()
   const cwdByExpert = useWorkspace((s) => s.cwdByExpert)
   const sessions = useTerminals((s) => s.sessions)
@@ -27,18 +27,25 @@ export function WorkspaceTerminal({ conv }: { conv: ConversationDto | null }): R
   const [error, setError] = useState(false)
   const cwdRef = useRef<string | null>(null) // latest resolved cwd, used for newly opened sessions
 
-  // Resolve this conversation's cwd like Files does (design §3 P17): persisted conv.cwd → primary expert
-  // cwd → first participating dispatched-role cwd (via messages). Stash it for new sessions, and kick the
-  // one-time auto-open once it's known. autoOpen is idempotent (store-level guard), so switching
+  // Resolve the root cwd like Files does: a conversation → its primary role's cwd (+ collab messages
+  // fallback, design §3 P17); an expert greeting → the active expert's cwd. Stash it for new sessions and
+  // kick the one-time auto-open once it's known. autoOpen is idempotent (store-level guard), so switching
   // conversations re-resolves the cwd for the NEXT session without spawning extra terminals.
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      let cwd: string | null = conv?.cwd ?? (conv?.primaryRoleId ? cwdByExpert[conv.primaryRoleId]?.trim() || null : null)
-      if (!cwd && conv) {
-        const msgs = await window.api.conversations.messages(conv.id).catch(() => [])
-        if (cancelled) return
-        cwd = resolveConvCwd(conv, cwdByExpert, msgs)
+      // Same root resolution as Files: a conversation → its expert's cwd (+ collab messages fallback);
+      // an expert greeting (no conversation) → the active expert's cwd. Falls back to home dir in main.
+      let cwd: string | null
+      if (conv) {
+        cwd = (conv.primaryRoleId ? cwdByExpert[conv.primaryRoleId]?.trim() : '') || null
+        if (!cwd) {
+          const msgs = await window.api.conversations.messages(conv.id).catch(() => [])
+          if (cancelled) return
+          cwd = resolveConvCwd(conv, cwdByExpert, msgs)
+        }
+      } else {
+        cwd = cwdByExpert[activeExpert]?.trim() || null
       }
       if (cancelled) return
       cwdRef.current = cwd
@@ -47,7 +54,7 @@ export function WorkspaceTerminal({ conv }: { conv: ConversationDto | null }): R
     return () => {
       cancelled = true
     }
-  }, [conv, cwdByExpert, autoOpen])
+  }, [conv, activeExpert, cwdByExpert, autoOpen])
 
   // Re-parent every session host into the mount; show only the active one; fit it.
   useEffect(() => {

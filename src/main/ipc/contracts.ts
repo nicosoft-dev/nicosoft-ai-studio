@@ -561,7 +561,6 @@ export interface ConversationDto {
   projectId: string | null // set when a collaborate turn linked this chat to a project (doc 19 §1)
   pinned: boolean // pinned to the top of History
   archived: boolean // moved to the Archived group
-  cwd: string | null // workspace Files panel confine root (design §3); null until a folder is resolved
   createdAt: string
   updatedAt: string
 }

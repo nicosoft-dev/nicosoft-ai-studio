@@ -330,6 +330,7 @@ export default function App(): ReactElement {
               <WorkspaceDrawer
                 onClose={() => setDrawerOpen(false)}
                 activeConv={chat.activeConv}
+                activeExpert={activeExpert}
                 panel={workspacePanel}
                 onPanel={setWorkspacePanel}
                 width={drawerWidth}

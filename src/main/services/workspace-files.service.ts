@@ -1,15 +1,15 @@
 /* ============================================================
    Workspace · Files service — the ONLY way the renderer reads the project tree.
-   The renderer passes (convId, relPath); this resolves convId → the conversation's
-   confine root (conversations.cwd, design §3 decision A) and runs every path through
-   confineReal (realpath + prefix check — symlink/escape-safe) before any I/O. The
-   renderer never traffics absolute paths.
+   The renderer passes (cwd, relPath): cwd is the resolved root the user picked for the active expert
+   (cwdByExpert[role] — works on an expert's greeting before any conversation exists, which a convId-keyed
+   root could not). Every path runs through confineReal (realpath of cwd + the resolved target, prefix
+   check — symlink/escape-safe) before any I/O, so relPath can never escape the chosen root. Picking the
+   root is the user's own folder choice; confine only stops a relative path from climbing out of it.
    ============================================================ */
 import { shell } from 'electron'
 import { readdir, stat, readFile } from 'node:fs/promises'
 import { basename, extname } from 'node:path'
 import { confineReal } from '../agent/confine'
-import * as convService from './conversation.service'
 import type { FsListDirResult, FsReadForViewResult, FsEntryDto } from '../ipc/contracts'
 
 const MAX_VIEW_BYTES = 1024 * 1024 // 1 MB text cap for the viewer (design §3 P18; distinct from agent Read's 256 KB)
@@ -48,18 +48,16 @@ function langForExt(ext: string): string {
   return LANG[ext] ?? 'text'
 }
 
-// Resolve convId → cwd; throw a typed message the handler surfaces. listDir handles no-cwd as an empty
-// result instead (so the panel renders its empty state); the other ops require a cwd.
-function requireCwd(convId: string): string {
-  const cwd = convService.getCwd(convId)
-  if (!cwd) throw new Error('This conversation has no working directory')
+// Guard the non-list ops, which require a real root. listDir handles no-cwd as an empty result instead
+// (so the panel renders its empty state when no folder is picked yet).
+function requireCwd(cwd: string): string {
+  if (!cwd) throw new Error('No working directory')
   return cwd
 }
 
 // List one directory level (design §3): name + type only — NO per-entry stat (avoids the syscall storm
 // on node_modules-sized dirs, design §3 P18). Folders first, then case-insensitive name order.
-export async function listDir(convId: string, relPath: string): Promise<FsListDirResult> {
-  const cwd = convService.getCwd(convId)
+export async function listDir(cwd: string, relPath: string): Promise<FsListDirResult> {
   if (!cwd) return { root: null, entries: [], truncated: false }
   const abs = await confineReal(cwd, relPath || '.')
   const dirents = await readdir(abs, { withFileTypes: true })
@@ -74,9 +72,8 @@ export async function listDir(convId: string, relPath: string): Promise<FsListDi
 // Read a file for the by-type viewer (design §3). Images → data URL; text → decoded string + lang;
 // binary / oversize → a kind flag with no content. Binary detection (P18): a NUL in the header OR a
 // strict (fatal) UTF-8 decode failure — never the default lossy toString.
-export async function readForView(convId: string, relPath: string): Promise<FsReadForViewResult> {
-  const cwd = requireCwd(convId)
-  const abs = await confineReal(cwd, relPath)
+export async function readForView(cwd: string, relPath: string): Promise<FsReadForViewResult> {
+  const abs = await confineReal(requireCwd(cwd), relPath)
   const st = await stat(abs)
   if (!st.isFile()) throw new Error('Not a file')
   const ext = extname(abs).toLowerCase()
@@ -101,9 +98,8 @@ export async function readForView(convId: string, relPath: string): Promise<FsRe
 
 // Open a file with the OS default app — gated (design §3 P15): refuse an execute bit or an executable/
 // script/bundle extension so this can't be turned into "double-click to run an unaudited cwd file".
-export async function openDefault(convId: string, relPath: string): Promise<void> {
-  const cwd = requireCwd(convId)
-  const abs = await confineReal(cwd, relPath)
+export async function openDefault(cwd: string, relPath: string): Promise<void> {
+  const abs = await confineReal(requireCwd(cwd), relPath)
   const st = await stat(abs)
   if (!st.isFile()) throw new Error('Not a file')
   // Strip trailing dots/spaces BEFORE taking the extension: Windows ShellExecute drops them when opening,
@@ -120,8 +116,7 @@ export async function openDefault(convId: string, relPath: string): Promise<void
 
 // Reveal a cwd-relative path in the OS file manager (Finder/Explorer). Repurposed from the old
 // absolute-path shell:reveal (design §3 P25) — now confined like every other fs op.
-export async function reveal(convId: string, relPath: string): Promise<void> {
-  const cwd = requireCwd(convId)
-  const abs = await confineReal(cwd, relPath)
+export async function reveal(cwd: string, relPath: string): Promise<void> {
+  const abs = await confineReal(requireCwd(cwd), relPath)
   shell.showItemInFolder(abs)
 }

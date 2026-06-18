@@ -27,7 +27,6 @@ function toConvDto(r: convRepo.ConversationRow): ConversationDto {
     projectId: r.projectId,
     pinned: r.pinned,
     archived: r.archived,
-    cwd: r.cwd,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt
   }
@@ -100,18 +99,6 @@ export function setPinned(convId: string, pinned: boolean): void {
 
 export function setArchived(convId: string, archived: boolean): void {
   convRepo.setArchived(convId, archived)
-}
-
-// Persist the conversation's workspace cwd — the authoritative confine root the Files panel reads
-// back via fs:* IPC. The renderer resolves the value (design §3 P17) and pushes it here.
-export function setCwd(convId: string, cwd: string): void {
-  convRepo.setCwd(convId, cwd)
-}
-
-// The conversation's confine root, or null. Used by fs:* handlers to resolve convId → cwd in the main
-// process (the renderer only ever passes convId + a relative path).
-export function getCwd(convId: string): string | null {
-  return convRepo.getById(convId)?.cwd ?? null
 }
 
 // Generate a title for a fresh conversation from the user's first message (small/fast model — see
