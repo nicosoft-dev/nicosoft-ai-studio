@@ -1,13 +1,17 @@
 // Scheduler engine (batch 2 / doc 28 §3.3). Lives in the Electron main process — the natural single daemon
-// (no multi-session lock needed, unlike a multi-session CLI). Every CHECK_MS it scans enabled tasks and fires the due
-// ones. A task is a STEP CHAIN (doc 28 §5.3): an ordered list of steps, each an agent run by its own role,
+// (no multi-session lock needed, unlike a multi-session CLI). Event-armed (see arm() below): it fires any
+// due task then arms ONE setTimeout to the earliest future nextRunAt — no per-second scan. A task is a STEP
+// CHAIN (doc 28 §5.3): an ordered list of steps, each an agent run by its own role,
 // permissionMode='bypass' confined to the task's pre-authorized cwd (§5.1). Steps run sequentially in one
 // conversation; each step's final reply is injected into the next step's prompt — a cross-role pipeline
 // (Turing computes → Joan drafts → …). Recurring tasks reschedule, one-shots are removed after running. A task
 // already in flight is skipped (dedup).
 //
-// No file watcher: loadActive() re-reads the durable JSON every tick, so an external edit is picked up within
-// one CHECK_MS — chokidar would only save <1s of latency and add a dependency.
+// Event-armed, NOT polled: instead of scanning every second, the engine arms ONE setTimeout to the next
+// task's exact nextRunAt and re-arms on any store change (onChange) + after each fire. With no enabled task,
+// no timer runs at all (zero idle work). The one case not covered by an event is an external hand-edit of
+// scheduled_tasks.json; it's picked up on the next arm (any task mutation, or within MAX_DELAY) — an
+// acceptable trade vs a 1s readFileSync forever.
 //
 // Email/send sink is NOT here yet (doc 28 后续待完成 v2): a step that should email goes through an email MCP
 // tool or leaves a draft — Studio never sends mail itself.
@@ -23,7 +27,10 @@ import * as convRepo from '../../repos/conversation.repo'
 import * as conversationService from '../../services/conversation.service'
 import * as keychain from '../../keychain/keychain'
 
-const CHECK_MS = 1000 // main process is always up, a 1s small-file read is negligible
+// Cap one timer at 6h: bounds a far-future task's delay (setTimeout overflows past ~24.8d) and re-checks
+// after system sleep / clock changes. NOT a poll — a timer exists ONLY while an enabled task is scheduled,
+// and normally fires at the task's exact nextRunAt; the 6h cap just re-arms for tasks further out than that.
+const MAX_DELAY = 6 * 60 * 60 * 1000
 
 // Unattended callbacks shared by every step: bypass skips requestPermission (a cwd-confined tool that somehow
 // asked is denied — no user to approve); no streaming UI, no askUser.
@@ -57,27 +64,70 @@ function errorMessage(e: unknown): string {
 }
 
 class SchedulerEngine {
-  private timer?: ReturnType<typeof setInterval>
+  private timer?: ReturnType<typeof setTimeout>
   private running = new Set<string>() // task ids currently dispatched — dedup so a slow run can't double-fire
   private onFire?: (info: FiredInfo) => void
+  private unsubscribe?: () => void
+  private started = false
+  private arming = false // re-entrancy guard so a burst of store changes coalesces into one re-arm
+  private rearmQueued = false
 
   start(onFire?: (info: FiredInfo) => void): void {
-    if (this.timer) return
+    if (this.started) return
+    this.started = true
     this.onFire = onFire
-    this.timer = setInterval(() => void this.tick(), CHECK_MS)
+    // Re-arm whenever the task set changes (create/delete/setEnabled/update all emit onChange). No polling.
+    this.unsubscribe = scheduledTaskStore.onChange(() => this.requestArm())
+    this.requestArm()
   }
 
   stop(): void {
-    if (this.timer) clearInterval(this.timer)
+    if (this.timer) clearTimeout(this.timer)
     this.timer = undefined
+    this.unsubscribe?.()
+    this.unsubscribe = undefined
+    this.started = false
+    // Reset the re-arm coalescing flags so a future stop()/start() cycle can't leave re-arm wedged
+    // (arming stuck true would make requestArm swallow every request). In-flight fires self-clean their
+    // own `running` entry via their finally, so leave `running` alone.
+    this.arming = false
+    this.rearmQueued = false
   }
 
-  private async tick(): Promise<void> {
-    const now = Date.now()
-    for (const task of scheduledTaskStore.loadActive()) {
-      if (task.nextRunAt > now) break // list is sorted by nextRunAt → nothing past this is due
-      if (this.running.has(task.id)) continue // previous fire still in flight
-      void this.fire(task, now)
+  // Coalesce re-arm requests: firing several due tasks (each mutating the store) + their onChange callbacks
+  // would otherwise re-enter arm() repeatedly; defer any request raised during an arm() to one pass after.
+  private requestArm(): void {
+    if (this.arming) {
+      this.rearmQueued = true
+      return
+    }
+    this.arm()
+  }
+
+  // Fire every currently-due task, then arm ONE setTimeout to the next future nextRunAt. Nothing due and
+  // nothing scheduled ⇒ NO timer at all (the whole point — zero idle work vs the old per-second scan).
+  private arm(): void {
+    this.arming = true
+    try {
+      if (this.timer) {
+        clearTimeout(this.timer)
+        this.timer = undefined
+      }
+      const now = Date.now()
+      for (const task of scheduledTaskStore.loadActive()) {
+        if (task.nextRunAt > now) break // sorted by nextRunAt → nothing past here is due
+        if (!this.running.has(task.id)) void this.fire(task, now) // fire() reschedules synchronously before its first await
+      }
+      // Recompute after the fires advanced due tasks' nextRunAt; arm to the earliest still-future,
+      // not-in-flight task (an in-flight task re-arms itself when it settles — see fire()).
+      const next = scheduledTaskStore.loadActive().find((t) => t.nextRunAt > now && !this.running.has(t.id))
+      if (next) this.timer = setTimeout(() => this.requestArm(), Math.min(MAX_DELAY, Math.max(0, next.nextRunAt - Date.now())))
+    } finally {
+      this.arming = false
+    }
+    if (this.rearmQueued) {
+      this.rearmQueued = false
+      this.arm()
     }
   }
 
@@ -98,6 +148,7 @@ class SchedulerEngine {
     } finally {
       if (!task.recurring) scheduledTaskStore.delete(task.id) // one-shot done (ok or error) → remove
       this.running.delete(task.id)
+      this.requestArm() // run settled (slot freed / one-shot removed / recurring rescheduled) → re-arm for the next occurrence
     }
     this.onFire?.({ task, convId, ok }) // always notify (success or failure) so the page refreshes
   }

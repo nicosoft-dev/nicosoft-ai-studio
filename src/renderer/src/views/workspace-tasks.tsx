@@ -35,17 +35,13 @@ export function WorkspaceTasks({ activeConv }: { activeConv: string | null }): R
   const t = useT()
   const [tasks, setTasks] = useState<WsTask[]>([])
   const [history, setHistory] = useState<WorkspaceTaskHistory>(EMPTY)
-  const [tick, setTick] = useState(0) // streaming re-derive trigger (TodoWrite tool calls don't bump msgCount)
   const msgCount = useChat((s) => (activeConv ? (s.byConversation[activeConv]?.length ?? 0) : 0))
   const streaming = useChat((s) => (activeConv ? !!s.streaming[activeConv] : false))
 
-  // — Live tasks —
-  useEffect(() => {
-    if (!streaming) return
-    const id = setInterval(() => setTick((x) => x + 1), 1200)
-    return () => clearInterval(id)
-  }, [streaming])
-
+  // — Live tasks — pushed event-driven by main the moment TodoWrite executes (onConvTodos below); the
+  // transcript-derive effect is only a fallback for restoring an old chat's list (keyed on msgCount /
+  // streaming edges). No re-derive poll: once a live push lands, liveTasksRef makes the derive a no-op,
+  // so a periodic tick only ran an agent.transcript IPC whose result was discarded.
   const liveTasksRef = useRef(false)
   useEffect(() => {
     liveTasksRef.current = false
@@ -83,7 +79,7 @@ export function WorkspaceTasks({ activeConv }: { activeConv: string | null }): R
     return () => {
       cancelled = true
     }
-  }, [activeConv, msgCount, streaming, tick])
+  }, [activeConv, msgCount, streaming])
 
   // — History (SQLite; refreshed when a phase/examine is archived) —
   const loadHistory = useRef<(() => void) | null>(null)

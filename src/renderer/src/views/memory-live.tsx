@@ -1355,8 +1355,23 @@ export function MemoryLive({ onClose }: { onClose: () => void }): ReactElement {
     }
     raf = requestAnimationFrame(animate)
 
+    // Pause the whole render loop while the window is hidden/minimized — no point running physics + GPU
+    // draws nobody can see (the scene's autoRotate keeps it in perpetual motion, so it never settles on
+    // its own). Resume on return, resetting the clock so the pause doesn't fast-forward the animation.
+    const onVisibility = (): void => {
+      if (document.hidden) {
+        if (raf) cancelAnimationFrame(raf)
+        raf = 0
+      } else if (raf === 0) {
+        last = performance.now()
+        raf = requestAnimationFrame(animate)
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+
     return () => {
       cancelAnimationFrame(raf)
+      document.removeEventListener('visibilitychange', onVisibility)
       unsubRecalled()
       window.removeEventListener('resize', onResize)
       canvas.removeEventListener('pointermove', onPointerMove)

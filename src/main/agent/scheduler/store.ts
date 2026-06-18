@@ -125,8 +125,13 @@ export class ScheduledTaskStore {
       return true
     }
     const durable = readDurable()
-    if (apply(durable, () => writeDurable(durable))) return true
-    return apply(sessionTasks, () => {})
+    if (apply(durable, () => writeDurable(durable))) {
+      this.emitChange() // enable/disable changes what the engine should fire → re-arm + refresh the page
+      return true
+    }
+    const ok = apply(sessionTasks, () => {})
+    if (ok) this.emitChange()
+    return ok
   }
 
   // Edit a task in place (Scheduled page Save): re-parse the schedule (recomputing cron/nextRunAt/recurring)
@@ -148,7 +153,9 @@ export class ScheduledTaskStore {
       return t
     }
     const durable = readDurable()
-    return apply(durable, () => writeDurable(durable)) ?? apply(sessionTasks, () => {})
+    const updated = apply(durable, () => writeDurable(durable)) ?? apply(sessionTasks, () => {})
+    if (updated) this.emitChange() // schedule/steps changed → re-arm the engine + refresh the page
+    return updated
   }
 
   // Advance the schedule BEFORE a run so the next tick can't re-fire a recurring task: recurring → recompute

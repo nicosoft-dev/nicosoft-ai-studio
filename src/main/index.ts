@@ -5,7 +5,7 @@ import { getDb } from './db/connection'
 import * as settingsService from './services/settings.service'
 import { registerIpc } from './ipc/register'
 import { registerMediaProtocol, MEDIA_PRIVILEGED_SCHEME } from './media/protocol'
-import { runIdleSweep } from './services/memory.service'
+import { startMemoryMaintenance } from './services/memory.service'
 import { connectEnabled as connectMcpServers } from './services/mcp.service'
 import { loadEnabled as loadSkills } from './services/skill.service'
 import { schedulerEngine } from './agent/scheduler/engine'
@@ -215,10 +215,12 @@ app.whenReady().then(() => {
   // Register every enabled skill so a role's agent sees it on the first run (sync — DB read only).
   loadSkills()
   createWindow()
-  // Idle memory-extraction sweep: every minute, extract for conversations whose idle timer elapsed.
-  setInterval(() => void runIdleSweep().catch(() => {}), 60_000)
-  // Scheduled-task engine (doc 28): scan enabled tasks every second, fire due ones as cross-role step chains.
-  // On each fire, notify the renderer so the Scheduled page refreshes its Next/Last times live.
+  // Memory maintenance: arm the event-driven idle-extraction timer (fires at each conversation's exact
+  // idle_due, re-armed from onTurn — no per-minute scan) + start the coarse decay/prune loop.
+  startMemoryMaintenance()
+  // Scheduled-task engine (doc 28): event-armed — fires each task at its exact nextRunAt (re-armed on task
+  // changes + after each fire), no per-second scan. On each fire, notify the renderer so the Scheduled page
+  // refreshes its Next/Last times live.
   schedulerEngine.start((info) => {
     for (const w of BrowserWindow.getAllWindows())
       w.webContents.send('scheduled:fired', { taskId: info.task.id, convId: info.convId, ok: info.ok })

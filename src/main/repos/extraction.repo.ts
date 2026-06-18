@@ -79,3 +79,12 @@ export function listDue(now: string): string[] {
     .all(now) as unknown as { conversation_id: string }[]
   return rows.map((r) => r.conversation_id)
 }
+
+// Earliest pending idle_due across all conversations (ISO string), or null if none. Lets the memory
+// service arm ONE timer to that exact instant instead of scanning on a fixed cadence.
+export function nextIdleDue(): string | null {
+  const row = getDb()
+    .prepare('SELECT idle_due FROM extraction_state WHERE idle_due IS NOT NULL ORDER BY idle_due ASC LIMIT 1')
+    .get() as unknown as { idle_due: string } | undefined
+  return row?.idle_due ?? null
+}

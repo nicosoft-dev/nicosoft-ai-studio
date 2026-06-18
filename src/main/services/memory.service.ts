@@ -54,8 +54,12 @@ Return a JSON array of 0-2 items. Each element: {"content": "<one concise senten
 - If nothing generalizes, return [].
 - Output ONLY the JSON array — no preamble, no explanation, no markdown code fence.`
 
-// Module-level guard so the 60s idle-sweep timer can't stack a new sweep on a still-running one.
+// Module-level guard so an idle-extraction pass can't stack on a still-running one (slow LLM).
 let sweeping = false
+// Single armed timer for the next pending idle_due (event-driven, replaces the old blind 60s scan).
+let idleTimer: ReturnType<typeof setTimeout> | null = null
+const MAX_IDLE_DELAY_MS = 6 * 60 * 60 * 1000 // cap one timer (sleep/clock-change safety); re-arms after
+const DECAY_INTERVAL_MS = 6 * 60 * 60 * 1000 // decay/prune has no event source → coarse cron, not 60s
 
 export type ExtractTrigger = 'auto' | 'explicit' | 'user'
 
@@ -208,16 +212,17 @@ function parseLessons(raw: string): string[] {
 export async function onTurn(ctx: ExtractContext, cadence: number = POST_TURN_EVERY): Promise<void> {
   const turn = extractionRepo.incrTurn(ctx.convId)
   extractionRepo.setIdleDue(ctx.convId, new Date(Date.now() + IDLE_DELAY_MS).toISOString())
+  armIdleTimer() // re-arm to the nearest pending idle_due (this turn just set/refreshed one)
   const messages = convRepo.listByConversation(ctx.convId)
   const lastUser = [...messages].reverse().find((m) => m.author === 'user')
   if (lastUser && isExplicit(lastUser.content)) await extract(ctx, 'explicit')
   else if (turn % Math.max(1, cadence) === 0) await extract(ctx, 'auto')
 }
 
-// Idle sweep: extract for every conversation whose idle timer elapsed. Self-resolves each
-// conversation's role + endpoint/model from its primary role binding. Driven by a main-process timer.
-export async function runIdleSweep(): Promise<void> {
-  if (sweeping) return // a previous sweep is still running (slow LLM) — don't stack another
+// Extract for every conversation whose idle timer elapsed. Self-resolves each conversation's role +
+// endpoint/model from its primary role binding. Fired by the armed idle timer (armIdleTimer), not a scan.
+async function runIdleExtractions(): Promise<void> {
+  if (sweeping) return // a previous pass is still running (slow LLM) — don't stack another
   sweeping = true
   try {
     const now = new Date().toISOString()
@@ -235,9 +240,37 @@ export async function runIdleSweep(): Promise<void> {
   } finally {
     sweeping = false
   }
-  // Decay pass, piggybacked on the sweep timer: drop AUTO memories nothing has recalled for
-  // STALE_AUTO_DAYS, and keep the whole pool under MAX_POOL (least-recently-recalled auto first).
-  // Explicit/user memories are never auto-deleted.
+}
+
+// Arm ONE timer to the nearest pending idle_due; when it fires, run the elapsed extractions then re-arm to
+// whatever's next. No pending idle_due ⇒ no timer (replaces the blind 60s sweep). Called from onTurn (a
+// turn just set/refreshed an idle_due) and once at startup (to pick up idle_due persisted across restart).
+export function armIdleTimer(): void {
+  // A sweep is already in flight: do NOT (re)arm here. runIdleExtractions clears each conversation's
+  // idle_due BEFORE its (possibly slow, 2-5min) extract await, so a concurrent onTurn calling armIdleTimer
+  // would otherwise see a still-past-due instant, arm setTimeout(0), hit the `sweeping` guard, and re-arm
+  // delay=0 in a tight loop until the stalled extract resolves. The in-flight pass's own .finally re-arms
+  // once after it drains (re-reading nextIdleDue), so every pending idle_due is still picked up.
+  if (sweeping) return
+  if (idleTimer) {
+    clearTimeout(idleTimer)
+    idleTimer = null
+  }
+  const nextIso = extractionRepo.nextIdleDue()
+  if (!nextIso) return
+  const delay = Math.min(MAX_IDLE_DELAY_MS, Math.max(0, new Date(nextIso).getTime() - Date.now()))
+  idleTimer = setTimeout(() => {
+    idleTimer = null
+    void runIdleExtractions()
+      .catch(() => {})
+      .finally(() => armIdleTimer()) // re-arm to the next pending idle_due (the fired ones were cleared)
+  }, delay)
+}
+
+// Decay/prune: drop AUTO memories nothing has recalled for STALE_AUTO_DAYS + keep the pool under MAX_POOL
+// (least-recently-recalled auto first). Explicit/user memories are never auto-deleted. No event source, so
+// it stays a timer — but a coarse multi-hour one (startMemoryMaintenance), not the old 60s sweep.
+function runDecayPass(): void {
   try {
     const staleBefore = new Date(Date.now() - STALE_AUTO_DAYS * 24 * 3600 * 1000).toISOString()
     const pruned = memoryRepo.pruneAuto(staleBefore, MAX_POOL)
@@ -245,6 +278,14 @@ export async function runIdleSweep(): Promise<void> {
   } catch {
     /* best-effort */
   }
+}
+
+// Called once at app startup (replaces the 60s setInterval(runIdleSweep)): arm the event-driven idle timer
+// for any idle_due persisted across restart, and start the coarse decay loop (run once now + every 6h).
+export function startMemoryMaintenance(): void {
+  armIdleTimer()
+  runDecayPass()
+  setInterval(runDecayPass, DECAY_INTERVAL_MS)
 }
 
 export interface RecallInput {
