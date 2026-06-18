@@ -69,6 +69,7 @@
   "sidebar.unarchive": "보관 해제",
   "sidebar.delete": "삭제",
   "topbar.workspace": "워크스페이스",
+  "topbar.sidebar": "사이드바",
   "topbar.actions": "작업",
   "topbar.settings": "설정",
   "topbar.rename": "이름 변경",

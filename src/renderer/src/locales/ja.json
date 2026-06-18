@@ -69,6 +69,7 @@
   "sidebar.unarchive": "アーカイブから戻す",
   "sidebar.delete": "削除する",
   "topbar.workspace": "ワークスペース",
+  "topbar.sidebar": "サイドバー",
   "topbar.actions": "操作",
   "topbar.settings": "設定",
   "topbar.rename": "名前を変更",

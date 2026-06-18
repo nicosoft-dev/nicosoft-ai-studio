@@ -69,6 +69,7 @@
   "sidebar.unarchive": "取消归档",
   "sidebar.delete": "删除",
   "topbar.workspace": "工作区",
+  "topbar.sidebar": "侧边栏",
   "topbar.actions": "操作",
   "topbar.settings": "设置",
   "topbar.rename": "重命名",

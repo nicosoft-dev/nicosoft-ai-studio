@@ -69,6 +69,7 @@
   "sidebar.unarchive": "Unarchive",
   "sidebar.delete": "Delete",
   "topbar.workspace": "Workspace",
+  "topbar.sidebar": "Sidebar",
   "topbar.actions": "Actions",
   "topbar.settings": "Settings",
   "topbar.rename": "Rename",

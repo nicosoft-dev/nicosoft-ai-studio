@@ -308,6 +308,10 @@ input, textarea, select { font-family: inherit; color: inherit; }
   min-height: 0;
 }
 .w-1024 .sidebar { width: 232px; flex-basis: 232px; }
+/* Collapsed: hide the nav entirely. The window's traffic-light strip lived in .sidebar-header,
+   so the topbar reserves it instead (.topbar.nav-collapsed) to keep the controls clear. */
+.sidebar.collapsed { display: none; }
+.topbar.nav-collapsed { padding-left: 78px; }
 
 .sidebar-scroll { flex: 1; overflow-y: auto; padding: 8px 8px 16px; }
 

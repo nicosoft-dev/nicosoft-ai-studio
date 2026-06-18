@@ -343,6 +343,12 @@ export const Icons: Record<string, IconFn> = {
       <path d="M15 3v18" />
     </Icon>
   ),
+  panelLeft: (p) => (
+    <Icon {...p}>
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M9 3v18" />
+    </Icon>
+  ),
   table: (p) => (
     <Icon {...p}>
       <path d="M12 3v18" />

@@ -31,6 +31,7 @@ interface PersistedState {
   activeExpert?: string
   settingsTab?: string
   drawerOpen?: boolean
+  sidebarCollapsed?: boolean
   activeProject?: string | null
 }
 
@@ -65,12 +66,13 @@ export default function App(): ReactElement {
   // null = closed, {} = create mode, {initialRole} = edit mode for an existing custom role.
   const [roleDialog, setRoleDialog] = useState<null | { initialRole?: { id: string; name: string; color: string | null; systemPrompt: string | null; greeting: string | null; tools: string[] } }>(null)
   const [drawerOpen, setDrawerOpen] = useState<boolean>(persisted.drawerOpen || false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(persisted.sidebarCollapsed || false)
   const [activeProject, setActiveProject] = useState<string | null>(persisted.activeProject || null)
   const [fromProject, setFromProject] = useState<string | null>(null) // project an expert chat was opened FROM (back-breadcrumb)
 
   useEffect(() => {
-    saveState({ view, activeExpert, settingsTab, drawerOpen, activeProject })
-  }, [view, activeExpert, settingsTab, drawerOpen, activeProject])
+    saveState({ view, activeExpert, settingsTab, drawerOpen, sidebarCollapsed, activeProject })
+  }, [view, activeExpert, settingsTab, drawerOpen, sidebarCollapsed, activeProject])
 
   // Load the persisted conversation history + role enable/disable states + user-defined custom roles
   // once on mount. Until each store's load() completes, the sidebar shows built-ins only; customs
@@ -239,12 +241,14 @@ export default function App(): ReactElement {
             onSelectConv={selectConv}
             onNewRole={() => setRoleDialog({})}
             onNewConversation={() => setRolePicker(true)}
+            collapsed={sidebarCollapsed}
           />
           <div className="main-area">
             <Topbar
               onCommand={() => setCmdk(true)}
               onSettings={openSettings}
               workspace={view === 'app' ? { open: drawerOpen, onToggle: () => setDrawerOpen((s) => !s) } : null}
+              sidebar={{ collapsed: sidebarCollapsed, onToggle: () => setSidebarCollapsed((s) => !s) }}
             />
             <div className="main-row">
             {view === 'studio' ? (

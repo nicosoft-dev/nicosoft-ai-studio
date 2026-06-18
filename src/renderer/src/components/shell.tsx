@@ -23,11 +23,13 @@ import type { ConversationDto } from '@/lib/api'
 export function Topbar({
   onCommand,
   onSettings,
-  workspace
+  workspace,
+  sidebar
 }: {
   onCommand: () => void
   onSettings: () => void
   workspace?: { open: boolean; onToggle: () => void } | null
+  sidebar?: { collapsed: boolean; onToggle: () => void } | null
 }): ReactElement {
   const chat = useChat()
   const cid = chat.activeConv
@@ -49,7 +51,7 @@ export function Topbar({
         .catch(() => toast.error(t('topbar.exportFailed')))
   }
   return (
-    <div className="topbar">
+    <div className={'topbar' + (sidebar?.collapsed ? ' nav-collapsed' : '')}>
       {workspace && cid ? (
         <div className="topbar-title" title={curTitle || t('sidebar.untitled')}>
           <span className="tt-name">{curTitle || t('sidebar.untitled')}</span>
@@ -58,10 +60,19 @@ export function Topbar({
         <div className="spacer" />
       )}
       <div className="top-actions">
+        {sidebar && (
+          <button
+            className="icon-btn"
+            title={t('topbar.sidebar')}
+            onClick={sidebar.onToggle}
+          >
+            <Icons.panelLeft size={17} />
+          </button>
+        )}
         {workspace && (
           <>
             <button
-              className={'icon-btn' + (workspace.open ? ' on' : '')}
+              className="icon-btn"
               title={t('topbar.workspace')}
               onClick={workspace.onToggle}
             >
@@ -315,7 +326,8 @@ export function Sidebar({
   onOpenProfile,
   onSelectConv,
   onNewRole,
-  onNewConversation
+  onNewConversation,
+  collapsed
 }: {
   activeExpert?: string | null
   activeConv?: string | null
@@ -333,6 +345,7 @@ export function Sidebar({
   onSelectConv: (id: string) => void
   onNewRole: () => void
   onNewConversation: () => void
+  collapsed?: boolean
 }): ReactElement {
   const { experts: EXPERTS, byId: EXPERT_BY_ID } = useAllExperts()
   const roles = useRoles()
@@ -365,7 +378,7 @@ export function Sidebar({
   const histExpert = (c: ConversationDto): Expert | null => (c.primaryRoleId ? EXPERT_BY_ID[c.primaryRoleId] ?? null : null)
 
   return (
-    <div className="sidebar">
+    <div className={'sidebar' + (collapsed ? ' collapsed' : '')}>
       <div className="sidebar-header">
         <button className="sidebar-new" title={t('sidebar.newConversation')} onClick={onNewConversation}>
           <Icons.edit size={17} />
