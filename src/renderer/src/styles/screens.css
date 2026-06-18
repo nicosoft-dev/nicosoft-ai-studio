@@ -1259,6 +1259,9 @@
   position: fixed; z-index: 1200; display: flex; flex-direction: column;
   background: var(--bg-1); border: 1px solid var(--border-2); border-radius: 12px; overflow: hidden;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+  /* Carve a no-drag hole over the window: without this, dragging the viewer's header while it overlaps the
+     main window's -webkit-app-region:drag strip (topbar) moves the whole Electron window instead. */
+  -webkit-app-region: no-drag;
 }
 .fv-head { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 10px 0 16px; border-bottom: 1px solid var(--border-1); cursor: move; user-select: none; }
 .fv-head .icon-btn { cursor: pointer; }
@@ -1267,14 +1270,22 @@
 .fv-name { flex: 1; min-width: 0; font-size: 13px; color: var(--text-1); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fv-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
 .fv-body { flex: 1; overflow: auto; padding: 16px; }
-/* Files viewer code: bare CodeBlock (no inner container) + per-line numbers via a Shiki .line counter. */
+/* Files viewer code: bare CodeBlock (no inner container) + per-line numbers via a Shiki .line counter.
+   Long lines soft-wrap so the content fits the window width (no right-edge cutoff); a hanging indent keeps
+   wrapped text aligned under the code, not under the line number. */
 .fv-code { counter-reset: fvln; }
-.fv-code .code-body { font-size: 12.5px; line-height: 1.55; }
+.fv-code .code-body { font-size: 12.5px; line-height: 1.6; }
+/* Soft-wrap long lines so content fits the window width (no right-edge cutoff). .line stays inline (Shiki
+   relies on the inter-line "\n" for breaks — making it block would double-space), so a wrapped line's
+   continuation flows under the number; acceptable for fit-to-width. */
+.fv-code .code-body .shiki,
+.fv-code .code-body .shiki code,
+.fv-code .code-plain code { white-space: pre-wrap; overflow-wrap: anywhere; }
 .fv-code .line::before {
   counter-increment: fvln;
   content: counter(fvln);
   display: inline-block;
-  width: 2.4em;
+  width: 2.3em;
   margin-right: 1.3em;
   text-align: right;
   color: var(--text-4);
