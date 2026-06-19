@@ -52,12 +52,6 @@ nsis:
   perMachine: false
   allowToChangeInstallationDirectory: true
 
-linux:
-  icon: build/icon.png
-  category: Development
-  target:
-    - AppImage
-
 # GitHub provider. CI builds with `--publish never` and uploads through the workflow's release job
 # (so a single job owns the release, avoiding a 3-runner race). Declaring it here still makes
 # electron-builder emit the auto-update metadata (latest*.yml) into dist/ at pack time; those files

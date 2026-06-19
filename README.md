@@ -73,8 +73,8 @@ Two limits we don't paper over: the loop-breaker for *repeated* failure hasn't h
 
 Grab a build from the [**Releases**](https://github.com/nicosoft-dev/nicosoft-ai-studio/releases) page:
 
-- **Stable** — tagged `vX.Y.Z` releases: macOS (`.dmg` / `.zip`, Apple Silicon), Windows (`.exe` installer), Linux (`.AppImage`).
-- **Nightly** — the rolling [`nightly`](https://github.com/nicosoft-dev/nicosoft-ai-studio/releases/tag/nightly) pre-release tracks `develop` and is rebuilt as new work lands (same three platforms). Bleeding edge — expect rough edges.
+- **Stable** — tagged `vX.Y.Z` releases: macOS (`.dmg` / `.zip`, Apple Silicon), Windows (`.exe` installer).
+- **Nightly** — the rolling [`nightly`](https://github.com/nicosoft-dev/nicosoft-ai-studio/releases/tag/nightly) pre-release tracks `develop` and is rebuilt as new work lands (both platforms). Bleeding edge — expect rough edges.
 
 Or build it yourself — see [Development](#-development).
 

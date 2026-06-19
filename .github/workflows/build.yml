@@ -82,8 +82,6 @@ jobs:
             args: --mac --arm64
           - os: windows-latest
             args: --win
-          - os: ubuntu-latest
-            args: --linux
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
