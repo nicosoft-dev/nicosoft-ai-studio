@@ -356,7 +356,6 @@ const ROLE_SECTIONS: Record<string, string> = {
 
 // Dispatched role ids (everything Danny can route to — Danny itself is the router, not a destination).
 export const DISPATCHABLE_ROLE_IDS = ['generalist', 'engineer', 'shuri', 'designer', 'translator', 'editor', 'analyst', 'scheduler'] as const
-export type DispatchableRoleId = (typeof DISPATCHABLE_ROLE_IDS)[number]
 
 // Assemble the full system prompt for a role: COMMON_PREAMBLE + role section. Returns null for an
 // unknown role id (the caller decides whether to fall back or 404). Danny router/synthesis are NOT

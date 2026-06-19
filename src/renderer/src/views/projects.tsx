@@ -20,7 +20,6 @@ import { Modal } from '@/components/modal'
 type ProjectDto = Awaited<ReturnType<typeof window.api.project.list>>[number]
 type TaskDto = ProjectDto['plan'][number]
 type TestDto = ProjectDto['tests'][number]
-type ToolEventDto = ProjectDto['toolEvents'][number]
 
 // project.phase is stored lowercase (planning|executing|testing|done); the chip + rail label in TitleCase.
 const PHASE_LABEL: Record<string, string> = { planning: 'Planning', executing: 'Executing', testing: 'Testing', done: 'Done' }

@@ -3,7 +3,7 @@
    Shared context that helps every expert understand the user.
    ============================================================ */
 import { Fragment, useEffect, useRef, useState } from 'react'
-import type { CSSProperties, ReactElement } from 'react'
+import type { ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 import { Icons } from '@/components/icons'
 import { Segmented } from '@/components/primitives'

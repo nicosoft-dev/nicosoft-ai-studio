@@ -4,12 +4,9 @@ import { McpManager } from '../mcp/manager'
 import type { McpServerConfig } from '../mcp/types'
 import type { McpServerRow } from '../repos/mcp.repo'
 import type {
-  McpScope,
   McpServerDto,
   McpServerInput,
-  McpStatus,
-  McpTestResult,
-  McpTransport
+  McpTestResult
 } from '../ipc/contracts'
 
 // One MCP manager for the whole app — agent.service injects manager.toolsForRole(roleId).

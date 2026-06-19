@@ -3,7 +3,7 @@
    Profile · Memory · Endpoints · Roles · General · Privacy · About
    ============================================================ */
 import { useEffect, useRef, useState } from 'react'
-import type { CSSProperties, ReactElement } from 'react'
+import type { ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 import { Icons } from '@/components/icons'
 import { useAnchoredMenu } from '@/lib/use-anchored-menu'

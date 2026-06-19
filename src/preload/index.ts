@@ -39,7 +39,6 @@ import type {
   AgentQuestionCancel,
   AgentDone,
   AgentErrorDto,
-  ToolCallDto,
   RunTranscript,
   CoordinatorRunInputDto,
   CoordinatorDispatchEvent,

@@ -3,7 +3,6 @@
 // BrowserWindow IS the window, so the .desktop/.stage/scale/width-switch wrappers are dropped.
 import { useEffect, useState } from 'react'
 import type { ReactElement } from 'react'
-import { STUDIO_DATA } from '@/data/studio-data'
 import { Topbar, Sidebar } from '@/components/shell'
 import { WindowControls } from '@/components/window-controls'
 import { CommandPalette } from '@/components/dialogs/command-palette'

@@ -4,13 +4,6 @@ import { getDb } from '../db/connection'
 // server version: a CAS lock (coalescing, one extraction in flight per conversation), a turn counter
 // (post-turn cadence), and an idle-due timestamp (the delayed idle trigger). One row per conversation.
 
-export interface ExtractionState {
-  conversationId: string
-  lockUntil: string | null
-  turnCounter: number
-  idleDue: string | null
-}
-
 function ensure(convId: string): void {
   getDb()
     .prepare('INSERT INTO extraction_state (conversation_id, turn_counter) VALUES (?, 0) ON CONFLICT(conversation_id) DO NOTHING')
