@@ -174,18 +174,22 @@ export async function run(
   // ⑥ chat-layer side effects, fire-and-forget so they don't delay the run's completion (mirrors the
   //    plain-chat onDone path: memory extraction cadence + compression check). contextWindow is passed
   //    explicitly because the role's model may not be in the endpoint's availableModels catalog.
+  //    B6/#8: chained (not concurrent) so the post-turn extraction runs BEFORE the compaction check —
+  //    compaction's STEP 0 extraction otherwise races onTurn on the same CAS lock and could fold before
+  //    memory is captured. Still fire-and-forget overall; the run's completion isn't delayed.
   void memoryService
     .onTurn({ convId, roleId, endpointId: input.endpointId, model: input.model })
     .catch(() => {})
-  void compressionService
-    .maybeCompress({
-      convId,
-      roleId,
-      endpointId: input.endpointId,
-      model: input.model,
-      contextWindow: input.contextWindow,
-      currentTokens: promptTokens,
-    })
+    .then(() =>
+      compressionService.maybeCompress({
+        convId,
+        roleId,
+        endpointId: input.endpointId,
+        model: input.model,
+        contextWindow: input.contextWindow,
+        currentTokens: promptTokens,
+      })
+    )
     .catch(() => {})
 
   return { reason: loopRes.reason, turns: loopRes.turns, convId, runId, promptTokens, outputTokens: loopRes.outTokens, sentTokens: loopRes.inTokens }

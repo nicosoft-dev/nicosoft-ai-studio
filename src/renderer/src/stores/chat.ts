@@ -161,15 +161,17 @@ export const useChat = create<ChatState>((set, get) => {
       const ctxTok = d.inputTokens
       if (typeof ctxTok === 'number')
         set((s) => ({ contextTokens: { ...s.contextTokens, [meta.convId]: ctxTok } }))
-      void window.api.conversations
+      // B6/#8: persist the assistant turn, THEN extract memory, THEN fire compaction — all before the fold —
+      // so the documented "extract synchronously before folding" ordering holds EXPLICITLY rather than by
+      // relying on the append IPC happening to land before onTurn. Awaiting the append makes it robust even
+      // if the append handler is ever made async; onTurn (extraction) then runs before compaction so its own
+      // STEP 0 extraction can't lose the CAS lock and fold before memory is captured. onTurn runs an LLM
+      // extraction only on its cadence turns; other turns it resolves immediately. Best-effort — neither the
+      // extraction nor the list refresh may block compaction.
+      await window.api.conversations
         .append(meta.convId, { author: 'expert', expertId: meta.expertId, model: meta.model, content: d.text, inputTokens: ctxTok, outputTokens: d.usage?.outTokens, sentTokens: d.usage?.inTokens })
-        .then(() => get().loadConversations())
-      // B6/#8: await the post-turn memory extraction BEFORE firing compaction, so compaction's STEP 0
-      // extraction can't lose the per-conversation CAS lock to it and fold before memory is captured —
-      // restoring the documented "extract synchronously before folding" ordering. With onTurn serialized
-      // first, compress's own STEP 0 extraction then runs uncontended and catches anything onTurn missed,
-      // all before the fold. onTurn only runs an LLM extraction on its cadence turns; other turns this
-      // resolves immediately. Best-effort — a failed extraction must not block compaction.
+        .catch(() => {})
+      void get().loadConversations()
       await window.api.memory
         .onTurn({ convId: meta.convId, roleId: meta.expertId, endpointId: meta.endpointId, model: meta.model })
         .catch(() => {})

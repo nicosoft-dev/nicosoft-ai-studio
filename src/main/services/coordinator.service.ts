@@ -444,6 +444,12 @@ function fireSideEffects(convId: string, roleId: string, endpointId: string, mod
   // cadence 1: a coordinator turn is heavyweight (a dispatched run can be a multi-expert hour), so
   // extract after EVERY turn — the every-3 chat cadence left whole runs unextracted when the app
   // closed before the idle sweep. The watermark keeps repeat extraction incremental and cheap.
-  void memoryService.onTurn({ convId, roleId, endpointId, model }, 1).catch(() => {})
-  void compressionService.maybeCompress({ convId, roleId, endpointId, model, currentTokens: inputTokens }).catch(() => {})
+  // B6/#8: chain extraction → compaction (not concurrent) so STEP 0's extraction can't lose the
+  // per-conversation CAS lock to onTurn and fold before memory is captured — the same extract-before-fold
+  // ordering the chat renderer path enforces. Still fire-and-forget overall.
+  void memoryService
+    .onTurn({ convId, roleId, endpointId, model }, 1)
+    .catch(() => {})
+    .then(() => compressionService.maybeCompress({ convId, roleId, endpointId, model, currentTokens: inputTokens }))
+    .catch(() => {})
 }
