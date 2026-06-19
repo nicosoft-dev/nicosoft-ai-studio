@@ -310,7 +310,13 @@ export async function* callWithToolsOpenAI(
       cacheCreationInputTokens: 0,
     },
   })
-  return { content, stopReason, usage: { inTokens, outTokens, cacheReadTokens } }
+  // B4/#6: OpenAI's input_tokens INCLUDES the cached prefix, but the token helpers
+  // (promptTokensFromUsage/tokensFromUsage) follow the Anthropic convention where usage.inTokens is the
+  // NON-cached delta and cacheRead is added back to recover the total. Return the delta (total - cached) so
+  // the helpers don't double-count the cached tokens — which inflated the autocompact estimate (premature
+  // compaction), the billed inTokens, and the ↑ readout. The live `usage` + `turn-final` events above keep
+  // the full total (inTokens var unchanged), exactly mirroring the Anthropic adapter (llm.ts).
+  return { content, stopReason, usage: { inTokens: Math.max(0, inTokens - cacheReadTokens), outTokens, cacheReadTokens } }
 }
 
 // Pull url_citation annotations off a message item — which web sources each part of the answer drew
