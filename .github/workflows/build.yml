@@ -78,9 +78,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14 # Apple Silicon runner → arm64-only build
+          - os: macos-26 # pinned to the newest fixed GA image our toolchain supports: Apple Silicon (arm64 — matches --arm64; node-pty can't cross-compile) + Xcode/clang (no node-gyp VS ceiling). Matches the macOS 26 dev box. Pinned, not macos-latest, for reproducible builds.
             args: --mac --arm64
-          - os: windows-latest
+          - os: windows-2022 # pinned to the newest fixed image our toolchain supports: windows-2025 ships VS 2026 (v18), which @electron/rebuild's node-gyp 10.2 can't parse ("unsupported version: 18") → node-pty rebuild fails. VS 2022 (v17) is the newest it handles; bump to windows-2025 only after @electron/rebuild gains VS 2026 support.
             args: --win
     runs-on: ${{ matrix.os }}
     steps:
