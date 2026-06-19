@@ -1275,12 +1275,20 @@
    wrapped text aligned under the code, not under the line number. */
 .fv-code { counter-reset: fvln; }
 .fv-code .code-body { font-size: 12.5px; line-height: 1.6; }
-/* Soft-wrap long lines so content fits the window width (no right-edge cutoff). .line stays inline (Shiki
-   relies on the inter-line "\n" for breaks — making it block would double-space), so a wrapped line's
-   continuation flows under the number; acceptable for fit-to-width. */
-.fv-code .code-body .shiki,
-.fv-code .code-body .shiki code,
+/* Soft-wrap long lines so content fits the window width (no right-edge cutoff). The Shiki <code> becomes a
+   grid: each .line is its own row and the inter-line "\n" whitespace text nodes collapse (a whitespace-only
+   node forms no grid item), so a block-level line no longer double-spaces. Each line then carries a hanging
+   indent (padding-left == the line-number column width, negative text-indent of the same) so a wrapped
+   line's continuation aligns under the CODE, not under the line number. code-plain has no .line → plain wrap. */
+.fv-code .code-body .shiki { white-space: pre-wrap; overflow-wrap: anywhere; }
+.fv-code .code-body .shiki code { display: grid; }
 .fv-code .code-plain code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.fv-code .code-body .shiki .line {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding-left: 3.6em; /* == ::before width 2.3em + margin-right 1.3em (the line-number column) */
+  text-indent: -3.6em; /* hanging indent: first line pulls back to the edge; wraps hang at the code column */
+}
 .fv-code .line::before {
   counter-increment: fvln;
   content: counter(fvln);
