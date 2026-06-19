@@ -1,0 +1,155 @@
+name: Build & Release
+
+# Two entry points:
+#   • push a tag `vX.Y.Z`           → stable release, version pinned to the tag
+#   • Run workflow (manual dispatch) → build any ref:
+#       - a tag `vX.Y.Z`            → that stable release
+#       - a branch (default develop) → rolling `nightly` pre-release, version stamped per build
+# node-pty is a native module that can't be cross-compiled, so every OS builds on its own runner.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch or tag to build (tag vX.Y.Z → that release; branch like develop → nightly)'
+        required: true
+        default: develop
+
+permissions:
+  contents: write # create releases + upload assets — GITHUB_TOKEN is enough, no PAT needed
+
+# Supersede an in-flight build of the same ref (matters if nightly is ever wired to auto-run on push).
+concurrency:
+  group: build-${{ github.event.inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Resolve the ref once — which commit, what version string, stable vs nightly — so the rule lives in
+  # exactly one place and every downstream job just reads these outputs.
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.resolve.outputs.ref }}
+      sha: ${{ steps.resolve.outputs.sha }}
+      version: ${{ steps.resolve.outputs.version }}
+      channel: ${{ steps.resolve.outputs.channel }}
+    steps:
+      - name: Pick ref
+        id: pick
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "ref=${{ github.event.inputs.ref }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pick.outputs.ref }}
+      - name: Resolve version & channel
+        id: resolve
+        run: |
+          REF="${{ steps.pick.outputs.ref }}"
+          SHA="$(git rev-parse HEAD)"
+          BASE="$(node -p "require('./package.json').version")"
+          # A vX.Y.Z ref (whether pushed as a tag or typed into the dispatch box) is a stable release;
+          # anything else (a branch) is a nightly, stamped <base>-nightly.<utc-date>.g<short-sha>.
+          if printf '%s' "$REF" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+'; then
+            CHANNEL=stable
+            VERSION="${REF#v}"
+          else
+            CHANNEL=nightly
+            VERSION="${BASE}-nightly.$(date -u +%Y%m%d).g${SHA:0:7}"
+          fi
+          {
+            echo "ref=$REF"
+            echo "sha=$SHA"
+            echo "version=$VERSION"
+            echo "channel=$CHANNEL"
+          } >> "$GITHUB_OUTPUT"
+          echo "Building $REF → $CHANNEL $VERSION ($SHA)"
+
+  # One runner per OS: node-pty must be compiled on its target platform against Electron's ABI (the
+  # postinstall hooks do the rebuild during `npm ci`), so a single host can't produce all three.
+  build:
+    needs: meta
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14 # Apple Silicon runner → arm64-only build
+            args: --mac --arm64
+          - os: windows-latest
+            args: --win
+          - os: ubuntu-latest
+            args: --linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # Electron 42's extract hangs under Node 24 — see scripts/ensure-electron.mjs
+          cache: npm
+      # `npm ci` runs postinstall: ensure-electron (repairs the Electron unpack) + rebuild-native
+      # (compiles node-pty against Electron's ABI). Both are idempotent.
+      - run: npm ci
+      - name: Package
+        shell: bash # uniform across runners (Windows defaults to pwsh) for the `&&` and arg splat
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false # MVP: unsigned — don't probe for a Developer ID identity
+          # --- macOS signing + notarization placeholders: set these secrets later to enable it ---
+          # CSC_LINK: ${{ secrets.CSC_LINK }}
+          # CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        # Pin the built version to the resolved string; pack only — the release job publishes.
+        run: npm run build && npx electron-builder ${{ matrix.args }} --publish never --config.extraMetadata.version=${{ needs.meta.outputs.version }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.yml
+            dist/*.blockmap
+
+  # A single job owns the GitHub release, so the three build runners never race to create or update it.
+  release:
+    needs: [meta, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true # flatten all per-OS artifacts into one folder
+      - name: Publish to GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Gather the actual installer + update-metadata files regardless of nesting depth.
+          mapfile -t FILES < <(find artifacts -type f \( \
+            -name '*.dmg' -o -name '*.zip' -o -name '*.exe' -o -name '*.AppImage' \
+            -o -name '*.yml' -o -name '*.blockmap' \))
+          echo "Found ${#FILES[@]} files to upload:"; printf '  - %s\n' "${FILES[@]}"
+          if [ "${{ needs.meta.outputs.channel }}" = "stable" ]; then
+            TAG="v${{ needs.meta.outputs.version }}"
+            # Create the release (auto-notes from commits) if it's new; on a rerun, just refresh assets.
+            gh release create "$TAG" --target "${{ needs.meta.outputs.sha }}" \
+              --title "$TAG" --generate-notes "${FILES[@]}" \
+              || gh release upload "$TAG" --clobber "${FILES[@]}"
+          else
+            # Rolling nightly: delete + recreate so stale assets never linger and the URL stays stable.
+            gh release delete nightly --cleanup-tag --yes 2>/dev/null || true
+            gh release create nightly --target "${{ needs.meta.outputs.sha }}" --prerelease \
+              --title "Nightly (develop)" \
+              --notes "Automated build from \`${{ needs.meta.outputs.ref }}\` @ \`${{ needs.meta.outputs.sha }}\`. Unsigned — see the README for first-launch steps." \
+              "${FILES[@]}"
+          fi

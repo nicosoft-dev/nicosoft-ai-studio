@@ -71,7 +71,16 @@ Two limits we don't paper over: the loop-breaker for *repeated* failure hasn't h
 
 ## 📥 Download
 
-Build it yourself today (see [Development](#-development)) — packaged macOS (`.dmg` / Apple Silicon) and Windows (`.exe`) installers are published on the [Releases](https://github.com/nicosoft-dev/nicosoft-ai-studio/releases) page as they're cut. Linux comes later.
+Grab a build from the [**Releases**](https://github.com/nicosoft-dev/nicosoft-ai-studio/releases) page:
+
+- **Stable** — tagged `vX.Y.Z` releases: macOS (`.dmg` / `.zip`, Apple Silicon), Windows (`.exe` installer), Linux (`.AppImage`).
+- **Nightly** — the rolling [`nightly`](https://github.com/nicosoft-dev/nicosoft-ai-studio/releases/tag/nightly) pre-release tracks `develop` and is rebuilt as new work lands (same three platforms). Bleeding edge — expect rough edges.
+
+Or build it yourself — see [Development](#-development).
+
+> **Unsigned builds.** Installers aren't code-signed yet, so the OS warns on first launch:
+> - **macOS:** right-click the app → **Open** (once), or run `xattr -dr com.apple.quarantine "/Applications/NicoSoft AI Studio.app"`.
+> - **Windows:** SmartScreen → **More info** → **Run anyway**.
 
 ---
 

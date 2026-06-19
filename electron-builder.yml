@@ -2,6 +2,10 @@ appId: com.nicosoft.aistudio
 productName: NicoSoft AI Studio
 copyright: Copyright © NicoSoft
 
+# Space-free, predictable asset names so release URLs and CI globbing stay simple, e.g.
+# nicosoft-ai-studio-1.0.1-mac-arm64.dmg / -windows-x64.exe / -linux-x64.AppImage.
+artifactName: ${name}-${version}-${os}-${arch}.${ext}
+
 directories:
   # electron-builder auto-discovers build/icon.{icns,ico,png} here; icons are also set explicitly below.
   buildResources: build
@@ -53,3 +57,12 @@ linux:
   category: Development
   target:
     - AppImage
+
+# GitHub provider. CI builds with `--publish never` and uploads through the workflow's release job
+# (so a single job owns the release, avoiding a 3-runner race). Declaring it here still makes
+# electron-builder emit the auto-update metadata (latest*.yml) into dist/ at pack time; those files
+# ride along with the installers so a future electron-updater integration works without rework.
+publish:
+  provider: github
+  owner: nicosoft-dev
+  repo: nicosoft-ai-studio
