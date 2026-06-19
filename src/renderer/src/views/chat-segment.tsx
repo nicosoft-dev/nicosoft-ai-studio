@@ -26,12 +26,31 @@ function fmtElapsed(ms: number): string {
   return `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
-// The readout's tail activity — ONLY "Thinking", and ONLY while the model is generating between tools (no
-// tool running). While a tool runs we surface nothing (just the dot + elapsed/tokens): per-tool labels
-// (Reading/Running/Searching/…) were intentionally dropped — the user only wants "Thinking" during the think
-// phase. Reads ONLY this message's tools, so it stays per-segment and never bleeds across concurrent agents.
+// The readout's tail activity — a short status WORD: "Thinking" while the model generates between tools, or a
+// coarse per-tool word while a tool runs (Reading / Writing / Editing / Running / …). Deliberately just the
+// KIND of work — never the specific target (no file path / command). That detail was the old verbose version
+// that read long and noisy; this stays a single word. English literals (not i18n), matching the existing
+// "Thinking". Reads ONLY this message's tools, so it stays per-segment and never bleeds across concurrent agents.
+const TOOL_ACTIVITY: Record<string, string> = {
+  Read: 'Reading', LS: 'Reading', view_image: 'Reading', WebFetch: 'Fetching',
+  Write: 'Writing', WritePdf: 'Writing',
+  Edit: 'Editing', MultiEdit: 'Editing',
+  Bash: 'Running', code_execution: 'Running',
+  start_service: 'Running', stop_service: 'Running', list_services: 'Running', service_logs: 'Running',
+  Glob: 'Searching', Grep: 'Searching', WebSearch: 'Searching', web_search: 'Searching',
+  TodoWrite: 'Planning', EnterPlanMode: 'Planning', ExitPlanMode: 'Planning',
+  ns_generate_image: 'Generating',
+  panel_examine: 'Reviewing',
+  lsp: 'Analyzing',
+  Task: 'Delegating', agent_spawn: 'Delegating', agent_send: 'Delegating', agent_wait: 'Delegating',
+  agent_batch: 'Delegating', agent_close: 'Delegating', assign_task: 'Delegating', send_message: 'Delegating', wait: 'Delegating',
+  schedule_create: 'Scheduling', schedule_delete: 'Scheduling', schedule_list: 'Scheduling',
+  AskUserQuestion: 'Waiting'
+}
 function segmentActivity(tools?: ToolCall[]): string {
-  return tools?.some((t) => t.status === 'running') ? '' : 'Thinking'
+  const running = tools?.find((t) => t.status === 'running')
+  if (!running) return 'Thinking'
+  return TOOL_ACTIVITY[running.name] ?? 'Working'
 }
 
 // The live "thinking" readout shown while a reply streams: a steady role-colored dot (CSS breathes its
@@ -66,10 +85,9 @@ function ThinkingReadout({ chars, inputTokens, outputTokens, cachedTokens = 0, a
       </span>
     )
   if (out > 0) parts.push(<span>↓ {fmtReadoutTokens(out)} {t('conv.tokensSuffix')}</span>)
-  // The activity ("Thinking…") renders OUTSIDE `parts`, at a fixed trailing position, so its breathe animation
-  // never restarts when parts grow (elapsed crossing 1s / first token landing would shift its index key and
-  // remount it). Sitting outside parts — like the dot — keeps the two in lockstep. Empty activity (a tool is
-  // running) renders nothing — only the think phase shows text.
+  // The activity ("Thinking…" / "Reading…" / …) renders OUTSIDE `parts`, at a fixed trailing position, so its
+  // breathe animation never restarts when parts grow (elapsed crossing 1s / first token landing would shift
+  // its index key and remount it). Sitting outside parts — like the dot — keeps the two in lockstep.
   return (
     <span className="thinking-readout" aria-label="thinking">
       <span className="tr-dot" />
