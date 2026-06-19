@@ -44,7 +44,7 @@ jobs:
           else
             echo "ref=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
           fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ steps.pick.outputs.ref }}
       - name: Resolve version & channel
@@ -84,12 +84,12 @@ jobs:
             args: --win
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.meta.outputs.ref }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
-          node-version: 22 # Electron 42's extract hangs under Node 24 — see scripts/ensure-electron.mjs
+          node-version-file: .nvmrc # single source (Node 24, Active LTS) — matches local dev; ensure-electron.mjs repairs the Electron unpack
           cache: npm
       # `npm ci` runs postinstall: ensure-electron (repairs the Electron unpack) + rebuild-native
       # (compiles node-pty against Electron's ABI). Both are idempotent.
@@ -106,7 +106,7 @@ jobs:
           # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         # Pin the built version to the resolved string; pack only — the release job publishes.
         run: npm run build && npx electron-builder ${{ matrix.args }} --publish never --config.extraMetadata.version=${{ needs.meta.outputs.version }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.os }}
           if-no-files-found: error
@@ -123,7 +123,7 @@ jobs:
     needs: [meta, build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true # flatten all per-OS artifacts into one folder
