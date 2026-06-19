@@ -32,7 +32,7 @@ A desktop app where **nine named AI experts** work for you — each with its own
 | **Turing** | Data analyst — stats & charts | GPT |
 | **Joan** | Email & scheduling — drafts, replies, agendas | GPT |
 
-> Model assignments are sensible defaults — every role is freely re-pointable to any provider/model you've configured.
+> **The model assignments above are a reference configuration, not a hard rule** — the best-performing setup we arrived at through experimentation. Out of the box every expert is seeded to route through **NicoSoft AI**; replace it with your own provider keys and freely re-point any role to any model you've configured under **Settings → Endpoints**.
 
 ---
 
