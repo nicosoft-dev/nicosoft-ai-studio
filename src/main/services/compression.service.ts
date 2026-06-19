@@ -48,9 +48,19 @@ export async function maybeCompress(input: CompressInput): Promise<void> {
   try {
     const ep = endpointRepo.getById(input.endpointId)
     if (!ep) return
+    // B2/#1: resolve the model's real window. A nicosoft/* OAuth slug is often ABSENT from the endpoint
+    // catalog (exact lookup → contextLength 0), which previously returned here and DISABLED compaction
+    // outright (unbounded growth → a non-recoverable upstream 400; on the council/collab path it also left
+    // even the B2-anchored gate dead because synth runs on the coordinator router model). Fall back to the
+    // largest known text-model window on the same endpoint so the gate still has a ceiling — mirrors the
+    // renderer's resolveContextLength, so the context meter and the backend now agree.
+    const exactWindow =
+      input.contextWindow ?? ep.availableModels.find((m) => m.slug === input.model)?.contextLength
     const ctxLen =
-      input.contextWindow ?? ep.availableModels.find((m) => m.slug === input.model)?.contextLength ?? 0
-    if (ctxLen <= 0) return // unknown window — can't compute a threshold
+      exactWindow && exactWindow > 0
+        ? exactWindow
+        : ep.availableModels.reduce((mx, m) => Math.max(mx, m.contextLength || 0), 0)
+    if (ctxLen <= 0) return // no known window anywhere on the endpoint — can't compute a threshold
 
     const history = convRepo.listByConversation(input.convId)
     const prevSummary = summaryRepo.getLatest(input.convId)
@@ -59,12 +69,20 @@ export async function maybeCompress(input: CompressInput): Promise<void> {
 
     // Prefer the exact prompt-token count the caller measured (count_tokens — already includes system,
     // memories, summary, recent turns AND tool schemas). Fall back to a chars/4 estimate + a reserve.
-    const used =
-      input.currentTokens != null
-        ? input.currentTokens
-        : estimateMessageTokens(recent) +
-          (prevSummary ? estimateTextTokens(prevSummary.content) : 0) +
-          RESERVED_CONTEXT_TOKENS
+    // B2/#2/#4: the caller's currentTokens (count_tokens of the step that just finished) is a RELIABLE
+    // measure only when that step ran over the full history (single/direct modes, includeHistory:true).
+    // Multi-expert modes (parallel/council/collaborate, and multi-step pipeline) pass an
+    // includeHistory:false synthesis/panelist prompt — a few KB decoupled from the real fold target (the
+    // whole post-coveredUpTo conversation), so it systematically UNDER-measures and the 90% gate never
+    // trips, letting a group chat grow unbounded. Anchor on the fold target itself: never let `used` drop
+    // below a real estimate of `recent`. An accurate full-history count still wins when larger (it also
+    // covers the system/tools/memories the estimate can't see), but a tiny synthesis prompt can no longer
+    // suppress compaction. chars/4 estimate — no LLM call, same machinery as the legacy fallback branch.
+    const foldTargetEstimate =
+      estimateMessageTokens(recent) +
+      (prevSummary ? estimateTextTokens(prevSummary.content) : 0) +
+      RESERVED_CONTEXT_TOKENS
+    const used = Math.max(input.currentTokens ?? 0, foldTargetEstimate)
     if (!input.force && used < ctxLen * COMPRESS_RATIO) return // under threshold (force = manual /compact)
     if (recent.length <= KEEP_RECENT + 1) return // too little to fold usefully
 
