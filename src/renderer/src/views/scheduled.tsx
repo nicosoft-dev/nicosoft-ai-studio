@@ -118,10 +118,6 @@ function fmtTime(ms?: number): string {
   return new Date(ms).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' })
 }
 
-function stepLabel(s: StepDto): string {
-  return s.kind === 'expert' ? (s.roleId ?? 'expert') : s.kind
-}
-
 function StepChip({ step }: { step: StepDto }): ReactElement {
   const { EXPERT_BY_ID } = STUDIO_DATA
   if (step.kind === 'expert') {

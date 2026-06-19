@@ -268,9 +268,6 @@ export function ChatSegment({
   // "View full" expands to the complete height; collapsing returns to the window. Single-dispatch experts,
   // direct, intro, and synthesis never fold (foldable already excludes them).
   const windowed = foldable && !expanded
-  // Live while the run's newest turn still streams, any tool executes, or (pendingLive) the conversation is
-  // about to continue this run — keeps a tail fold open and the tool cards' live rows rendering.
-  const runLive = pendingLive || msgs.some((m) => m.streaming || m.tools?.some((tl) => tl.status === 'running'))
   // The TIMED readout and the pulsing avatar belong to a segment that is ITSELF streaming. A closed
   // segment can still carry a running sub-tool — Gate B's verifier/fail-handler attach to the
   // implementer's FINISHED step — and resurrecting the timer/token readout off that made two segments

@@ -235,7 +235,7 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
 
   // Floor closure (1 fix round if it failed) — independent of subjects (inv3). The subject integrator then gets
   // the REMAINING round budget (inv6 backstop). closeFloor/integrate run SERIALLY — handlers edit the shared tree.
-  const floorClosure = floorFailed ? await closeFloor(roleId, opts, gate, result.text, verdict.feedback, stepId, signal) : undefined
+  const floorClosure = floorFailed ? await closeFloor(roleId, opts, gate, result.text, verdict.feedback, signal) : undefined
   if (floorClosure) {
     inputTokens += floorClosure.inputTokens
     outputTokens += floorClosure.outputTokens
@@ -409,7 +409,6 @@ async function closeFloor(
   gate: { originalPrompt: string; approvedPlan?: string; acceptance?: string[] },
   implementationText: string,
   feedback: string,
-  stepId: string,
   signal?: AbortSignal
 ): Promise<FloorClosure> {
   const followUp = await runGateBFailFollowUp(implementerRoleId, opts, gate, implementationText, feedback, signal)

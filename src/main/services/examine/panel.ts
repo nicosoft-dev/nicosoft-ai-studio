@@ -167,7 +167,7 @@ export async function runPanelExamine(roleId: string, opts: RunStepOptions, gate
     // reds). Burden is on the skeptics: uncertain → NOT refuted, so a real defect is never lightly dropped.
     const failed = verdicts.filter((v) => v.produced && !v.passed)
     if (failed.length > 0) {
-      const refutes = await refuteSubjectFailures(roleId, opts, gate, implementationText, failed, sharedBuild, verifierRoleId, verifierEndpointId, stepId, panelId, signal)
+      const refutes = await refuteSubjectFailures(opts, gate, implementationText, failed, sharedBuild, verifierRoleId, verifierEndpointId, stepId, panelId, signal)
       for (const v of failed) {
         const r = refutes.get(v.key)
         if (!r) continue
@@ -212,7 +212,6 @@ const REFUTE_VOTERS = 3
 const REFUTE_MAJORITY = 2 // ≥ 2 of 3 must concretely disprove the finding to overturn it
 
 async function refuteSubjectFailures(
-  roleId: string,
   opts: RunStepOptions,
   gate: { originalPrompt: string; approvedPlan?: string; acceptance?: string[] },
   implementationText: string,
@@ -230,7 +229,7 @@ async function refuteSubjectFailures(
   for (const lv of failed) {
     const focus = subjectMeta(lv.key)?.focus ?? lv.key
     for (let i = 0; i < REFUTE_VOTERS; i++) {
-      jobs.push(() => runRefuteVote(roleId, opts, gate, implementationText, lv, focus, sharedBuild, verifierRoleId, i, stepId, panelId, signal).then((r) => ({ key: lv.key, ...r })))
+      jobs.push(() => runRefuteVote(opts, gate, implementationText, lv, focus, sharedBuild, verifierRoleId, i, stepId, panelId, signal).then((r) => ({ key: lv.key, ...r })))
     }
   }
   const votes = (await parallelExamineLimited(verifierEndpointId, jobs)).filter((v): v is { key: ReviewSubject; refuted: boolean; inputTokens: number; outputTokens: number } => v != null)
@@ -258,7 +257,6 @@ async function refuteSubjectFailures(
 // non-contracted reply (no REFUTE: line) or an infra failure → refuted:false (the finding stands; the burden
 // is on the skeptic to disprove it).
 async function runRefuteVote(
-  roleId: string,
   opts: RunStepOptions,
   gate: { originalPrompt: string; approvedPlan?: string; acceptance?: string[] },
   implementationText: string,
