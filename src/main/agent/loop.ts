@@ -424,6 +424,14 @@ export async function* runAgent(
           compactions.auto++
           prevAutoTurn = turns
           appendTodoSnapshot(messages)
+        } else {
+          // B5/#10: autocompact returned the transcript UNCHANGED — the summary call failed (LLM error) or
+          // produced nothing. Without advancing prevAutoTurn the estimate is still over threshold next turn,
+          // so the loop would re-attempt a full-transcript (~400K-char) summary EVERY turn for the rest of
+          // the run while the main path keeps succeeding. Treat it like an ineffective compact: advance
+          // prevAutoTurn so the thrash guard above disables proactive compaction next turn. The reactive
+          // overflow path stays armed for a genuine overflow.
+          prevAutoTurn = turns
         }
       }
     }
