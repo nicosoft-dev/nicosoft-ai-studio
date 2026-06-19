@@ -9,7 +9,7 @@ import { Avatar, Segmented, Switch } from '@/components/primitives'
 import { STUDIO_DATA } from '@/data/studio-data'
 import { Dropdown } from '@/views/profile'
 import { Pagination } from '@/components/pagination'
-import { MemoryLive } from '@/views/memory-live'
+import { useMemoryCloud } from '@/stores/memory-cloud'
 import { useMemory } from '@/stores/memory'
 import { toast } from '@/stores/toast'
 import { useT } from '@/stores/locale'
@@ -222,7 +222,7 @@ export function MemorySettings(): ReactElement {
   const [fExpert, setFExpert] = useState('all')
   const [fLayer, setFLayer] = useState('all')
   const [page, setPage] = useState(0)
-  const [live, setLive] = useState(false) // Memory Live — full-screen 3D neural cloud overlay
+  const showCloud = useMemoryCloud((s) => s.show) // opens the global Memory Live overlay (mounted by App)
   // Reset to the first page whenever a filter narrows the set (else you can land past the last page).
   useEffect(() => setPage(0), [fExpert, fLayer])
 
@@ -298,7 +298,7 @@ export function MemorySettings(): ReactElement {
         {/* trailing row actions: count + Memory Live entry ("Live" is a product name — not localized) */}
         <div className="mf-end">
           <span className="mf-count">{t('mem.count', { n: filtered.length })}</span>
-          <button className="mem-live-btn" onClick={() => setLive(true)} title="Memory Live — 3D neural cloud">
+          <button className="mem-live-btn" onClick={showCloud} title="Memory Live — 3D neural cloud">
             <span className="mem-live-dot" />
             Live
           </button>
@@ -321,7 +321,6 @@ export function MemorySettings(): ReactElement {
         )}
       </div>
       <Pagination page={safePage} pageCount={pageCount} total={filtered.length} pageSize={MEM_PAGE_SIZE} onChange={setPage} />
-      {live ? <MemoryLive onClose={() => setLive(false)} /> : null}
     </div>
   )
 }

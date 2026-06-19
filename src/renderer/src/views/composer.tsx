@@ -10,6 +10,7 @@ import { ModelPicker, ThinkingPicker, ImageModelPicker, ModePicker } from '@/com
 import { CommandPalette, matchCommands, type SlashCommand } from '@/components/command-palette'
 import { PathBar } from '@/components/path-bar'
 import { useWorkspace } from '@/stores/workspace'
+import { useMemoryCloud } from '@/stores/memory-cloud'
 import { useChat, roleHasAgent, roleHasImageGen } from '@/stores/chat'
 import { useRoleBinding, type RoleBindingControls } from '@/lib/use-role-binding'
 import type { EndpointDto } from '@/lib/api'
@@ -191,7 +192,8 @@ export function Composer({
         if (activeConv) void window.api.agent.compact(activeConv)
       },
       setPlanMode: (on) => setMode(expert.id, on ? 'plan' : 'default'),
-      setMode: (m) => setMode(expert.id, m)
+      setMode: (m) => setMode(expert.id, m),
+      openMemoryCloud: () => useMemoryCloud.getState().show()
     }, arg)
     setValue('')
     setCmdIndex(0)

@@ -18,9 +18,11 @@ import { ScheduledView } from '@/views/scheduled'
 import { ExpertDetail } from '@/views/expert'
 import { ChatView } from '@/views/conversation'
 import { WorkspaceDrawer, type WorkspacePanel } from '@/views/workspace'
+import { MemoryLive } from '@/views/memory-live'
 import { useChat } from '@/stores/chat'
 import { useRoles } from '@/stores/roles'
 import { useCustomRoles } from '@/stores/custom-roles'
+import { useMemoryCloud } from '@/stores/memory-cloud'
 import { useAllExperts } from '@/lib/all-experts'
 import { Toaster } from '@/components/toaster'
 
@@ -56,6 +58,7 @@ export default function App(): ReactElement {
   const chat = useChat()
   const { experts, byId: EXPERT_BY_ID } = useAllExperts()
   const roles = useRoles()
+  const memCloud = useMemoryCloud()
   const persisted = loadState()
 
   const [view, setView] = useState<string>(persisted.view || 'onboarding')
@@ -355,6 +358,7 @@ export default function App(): ReactElement {
           }}
         />
       )}
+      {memCloud.open && <MemoryLive onClose={memCloud.hide} />}
       {roleDialog && <RoleEditorDialog initialRole={roleDialog.initialRole} onClose={() => setRoleDialog(null)} />}
       {rolePicker && (
         <RolePickerDialog

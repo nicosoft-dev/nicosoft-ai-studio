@@ -12,6 +12,7 @@ export interface CommandContext {
   compact: () => void
   setPlanMode: (on: boolean) => void
   setMode: (mode: AgentMode) => void
+  openMemoryCloud: () => void
 }
 
 export interface SlashCommand {
@@ -27,6 +28,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: 'compact', desc: 'Summarize older history now to free up context', run: (c) => c.compact() },
   { name: 'plan', desc: 'Plan mode — investigate read-only, then propose a plan', run: (c) => c.setPlanMode(true) },
   { name: 'default', desc: 'Switch back to default (acting) mode', run: (c) => c.setPlanMode(false) },
+  { name: 'memory', desc: 'Open Memory Live — the 3D memory cloud', run: (c) => c.openMemoryCloud() },
   // `/mode <Ask|Plan|Auto>` — a single entry; the user types the mode as an argument. Parsed against
   // MODE_OPTIONS labels (case-insensitive) so it stays in sync as modes change.
   {
