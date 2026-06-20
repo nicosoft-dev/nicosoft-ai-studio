@@ -35,6 +35,7 @@ jobs:
       sha: ${{ steps.resolve.outputs.sha }}
       version: ${{ steps.resolve.outputs.version }}
       channel: ${{ steps.resolve.outputs.channel }}
+      updaterChannel: ${{ steps.resolve.outputs.updaterChannel }}
     steps:
       - name: Pick ref
         id: pick
@@ -54,19 +55,29 @@ jobs:
           SHA="$(git rev-parse HEAD)"
           BASE="$(node -p "require('./package.json').version")"
           # A vX.Y.Z ref (whether pushed as a tag or typed into the dispatch box) is a stable release;
-          # anything else (a branch) is a nightly, stamped <base>-nightly.<utc-date>.g<short-sha>.
+          # anything else (a branch) is a nightly. updaterChannel is the electron-updater channel that names
+          # the generated metadata file: stable → latest.yml, nightly → nightly.yml — so a nightly build only
+          # ever sees nightly releases and a stable build only stable (doc 56 §7.1), the app side picking its
+          # channel from its own -nightly version tag.
           if printf '%s' "$REF" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+'; then
             CHANNEL=stable
+            UPDATER_CHANNEL=latest
             VERSION="${REF#v}"
           else
             CHANNEL=nightly
-            VERSION="${BASE}-nightly.$(date -u +%Y%m%d).g${SHA:0:7}"
+            UPDATER_CHANNEL=nightly
+            # Pure numeric UTC timestamp → a semver-sortable, MONOTONIC prerelease even for same-day rebuilds
+            # (the old .g<sha> suffix sorted lexically by sha, not by time, so a newer same-day build could be
+            # judged older). The sha stays in the release notes for traceability; keeping it OUT of the version
+            # avoids a '+'/'.sha' token landing in asset names and download URLs.
+            VERSION="${BASE}-nightly.$(date -u +%Y%m%d%H%M%S)"
           fi
           {
             echo "ref=$REF"
             echo "sha=$SHA"
             echo "version=$VERSION"
             echo "channel=$CHANNEL"
+            echo "updaterChannel=$UPDATER_CHANNEL"
           } >> "$GITHUB_OUTPUT"
           echo "Building $REF → $CHANNEL $VERSION ($SHA)"
 
@@ -104,8 +115,10 @@ jobs:
           # APPLE_ID: ${{ secrets.APPLE_ID }}
           # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        # Pin the built version to the resolved string; pack only — the release job publishes.
-        run: npm run build && npx electron-builder ${{ matrix.args }} --publish never --config.extraMetadata.version=${{ needs.meta.outputs.version }}
+        # Pin the built version + the update channel; pack only — the release job publishes. channel names the
+        # generated metadata file (nightly.yml vs latest.yml); it deep-merges into the publish object the same
+        # way extraMetadata.version already does, so provider/owner/repo are preserved.
+        run: npm run build && npx electron-builder ${{ matrix.args }} --publish never --config.publish.channel=${{ needs.meta.outputs.updaterChannel }} --config.extraMetadata.version=${{ needs.meta.outputs.version }}
       - uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.os }}
