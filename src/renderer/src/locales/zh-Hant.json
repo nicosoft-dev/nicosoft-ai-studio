@@ -445,5 +445,11 @@
   "update.btn.restart": "重啟並安裝",
   "update.btn.installOnQuit": "退出時安裝",
   "update.btn.retry": "重試",
-  "update.btn.close": "關閉"
+  "update.btn.close": "關閉",
+  "settings.about.checkUpdate": "檢查更新",
+  "update.about.check": "檢測更新",
+  "update.about.checking": "檢測中…",
+  "update.about.upToDate": "已是最新 ✓",
+  "update.about.found": "發現 {version} →",
+  "update.about.failed": "檢測失敗"
 }

@@ -445,5 +445,11 @@
   "update.btn.restart": "再起動してインストール",
   "update.btn.installOnQuit": "終了時にインストール",
   "update.btn.retry": "再試行",
-  "update.btn.close": "閉じる"
+  "update.btn.close": "閉じる",
+  "settings.about.checkUpdate": "アップデート",
+  "update.about.check": "アップデートを確認",
+  "update.about.checking": "確認中…",
+  "update.about.upToDate": "最新です ✓",
+  "update.about.found": "{version} を発見 →",
+  "update.about.failed": "確認に失敗"
 }

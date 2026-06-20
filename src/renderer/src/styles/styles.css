@@ -298,6 +298,14 @@ input, textarea, select { font-family: inherit; color: inherit; }
 .up-progress-row .up-pct { color: var(--accent); font-variant-numeric: tabular-nums; }
 .up-msg { font-size: 13.5px; color: var(--text-2); line-height: 1.55; margin: 0; }
 
+/* About → Updates row (doc 56 §6.3): status text + check/retry button, right-aligned. */
+.set-row-val.up-check { display: flex; align-items: center; justify-content: flex-end; gap: 10px; overflow: visible; }
+.up-st { font-size: 12.5px; color: var(--text-3); white-space: nowrap; }
+.up-st.ok { color: var(--accent); }
+.up-st.err { color: var(--error); }
+.up-found { font-size: 12.5px; color: var(--accent); font-weight: 500; white-space: nowrap; }
+.up-found:hover { text-decoration: underline; }
+
 .kbd-hint {
   display: flex; align-items: center; gap: 6px;
   height: 28px; padding: 0 8px 0 10px; border-radius: 6px;

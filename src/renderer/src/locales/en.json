@@ -445,5 +445,11 @@
   "update.btn.restart": "Restart & install",
   "update.btn.installOnQuit": "Install on quit",
   "update.btn.retry": "Retry",
-  "update.btn.close": "Close"
+  "update.btn.close": "Close",
+  "settings.about.checkUpdate": "Updates",
+  "update.about.check": "Check for updates",
+  "update.about.checking": "Checking…",
+  "update.about.upToDate": "Up to date ✓",
+  "update.about.found": "Found {version} →",
+  "update.about.failed": "Check failed"
 }

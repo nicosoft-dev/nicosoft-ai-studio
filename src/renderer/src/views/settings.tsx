@@ -19,7 +19,16 @@ import { ADAPTIVE_LABEL, THINKING_OPTIONS } from '@/lib/thinking'
 import { useRoleBinding, FAMILY_LABEL } from '@/lib/use-role-binding'
 import { toast } from '@/stores/toast'
 import { useTheme, type ThemePref } from '@/stores/theme'
+import { useUpdate } from '@/stores/update'
 import { useT, useLocale, LOCALE_OPTIONS, type LocalePref } from '@/stores/locale'
+
+// Friendly version display (doc 56 §7.1): a long nightly string like "1.0.1-nightly.20260619223550" shows as
+// "Nightly · 2026-06-19" with the full string in the tooltip; a stable version shows verbatim.
+function prettyVersion(v: string | undefined): { label: string; title: string } {
+  if (!v) return { label: '…', title: '' }
+  const m = v.match(/-nightly\.(\d{4})(\d{2})(\d{2})/)
+  return m ? { label: `Nightly · ${m[1]}-${m[2]}-${m[3]}`, title: v } : { label: v, title: v }
+}
 
 const SETTINGS_NAV: { id: string; icon: string }[] = [
   { id: "profile",   icon: "user" },
@@ -279,6 +288,7 @@ function RolesPage({ onAddEndpoint }: { onAddEndpoint: () => void }): ReactEleme
 
 function GenericSettingsPage({ id }: { id: string }): ReactElement {
   const t = useT()
+  const u = useUpdate()
   const [info, setInfo] = useState<AppInfo | null>(null)
   useEffect(() => {
     void window.api.app.info().then(setInfo)
@@ -319,7 +329,7 @@ function GenericSettingsPage({ id }: { id: string }): ReactElement {
         <div className="settings-title">{t("settings.about.title")}</div>
         <div className="about-hero">
           <div className="about-name">NicoSoft AI Studio</div>
-          <div className="about-ver">{t("settings.about.tagline", { version: "v" + (info?.version ?? "…") })}</div>
+          <div className="about-ver" title={prettyVersion(info?.version).title}>{t("settings.about.tagline", { version: prettyVersion(info?.version).label })}</div>
         </div>
         <div className="settings-desc">{t("settings.about.desc")}</div>
         <ul className="set-points">
@@ -330,7 +340,28 @@ function GenericSettingsPage({ id }: { id: string }): ReactElement {
           <li><b>Yours, on this device</b> — conversations, memory, and projects live in a local SQLite database; API keys sit in the OS keychain.</li>
         </ul>
         <div className="set-list">
-          <div className="set-row"><span className="set-row-label">{t("settings.about.version")}</span><span className="set-row-val">{info?.version ?? "…"}</span></div>
+          <div className="set-row"><span className="set-row-label">{t("settings.about.version")}</span><span className="set-row-val" title={prettyVersion(info?.version).title}>{prettyVersion(info?.version).label}</span></div>
+          <div className="set-row">
+            <span className="set-row-label">{t("settings.about.checkUpdate")}</span>
+            <span className="set-row-val up-check">
+              {u.status === "available" || u.status === "downloading" || u.status === "downloaded" ? (
+                // An update is in play (auto OR manual) — surface it; click reopens the card.
+                <button className="up-found" onClick={u.openModal}>{t("update.about.found", { version: u.version ?? "" })}</button>
+              ) : u.status === "checking" && u.source === "manual" ? (
+                <span className="up-st">{t("update.about.checking")}</span>
+              ) : u.status === "up-to-date" && u.source === "manual" ? (
+                <span className="up-st ok">{t("update.about.upToDate")}</span>
+              ) : u.status === "error" && u.source === "manual" ? (
+                // Manual path shows failures (auto stays silent — §5): reason in tooltip + retry.
+                <>
+                  <span className="up-st err" title={u.error}>{t("update.about.failed")}</span>
+                  <button className="btn ghost sm" onClick={u.check}>{t("update.btn.retry")}</button>
+                </>
+              ) : (
+                <button className="btn ghost sm" onClick={u.check}>{t("update.about.check")}</button>
+              )}
+            </span>
+          </div>
           <div className="set-row"><span className="set-row-label">{t("settings.about.license")}</span><span className="set-row-val">{t("settings.about.licenseVal")}</span></div>
           <div className="set-row"><span className="set-row-label">{t("settings.about.engine")}</span><span className="set-row-val">{t("settings.about.engineVal")}</span></div>
           <div className="set-row"><span className="set-row-label">{t("settings.about.author")}</span><span className="set-row-val">NicoSoft</span></div>

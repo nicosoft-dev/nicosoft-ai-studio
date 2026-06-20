@@ -445,5 +445,11 @@
   "update.btn.restart": "재시작하여 설치",
   "update.btn.installOnQuit": "종료 시 설치",
   "update.btn.retry": "다시 시도",
-  "update.btn.close": "닫기"
+  "update.btn.close": "닫기",
+  "settings.about.checkUpdate": "업데이트",
+  "update.about.check": "업데이트 확인",
+  "update.about.checking": "확인 중…",
+  "update.about.upToDate": "최신 버전 ✓",
+  "update.about.found": "{version} 발견 →",
+  "update.about.failed": "확인 실패"
 }
