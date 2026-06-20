@@ -13,6 +13,7 @@ import { scheduledTaskStore } from './agent/scheduler/store'
 import { disposeAllE2ESessions } from './agent/tools/e2e-browser'
 import { disposeAll as disposeAllTerminals } from './services/terminal.service'
 import { disposeAllActiveServices } from './services/active-services'
+import { initUpdateService, checkSilently } from './services/update.service'
 
 declare const __APP_VERSION__: string
 
@@ -138,7 +139,13 @@ function createWindow(): void {
     }
   })
 
-  win.on('ready-to-show', () => win.show())
+  win.on('ready-to-show', () => {
+    win.show()
+    // Auto update check (doc 56 §5/§7.2): fire-and-forget, packaged only, ~3s after the window is up so it
+    // never delays first paint or enters the startup critical path. checkSilently swallows every failure
+    // (offline / unsigned / throttled stay silent); single-flight dedupes a second window's trigger.
+    if (app.isPackaged) setTimeout(() => void checkSilently(), 3000)
+  })
   if (winState.maximized) win.maximize()
   // Persist size/position across launches: debounced on resize/move, flushed on close.
   let winSaveTimer: ReturnType<typeof setTimeout> | null = null
@@ -211,6 +218,7 @@ app.whenReady().then(() => {
   applyThemePref(settingsService.get<string>('theme')) // set nativeTheme from the persisted pref before the window is created
   registerMediaProtocol() // nsai-media:// → local image files, before the window loads any attachment
   registerIpc()
+  initUpdateService() // wire autoUpdater (channel from the build's own version) before any check can run
   // Connect every enabled MCP server (best effort) so their tools are ready when an agent role runs.
   void connectMcpServers().catch(() => {})
   // Register every enabled skill so a role's agent sees it on the first run (sync — DB read only).

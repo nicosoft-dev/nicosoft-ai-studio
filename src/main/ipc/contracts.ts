@@ -980,3 +980,21 @@ export interface ScheduledFiredEvent {
   convId?: string // undefined on failure
   ok: boolean
 }
+
+// App self-update (doc 56). The single state object the main-process update service (services/update.service.ts)
+// broadcasts on every autoUpdater transition; the renderer store (stores/update.ts) mirrors it verbatim. One
+// source of truth shared by the Topbar button, the update modal, and the About row.
+//   idle → checking → available → downloading → downloaded → (install → quitAndInstall)
+//                  └─► up-to-date    └─► error (manual path only; auto-check errors stay silent — §5②)
+export type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error'
+
+export interface UpdateState {
+  status: UpdateStatus
+  currentVersion: string // the running build's version (build-time __APP_VERSION__)
+  version?: string // the newer version (available / downloaded)
+  notes?: string // release notes (GitHub release body), flattened to text
+  progress?: number // 0–100, while downloading
+  error?: string // raw failure reason (manual path only); the renderer localizes/prettifies it
+  source: 'auto' | 'manual' // who started this check — drives the "silent vs feedback" split (§5)
+  checkedAt?: number // epoch ms of the most recent check start
+}
