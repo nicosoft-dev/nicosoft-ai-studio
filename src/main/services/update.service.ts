@@ -93,7 +93,7 @@ export function initUpdateService(): void {
 export async function check(): Promise<void> {
   if (isBusy()) return
   silent = false
-  setState({ status: 'checking', source: 'manual', error: undefined, checkedAt: Date.now() })
+  setState({ status: 'checking', source: 'manual', error: undefined })
   try {
     await autoUpdater.checkForUpdates()
   } catch (err) {
@@ -105,7 +105,7 @@ export async function check(): Promise<void> {
 export async function checkSilently(): Promise<void> {
   if (isBusy()) return
   silent = true
-  setState({ status: 'checking', source: 'auto', error: undefined, checkedAt: Date.now() })
+  setState({ status: 'checking', source: 'auto', error: undefined })
   try {
     await autoUpdater.checkForUpdates() // libuv async network I/O — never blocks the main loop
   } catch (err) {

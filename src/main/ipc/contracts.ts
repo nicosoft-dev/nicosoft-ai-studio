@@ -996,5 +996,4 @@ export interface UpdateState {
   progress?: number // 0–100, while downloading
   error?: string // raw failure reason (manual path only); the renderer localizes/prettifies it
   source: 'auto' | 'manual' // who started this check — drives the "silent vs feedback" split (§5)
-  checkedAt?: number // epoch ms of the most recent check start
 }
