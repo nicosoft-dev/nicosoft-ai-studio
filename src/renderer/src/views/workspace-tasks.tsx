@@ -94,7 +94,7 @@ function PanelGroup({ owner, panelTools, expertsById }: { owner: string; panelTo
   )
 }
 
-export function WorkspaceTasks({ activeConv, onHasHistory }: { activeConv: string | null; onHasHistory?: (has: boolean) => void }): ReactElement {
+export function WorkspaceTasks({ activeConv }: { activeConv: string | null }): ReactElement {
   const t = useT()
   // — Live tasks — read from the app-lifetime conv:todos subscription (stores/conv-todos), which keeps
   // caching every conversation's latest TodoWrite list even while this panel is closed. That's the fix
@@ -259,8 +259,6 @@ export function WorkspaceTasks({ activeConv, onHasHistory }: { activeConv: strin
 
   // Report History presence up to the drawer so it can relax the narrow fixed window when there's nothing
   // archived yet (current-todos-only view → show them in full, not cramped). Phases / examines / exited services.
-  const hasHistory = history.phases.length > 0 || history.examines.length > 0 || history.services.length > 0
-  useEffect(() => onHasHistory?.(hasHistory), [hasHistory, onHasHistory])
 
   // Merge phases + exited services into one newest-first timeline. panel_examine reviews are NOT here — they
   // render as their own rich PanelCard in the "Panel reviews" section above (rebuilt from these same persisted
