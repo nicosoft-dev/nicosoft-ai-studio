@@ -17,6 +17,7 @@ import { sendMessageTool, assignTaskTool, waitTool } from '../agent/tools/consul
 import { CollabSession, type ExpertSpec, type CollabEvent } from '../agent/collab'
 import { AsyncRegistry } from '../agent/async-registry'
 import { awaitAsyncTool } from '../agent/tools/await-async'
+import { launchAsyncTool } from '../agent/tools/launch-async'
 import { ServiceRegistry, type ServiceInfo } from '../agent/service-registry'
 import { LSPManager } from '../agent/lsp/manager'
 import { startServiceTool, stopServiceTool, serviceLogsTool, listServicesTool } from '../agent/tools/service'
@@ -158,6 +159,7 @@ export async function runCollabSession(
       assignTaskTool,
       waitTool,
       awaitAsyncTool,
+      launchAsyncTool,
       startServiceTool,
       stopServiceTool,
       serviceLogsTool,
