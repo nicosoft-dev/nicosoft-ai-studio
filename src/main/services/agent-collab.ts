@@ -28,6 +28,7 @@ import { agentEvents } from './event-bus'
 import { manager as skillManager } from './skill.service'
 import { DEV_ROLES, E2E_TOOLS, toolsForAgentRole } from './agent-tools'
 import { buildAgentSystem } from './agent-system'
+import { createPanelHandle } from './examine/agent-panel'
 import { setActiveServices, clearActiveServices, broadcastConvServices } from './active-services'
 import * as workspaceTasks from './workspace-tasks.service'
 
@@ -157,11 +158,12 @@ export async function runCollabSession(
     const lsp = DEV_ROLES.has(x.roleId) ? new LSPManager(x.cwd) : undefined
     if (lsp) lspByExpert.push(lsp)
     const tools = [
-      // B3 (collab-review §4.2): collab implementers do NOT carry panel_examine — they self-check per batch
-      // (typecheck/build + self-review, §4.5) and the ONE consolidated panel runs post-completion by the
-      // independent reviewer (runCollabReview). Filtering it here (+ ctx.panel undefined below) kills P1's
-      // concurrent per-expert self-runs at the source: no tool, no handle, so it can't be (mis)invoked.
-      ...toolsForAgentRole(x.roleId).filter((t) => t.name !== 'panel_examine'),
+      // 批B (dogfood2 P1): collab implementers carry panel_examine AGAIN — 批3 had filtered it, which inverted the
+      // user's explicit "don't remove panel_examine from collab experts" spec. The election + async-drive of it is
+      // wired in 批C; here we just restore the tool so an ELECTED collaborator CAN drive the consolidated review
+      // from its own turn. Independence still holds: the panel's internal finders/skeptics are independent roles
+      // (driver ≠ reviewers — chooseVerifierRole excludes the implementer set).
+      ...toolsForAgentRole(x.roleId),
       sendMessageTool,
       assignTaskTool,
       waitTool,
@@ -210,11 +212,21 @@ export async function runCollabSession(
           services: registry,
           async: asyncRegistry,
           lsp,
-          // B3 (collab-review §4.2): collab implementers do NOT self-run the expensive multi-agent panel — the ONE
-          // consolidated review runs post-completion by the independent reviewer in runCollabReview (coordinator).
-          // panel is undefined here AND panel_examine is filtered from the kit above, so it can't be (mis)invoked.
-          // (solo dispatch keeps ctx.panel — agent-dispatch.ts — for its own pre-done self-review, unchanged.)
-          panel: undefined,
+          // 批B (dogfood2 P1): restore ctx.panel for collab implementers (批3 had nulled it). Solo-style handle so
+          // an elected collaborator can drive the consolidated review from its OWN turn (批C wraps the panel_examine
+          // tool in ctx.async for non-blocking launch + await_async suspend). Gated on the tool's presence —
+          // recursion-guard parity with solo agent-dispatch: no tool → no handle.
+          panel: tools.some((t) => t.name === 'panel_examine')
+            ? createPanelHandle({
+                convId,
+                callerRoleId: x.roleId,
+                cwd: x.cwd,
+                permissionMode: x.permissionMode ?? 'default',
+                signal: sig,
+                onStream: (ev) => hooks.onExpertStream(x.roleId, ev),
+                requestPermission: (req, s) => hooks.requestPermission(x.roleId, req, s)
+              })
+            : undefined,
           onSubAgentToolEvent: (ev) => hooks.onExpertStream(x.roleId, ev),
         }
         const gen = runAgent({
