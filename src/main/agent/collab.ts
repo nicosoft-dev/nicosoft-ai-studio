@@ -50,6 +50,9 @@ export interface ExpertSpec {
   // end_turn and return the updated messages. agent.service supplies this (sets up tools/system/ctx +
   // injects collab). Keeping it a callback keeps collab.ts pure scheduling — no agent.service coupling.
   runTurn: (messages: AgentMessage[], collab: CollabHandle, signal: AbortSignal) => Promise<AgentMessage[]>
+  // 批H (dogfood2 P2): the expert's LIVE todo list, so the scheduler can structurally check at hand-off that the
+  // expert isn't parking with dangling (non-completed) items — a prompt rule alone didn't hold (Shuri left 3 open).
+  getTodos?: () => { content: string; status: string }[]
 }
 
 interface ExpertRunner {
@@ -210,6 +213,7 @@ export class CollabSession {
   private async runExpert(e: ExpertRunner, signal: AbortSignal): Promise<void> {
     const handle = this.buildHandle(e.spec.roleId)
     let nudged = false // already gave a one-shot "your wait timed out" turn since this expert's last real input?
+    let todoNudged = false // 批H (P2): already gave the one-shot "you have dangling todos" hand-off reminder?
     try {
       while (!signal.aborted) {
         // 1. Inject unread mail as a single user turn so the expert sees who said what (and the conversation
@@ -228,13 +232,29 @@ export class CollabSession {
         //    DROPS the expert — the real trigger of the collab deadlock (an expert dies on its wait-timeout, so
         //    a peer's later assign lands on a dead runner).
         const last = e.messages[e.messages.length - 1]
+        let ran = false
         if (last && last.role === 'user') {
           e.status = 'running'
           e.waitRequested = false
           this.onEvent({ kind: 'turn', roleId: e.spec.roleId })
           e.messages = await e.spec.runTurn(e.messages, handle, signal)
+          ran = true
           if (signal.aborted) break
           if (e.mailbox.length) continue // mail arrived mid-turn → process it immediately
+        }
+
+        // 批H (dogfood2 P2): hand-off reconcile. If this expert just ran and is now FINISHING — nothing left to
+        // wait for (no wait(), no in-flight async handle, no mail/results) — but its todo list still has
+        // non-completed items, nudge it ONCE to finish or hand them off before parking. A prompt rule didn't hold
+        // (Shuri parked with 1 in_progress + 2 todo while claiming done); this is the structural gate. One-shot
+        // (todoNudged) so an expert that insists can't loop here.
+        if (ran && !todoNudged && !e.waitRequested && e.pendingHandles.size === 0 && e.pendingResults.length === 0 && e.mailbox.length === 0) {
+          const dangling = (e.spec.getTodos?.() ?? []).filter((t) => t.status !== 'completed')
+          if (dangling.length > 0) {
+            pushUserText(e, `Before you finish: your todo list still has ${dangling.length} unfinished item(s) — ${dangling.map((t) => `"${t.content}" (${t.status})`).join('; ')}. Complete them now, or if a teammate / the elected reviewer owns an item, mark it completed / handed-off via TodoWrite. Do NOT hand off with items left in_progress or todo.`)
+            todoNudged = true
+            continue
+          }
         }
 
         // 3. Park. A wait() arms ONE timed park; after we've already nudged this episode (or no wait was

@@ -189,6 +189,7 @@ export async function runCollabSession(
       roleId: x.roleId,
       name: roster.find((r) => r.id === x.roleId)?.name ?? x.roleId,
       initialPrompt: x.initialPrompt,
+      getTodos: () => todos, // 批H (P2): expose the live todo list so the scheduler's hand-off reconcile can check it
       runTurn: async (messages, collab, sig) => {
         hooks.onExpertActive?.(x.roleId, true) // expert is actively working this turn → show its live readout
         // The gen loop below has its own try/finally that clears the readout; guard the one await BEFORE it
