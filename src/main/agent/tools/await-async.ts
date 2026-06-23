@@ -11,9 +11,7 @@ import type { ToolResultBlock } from '../types'
 import { formatAsyncHandle } from '../async-registry'
 
 const inputSchema = z.strictObject({
-  handles: z.array(z.string()).min(1).describe('The async handle id(s) to wait for (returned when you launched the op).'),
-  mode: z.enum(['any', 'all']).optional().describe("'all' (default) waits for every handle; 'any' returns as soon as one finishes."),
-  timeoutMs: z.number().int().positive().optional().describe('Optional timeout in ms; on timeout, returns whatever has finished so far.'),
+  handles: z.array(z.string()).min(1).describe('The async handle id(s) to wait for (returned when you launched the op). Waits for ALL of them.'),
 })
 
 export const awaitAsyncTool = buildTool({
@@ -32,8 +30,9 @@ export const awaitAsyncTool = buildTool({
     // Split into already-settled vs still-running. All settled → return synchronously (no suspend). Any still
     // running → TRUE SUSPEND: park until they complete; the completion event wakes the expert and injects the
     // results (collab.ts notifyHandleComplete + runExpert T1), with the already-settled results riding along.
-    // The collab suspend waits for ALL in-flight handles (a session abort is the backstop — no per-handle timer
-    // this round); mode/timeoutMs are reserved for the synchronous path / a future per-handle timeout.
+    // The collab suspend waits for ALL in-flight handles; a session abort (or asyncRegistry.dispose on session
+    // end) is the backstop. mode/timeoutMs were REMOVED from the schema so the tool contract matches the wired
+    // behavior (the earlier schema advertised early-return / timeout that the collab suspend never honored).
     const inflight: string[] = []
     const settled: string[] = []
     let known = 0

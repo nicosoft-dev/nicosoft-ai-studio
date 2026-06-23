@@ -240,11 +240,20 @@ export class CollabSession {
         // 3. Park. A wait() arms ONE timed park; after we've already nudged this episode (or no wait was
         //    requested) park idle, so we never loop timeout→nudge→re-wait→timeout (API churn) — a real assign or
         //    quiescence resolves it.
+        // T1 (pre-park): if every awaited handle already completed DURING this turn (notifyHandleComplete drained
+        // pendingHandles + queued pendingResults while we were still running), inject now instead of arming a timed
+        // park with nothing left to wait for — that 120s timer was a resume-latency bug. (fix)
+        if (e.pendingResults.length) {
+          pushUserText(e, e.pendingResults.splice(0).join('\n\n'))
+          e.waitRequested = false
+          nudged = false
+          continue
+        }
         // An await_async park (pendingHandles non-empty) is INDEFINITE — its completion event wakes it, not a
         // timer; a wait() park stays timed. Otherwise idle-park (woken by assign or quiescence).
         e.waitUntil = e.pendingHandles.size > 0 ? 0 : e.waitRequested && !nudged ? this.clock() + DEFAULT_WAIT_MS : 0
         e.waitRequested = false
-        const reason = await this.park(e)
+        const reason = await this.park(e, signal)
         // Re-check the mailbox AFTER park resolves: a deliver() can enqueue mail in the window between the
         // quiescence sweep deciding to end and this loop observing the result. Unread mail ALWAYS wins over
         // ending — splice it on the next pass rather than exiting and stranding it (the lost-wakeup).
@@ -292,6 +301,10 @@ export class CollabSession {
   // it from pendingHandles, queue its result, and — once ALL of that expert's awaited handles are done — wake it.
   // A still-pending sibling keeps it parked (mode 'all'). Public: agent-collab wires AsyncRegistry.onComplete to it.
   notifyHandleComplete(handleId: string, result: string): void {
+    // NO early return: several experts can await the SAME handle id (the registry + the ids are shared, surfaced
+    // verbatim in chat), and the runner fires onComplete exactly once — so deliver to EVERY expert waiting on it.
+    // Returning after the first would strand a second waiter (never woken, pendingHandles never drained), and the
+    // settle() T2 guard would then wedge quiescence forever.
     for (const e of this.experts.values()) {
       if (!e.pendingHandles.has(handleId)) continue
       e.pendingHandles.delete(handleId)
@@ -300,7 +313,6 @@ export class CollabSession {
         e.wake('woken') // all awaited handles done → resume; runExpert's post-park check injects pendingResults
         this.onEvent({ kind: 'wake', roleId: e.spec.roleId })
       }
-      return
     }
   }
 
@@ -342,7 +354,7 @@ export class CollabSession {
   // Park the expert until it's woken (assign / quiescence sweep) or its wait times out. Each time an
   // expert parks we check global quiescence: if every expert is parked, wake any with unread mail to
   // drain it (a queued send that never triggered a turn), else end the whole session.
-  private park(e: ExpertRunner): Promise<'woken' | 'quiescent'> {
+  private park(e: ExpertRunner, signal: AbortSignal): Promise<'woken' | 'quiescent'> {
     return new Promise<'woken' | 'quiescent'>((resolve) => {
       let settled = false
       const done = (r: 'woken' | 'quiescent'): void => {
@@ -350,8 +362,16 @@ export class CollabSession {
         settled = true
         e.wake = undefined
         if (timer) clearTimeout(timer)
+        signal.removeEventListener('abort', onAbort)
         resolve(r)
       }
+      // An INDEFINITE async park (pendingHandles, timer===undefined) would otherwise be impervious to abort — the
+      // runExpert while(!aborted) check can't fire while blocked in this await, and no timer would resolve it. Wake
+      // on abort so a real cancel tears the session down and an unresolvable wait can never wedge quiescence.
+      // 'quiescent' = leave the loop cleanly with no wrap-up nudge.
+      const onAbort = (): void => done('quiescent')
+      if (signal.aborted) { resolve('quiescent'); return }
+      signal.addEventListener('abort', onAbort, { once: true })
       e.wake = done
       e.status = 'parked'
 

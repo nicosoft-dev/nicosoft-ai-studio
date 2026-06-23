@@ -23,6 +23,7 @@ const inputSchema = z.strictObject({
 })
 
 const MAX_CAP = 1_000_000 // cap captured output so a chatty background command can't balloon memory
+const KILL_GRACE = 3_000 // SIGTERM → SIGKILL escalation grace, mirroring bash.ts / service-registry
 
 export const launchAsyncTool = buildTool({
   name: 'launch_async',
@@ -43,14 +44,31 @@ export const launchAsyncTool = buildTool({
     const label = input.description?.trim() || input.command.slice(0, 60)
     const handle = ctx.async.launch('process', label, (signal) =>
       new Promise<string>((resolve) => {
-        // node spawn honours { signal } — an aborted session (T3) kills the detached process.
-        const child = spawn('bash', ['-lc', input.command], { cwd, signal })
+        // detached: the child leads its own process GROUP so abort tree-kills the WHOLE tree (the bash -lc wrapper
+        // + every grandchild it forked) via process.kill(-pgid). The plain { signal } option (or child.kill())
+        // reaps ONLY the wrapper and orphans the real worker — the same lesson as bash.ts / service-registry.
+        // SIGTERM, then SIGKILL after a grace so a SIGTERM-trapping child still dies.
+        const child = spawn('bash', ['-lc', input.command], { cwd, detached: true })
         let out = ''
+        let settled = false
         const cap = (d: Buffer): void => { if (out.length < MAX_CAP) out += d.toString() }
+        const killGroup = (sig: NodeJS.Signals): void => {
+          if (child.pid == null) return
+          try { process.kill(-child.pid, sig) } catch { try { child.kill(sig) } catch { /* already gone */ } }
+        }
+        const done = (text: string): void => { if (settled) return; settled = true; signal.removeEventListener('abort', onAbort); resolve(text) }
+        const onAbort = (): void => {
+          killGroup('SIGTERM')
+          const t = setTimeout(() => killGroup('SIGKILL'), KILL_GRACE)
+          t.unref?.()
+          done(`[aborted]\n${out.slice(-8000)}`)
+        }
+        if (signal.aborted) { onAbort(); return }
+        signal.addEventListener('abort', onAbort, { once: true })
         child.stdout?.on('data', cap)
         child.stderr?.on('data', cap)
-        child.on('close', (code) => resolve(`[exit ${code ?? 'null'}]\n${out.slice(-8000)}`))
-        child.on('error', (e) => resolve(`[spawn error] ${e instanceof Error ? e.message : String(e)}`))
+        child.on('close', (code) => done(`[exit ${code ?? 'null'}]\n${out.slice(-8000)}`))
+        child.on('error', (e) => done(`[spawn error] ${e instanceof Error ? e.message : String(e)}`))
       })
     )
     return { data: `Launched ${handle.id} (background: ${label}). Call await_async(["${handle.id}"]) to collect its output.` }

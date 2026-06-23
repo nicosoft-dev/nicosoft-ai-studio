@@ -299,6 +299,7 @@ export async function runCollabSession(
     clearActiveServices(convId, registry)
     broadcastConvServices(convId, []) // clear the Tasks panel's Services section on teardown
     registry.dispose() // tree-kill every service the collaboration started — no lingering ports
+    asyncRegistry.dispose() // tree-kill any still-running launch_async op, INCLUDING unawaited ones — a normal quiescent end never aborts the signal, so this is the only cleanup hook
     for (const lsp of lspByExpert) lsp.dispose() // tree-kill each expert's language server
   }
 }
