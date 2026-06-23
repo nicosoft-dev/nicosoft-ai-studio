@@ -138,6 +138,15 @@ export function WorkspaceTasks({ activeConv }: { activeConv: string | null }): R
   // Group chats (conversation.kind === 'multi') group services by the expert that started them; single
   // chats list them flat. Owner → display name/color comes from the merged experts map.
   const isGroup = useChat((s) => s.conversations.find((c) => c.id === activeConv)?.kind === 'multi')
+  // A coordinator-driven conversation (primaryRoleId='coordinator', OR an explicit 'multi' group) attributes its
+  // todos to whoever wrote them even with a SINGLE owner — Danny's own plan still reads "Danny". Only a SOLO
+  // direct-expert chat (you picked one agent → primaryRoleId is that agent, kind='single') stays headerless,
+  // where the name is redundant. kind ALONE can't separate them — a coordinator collab runs in a kind='single'
+  // conv — so primaryRoleId is the real signal.
+  const isCoordinatorConv = useChat((s) => {
+    const c = s.conversations.find((cc) => cc.id === activeConv)
+    return c?.primaryRoleId === 'coordinator' || c?.kind === 'multi'
+  })
   const { byId: expertsById } = useAllExperts()
   const groups = groupByOwner(liveServices)
   // Collab: per-role todo groups for the ACTIVE roles. A role whose list is all-complete has moved to History
@@ -284,11 +293,12 @@ export function WorkspaceTasks({ activeConv }: { activeConv: string | null }): R
           <div className="ws-empty">{t('tasks.empty')}</div>
         ) : allDone ? (
           <div className="ws-empty">{t('tasks.noActive')}</div>
-        ) : isCollab && todoGroups.length > 0 ? (
-          // Collab (more than one role wrote todos) → group the ACTIVE roles by owner so concurrent lists are
-          // attributed to whoever wrote them instead of merged into one anonymous pile (a completed role has
-          // moved to History and is filtered out). Keyed on role-COUNT, NOT conversation.kind: a coordinator
-          // collab runs in a kind:'single' conv (isGroup=false), so the kind check missed it (verified by e2e).
+        ) : (isCollab || isCoordinatorConv) && todoGroups.length > 0 ? (
+          // Attribute todos to whoever wrote them whenever the conv is role-driven — MORE than one owner
+          // (isCollab) OR a coordinator/group conv even with a SINGLE owner (isCoordinatorConv: Danny's own plan
+          // → "Danny"). Only a SOLO direct-expert chat (one agent, primaryRoleId≠coordinator, kind='single')
+          // falls through to the flat list below, where the name is redundant. (kind alone can't separate them —
+          // a coordinator collab runs in a kind:'single' conv — so primaryRoleId is the real signal.)
           <div className="ws-tasks">
             {todoGroups.map(([owner, ts]) => (
               <div className="ws-todo-group" key={owner || 'unknown'}>
