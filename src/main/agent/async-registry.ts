@@ -80,3 +80,12 @@ export class AsyncRegistry {
     return known.map((id) => this.handles.get(id)).filter((h): h is AsyncHandle => !!h)
   }
 }
+
+// Render a handle as a one-line result string — shared by await_async (the tool result) and agent-collab's
+// onComplete (the text injected when a parked expert resumes), so both read identically.
+export function formatAsyncHandle(h: AsyncHandle): string {
+  if (h.status === 'running') return `- ${h.id} (${h.kind}): still running${h.info ? ` — ${h.info}` : ''}`
+  if (h.status === 'failed') return `- ${h.id} (${h.kind}): FAILED — ${h.error ?? 'unknown error'}`
+  const r = typeof h.result === 'string' ? h.result : h.result != null ? JSON.stringify(h.result) : '(no result)'
+  return `- ${h.id} (${h.kind}): done — ${r}`
+}

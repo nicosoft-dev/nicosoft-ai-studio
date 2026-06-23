@@ -8,6 +8,7 @@
 import { z } from 'zod'
 import { buildTool } from '../tool'
 import type { ToolResultBlock } from '../types'
+import { formatAsyncHandle } from '../async-registry'
 
 const inputSchema = z.strictObject({
   handles: z.array(z.string()).min(1).describe('The async handle id(s) to wait for (returned when you launched the op).'),
@@ -25,20 +26,31 @@ export const awaitAsyncTool = buildTool({
   isReadOnly: () => true, // it only waits — the launched op carries its own permissions
   isConcurrencySafe: () => true,
   async call(input, ctx) {
-    if (!ctx.async) {
+    if (!ctx.async || !ctx.collab?.awaitHandles) {
       throw new Error('await_async is only available in a collaboration. In a solo run, wait on the operation’s own tool (e.g. agent_wait).')
     }
-    const results = await ctx.async.awaitHandles(input.handles, { mode: input.mode ?? 'all', timeoutMs: input.timeoutMs })
-    if (results.length === 0) {
+    // Split into already-settled vs still-running. All settled → return synchronously (no suspend). Any still
+    // running → TRUE SUSPEND: park until they complete; the completion event wakes the expert and injects the
+    // results (collab.ts notifyHandleComplete + runExpert T1), with the already-settled results riding along.
+    // The collab suspend waits for ALL in-flight handles (a session abort is the backstop — no per-handle timer
+    // this round); mode/timeoutMs are reserved for the synchronous path / a future per-handle timeout.
+    const inflight: string[] = []
+    const settled: string[] = []
+    let known = 0
+    for (const id of input.handles) {
+      const h = ctx.async.get(id)
+      if (!h) continue
+      known++
+      if (h.status === 'running') inflight.push(id)
+      else settled.push(formatAsyncHandle(h))
+    }
+    if (known === 0) {
       return { data: `No matching async handles for: ${input.handles.join(', ')}. Check the ids (a launched op returns its handle id).` }
     }
-    const lines = results.map((h) => {
-      if (h.status === 'running') return `- ${h.id} (${h.kind}): still running${h.info ? ` — ${h.info}` : ''} (timed out waiting)`
-      if (h.status === 'failed') return `- ${h.id} (${h.kind}): FAILED — ${h.error ?? 'unknown error'}`
-      const r = typeof h.result === 'string' ? h.result : h.result != null ? JSON.stringify(h.result) : '(no result)'
-      return `- ${h.id} (${h.kind}): done — ${r}`
-    })
-    return { data: lines.join('\n') }
+    if (inflight.length === 0) {
+      return { data: settled.join('\n') } // every handle already done → no need to park
+    }
+    return { data: ctx.collab.awaitHandles(inflight, settled) }
   },
   mapResult: stringResult,
 })

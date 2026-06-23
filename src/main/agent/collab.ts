@@ -36,6 +36,10 @@ export interface CollabHandle {
   send: (to: string, text: string) => string // returns a status line for the tool result
   assign: (to: string, text: string) => string
   requestWait: () => string
+  // C3 §6.5: await_async parks the caller until the given in-flight handles complete (woken by the completion
+  // event). settledResults = results of handles ALREADY done at call time, injected alongside on resume so an
+  // already-finished op isn't lost. Returns a status line for the tool result.
+  awaitHandles: (inflightIds: string[], settledResults: string[]) => string
 }
 
 export interface ExpertSpec {
@@ -57,6 +61,11 @@ interface ExpertRunner {
   waitUntil: number // epoch ms; 0 = park indefinitely (idle, woken only by assign or quiescence)
   wake?: (reason: 'woken' | 'quiescent') => void
   pairCount: Map<string, number> // roundtrips initiated toward each peer (§7 soft cap)
+  // C3 §6.5: in-flight async-op handle ids this expert is parked on (await_async). Non-empty = an active wait
+  // that must NOT be quiesced away (settle T2). pendingResults: completion text to inject on the next run (T1) —
+  // a SEPARATE queue from mailbox, since a handle result has no peer "from" and must not be formatted as mail.
+  pendingHandles: Set<string>
+  pendingResults: string[]
 }
 
 const DEFAULT_WAIT_MS = 120_000
@@ -124,6 +133,8 @@ export class CollabSession {
         waitRequested: false,
         waitUntil: 0,
         pairCount: new Map(),
+        pendingHandles: new Set(),
+        pendingResults: [],
       })
     }
   }
@@ -148,6 +159,14 @@ export class CollabSession {
         me.waitRequested = true
         this.onEvent({ kind: 'wait', roleId: self })
         return 'Waiting for replies — your turn will end and resume when a peer messages you (or on timeout).'
+      },
+      awaitHandles: (inflightIds, settledResults) => {
+        const me = this.experts.get(self)!
+        for (const id of inflightIds) me.pendingHandles.add(id)
+        if (settledResults.length) me.pendingResults.push(...settledResults)
+        me.waitRequested = true // park after this turn; pendingHandles makes it an INDEFINITE park (runExpert), woken by notifyHandleComplete
+        this.onEvent({ kind: 'wait', roleId: self })
+        return `Waiting on ${inflightIds.length} async op(s) — your turn will end and resume when they complete (or a peer messages you).`
       },
     }
   }
@@ -221,13 +240,22 @@ export class CollabSession {
         // 3. Park. A wait() arms ONE timed park; after we've already nudged this episode (or no wait was
         //    requested) park idle, so we never loop timeout→nudge→re-wait→timeout (API churn) — a real assign or
         //    quiescence resolves it.
-        e.waitUntil = e.waitRequested && !nudged ? this.clock() + DEFAULT_WAIT_MS : 0
+        // An await_async park (pendingHandles non-empty) is INDEFINITE — its completion event wakes it, not a
+        // timer; a wait() park stays timed. Otherwise idle-park (woken by assign or quiescence).
+        e.waitUntil = e.pendingHandles.size > 0 ? 0 : e.waitRequested && !nudged ? this.clock() + DEFAULT_WAIT_MS : 0
         e.waitRequested = false
         const reason = await this.park(e)
         // Re-check the mailbox AFTER park resolves: a deliver() can enqueue mail in the window between the
         // quiescence sweep deciding to end and this loop observing the result. Unread mail ALWAYS wins over
         // ending — splice it on the next pass rather than exiting and stranding it (the lost-wakeup).
         if (e.mailbox.length) continue
+        // T1: an awaited async handle (or batch) completed → inject its result(s) as a user turn and run. Real
+        // input, so reset the one-shot timeout-nudge budget (same as fresh mail).
+        if (e.pendingResults.length) {
+          pushUserText(e, e.pendingResults.splice(0).join('\n\n'))
+          nudged = false
+          continue
+        }
         if (reason === 'quiescent') break
 
         // 4. Woken with an empty mailbox = the wait timed out. Append ONE synthetic user turn so the expert gets
@@ -260,6 +288,22 @@ export class CollabSession {
     this.settle()
   }
 
+  // C3 §6.5 / T1: an async handle finished (AsyncRegistry.onComplete → here). Find the expert parked on it, drop
+  // it from pendingHandles, queue its result, and — once ALL of that expert's awaited handles are done — wake it.
+  // A still-pending sibling keeps it parked (mode 'all'). Public: agent-collab wires AsyncRegistry.onComplete to it.
+  notifyHandleComplete(handleId: string, result: string): void {
+    for (const e of this.experts.values()) {
+      if (!e.pendingHandles.has(handleId)) continue
+      e.pendingHandles.delete(handleId)
+      e.pendingResults.push(result)
+      if (e.pendingHandles.size === 0 && e.status === 'parked' && e.wake) {
+        e.wake('woken') // all awaited handles done → resume; runExpert's post-park check injects pendingResults
+        this.onEvent({ kind: 'wake', roleId: e.spec.roleId })
+      }
+      return
+    }
+  }
+
   // Decide whether the collaboration can end — called whenever an expert parks (park) or leaves its loop
   // (runExpert, done/failed). Precedence:
   //   • someone still running → do nothing.
@@ -288,6 +332,10 @@ export class CollabSession {
       }
       return
     }
+    // T2 (C3 §6.5 / C4): a parked expert with in-flight async handle(s) is ACTIVE, not quiescent — never end the
+    // session out from under it; its completion event will wake it. AFTER the mail/timed-waiter drains above, so
+    // it only blocks the final quiescent end (not those wakeups). An async-waiting peer can still receive mail.
+    if (all.some((x) => x.pendingHandles.size > 0 && x.wake)) return
     for (const x of all) x.wake?.('quiescent')
   }
 

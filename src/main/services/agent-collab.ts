@@ -15,7 +15,7 @@ import type { ServerToolSchema } from '../agent/types'
 import { displayName } from '../agent/roles/prompts'
 import { sendMessageTool, assignTaskTool, waitTool } from '../agent/tools/consult'
 import { CollabSession, type ExpertSpec, type CollabEvent } from '../agent/collab'
-import { AsyncRegistry } from '../agent/async-registry'
+import { AsyncRegistry, formatAsyncHandle } from '../agent/async-registry'
 import { awaitAsyncTool } from '../agent/tools/await-async'
 import { launchAsyncTool } from '../agent/tools/launch-async'
 import { ServiceRegistry, type ServiceInfo } from '../agent/service-registry'
@@ -279,7 +279,11 @@ export async function runCollabSession(
     hooks.onServices?.(registry.list())
   }
   try {
-    const texts = await new CollabSession(specs, onEvent, nowMs).run(signal)
+    const session = new CollabSession(specs, onEvent, nowMs)
+    // C3 §6.5 (批8): route async-handle completions into the session so it wakes the parked expert + injects the
+    // result (notifyHandleComplete → runExpert T1). Set before run() so a fast handle can't fire before it's wired.
+    asyncRegistry.onComplete = (h) => session.notifyHandleComplete(h.id, formatAsyncHandle(h))
+    const texts = await session.run(signal)
     return new Map(
       [...texts].map(([roleId, text]): [string, { text: string; reason: AgentResult['reason']; inTokens: number; contextTokens: number; cacheReadTokens: number; outTokens: number }] => [roleId, { text, reason: reasonByRole.get(roleId) ?? 'completed', inTokens: inTokensByRole.get(roleId) ?? 0, contextTokens: contextByRole.get(roleId) ?? 0, cacheReadTokens: cacheReadByRole.get(roleId) ?? 0, outTokens: outTokensByRole.get(roleId) ?? 0 }])
     )
