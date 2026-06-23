@@ -69,7 +69,7 @@ export interface CollabHooks {
 // expert knows who to consult and to stay in its own area. Memories/summary are skipped — a collaboration
 // is a fresh shared task, not a continuation of the role's chat history.
 function buildCollabSystem(roleId: string, teammates: { id: string; name: string }[], cwd?: string): string {
-  const base = buildAgentSystem(roleId, [], null, skillManager.listingForRole(roleId), cwd)
+  const base = buildAgentSystem(roleId, [], null, skillManager.listingForRole(roleId), cwd, true) // collab=true: skip the solo panel self-review discipline (collab implementers have no panel_examine — 批3)
   const roster = teammates.map((t) => `- ${t.name} (roleId: ${t.id})`).join('\n')
   return (
     base +
@@ -87,7 +87,22 @@ function buildCollabSystem(roleId: string, teammates: { id: string; name: string
     "own checks passing, and the agreed integration actually working. Do NOT end your turn after " +
     "scaffolding a few files assuming the session keeps running: when every expert stops at once the whole " +
     "build ends right there, unfinished. Keep working — and consult teammates — until your piece is " +
-    "genuinely, fully done; only then finish, and the coordinator collects everyone's results and reviews."
+    "genuinely, fully done; only then finish, and the coordinator collects everyone's results and reviews." +
+    // C2: open with a non-overlapping-scope handshake so two experts don't touch the same files (P4).
+    '\n\n## Align before you build — non-overlapping scope\n' +
+    'Before you start editing, sync with your teammates: use send_message / assign_task to AGREE the exact ' +
+    'boundary of who owns what — NON-overlapping files / areas (e.g. backend owns the main process / IPC / ' +
+    'services; frontend owns the renderer / UI) — and split your todos so they do NOT collide. Build only ' +
+    "within your agreed scope; never edit a teammate's files. This opening alignment is what prevents two of " +
+    'you touching the same files and duplicating or conflicting work.\n\n' +
+    // §4.2/§4.5: collab implementers self-check per batch; the ONE deep panel runs post-completion by the reviewer.
+    '## Review in a collaboration — you do NOT self-run a panel\n' +
+    'You have NO panel_examine tool here, and that is deliberate: in a collaboration you do NOT run your own ' +
+    'multi-perspective panel review. Instead, self-check + fix after EACH batch (your own type-check / build + a ' +
+    'careful re-read of your batch), and finish your COMPLETE part clean. After everyone finishes, the ' +
+    'coordinator runs ONE consolidated independent review — an elected reviewer, independent of all of you — ' +
+    'over the whole combined change. That single post-completion review is the deep second set of eyes; your ' +
+    'job is to make your part genuinely done and self-checked so it has little left to catch.'
   )
 }
 

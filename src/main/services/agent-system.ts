@@ -4,7 +4,7 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { CODING_DISCIPLINE, ENGINEER_SYSTEM_PROMPT } from '../agent/system-prompt'
+import { CODING_DISCIPLINE, PANEL_REVIEW_DISCIPLINE, ENGINEER_SYSTEM_PROMPT } from '../agent/system-prompt'
 import { buildRolePrompt } from '../agent/roles/prompts'
 import type { MemoryRow } from '../repos/memory.repo'
 import { DEV_PROMPT, DEV_ROLES } from './agent-tools'
@@ -79,6 +79,7 @@ export function buildAgentSystem(
   summary: string | null,
   skillListing: string,
   cwd?: string,
+  collab = false,
 ): string {
   // toolless:false — this is the agent-loop path (the role really has a tool kit), so buildRolePrompt must
   // NOT prepend the "no tools to call" chat-mode note. TOOL_AWARENESS below tells non-dev roles they can act.
@@ -86,6 +87,10 @@ export function buildAgentSystem(
   // Verify-before-done + stay-in-scope discipline applies to EVERY tool-wielding expert, not just the dev
   // roles — a non-dev expert (e.g. the translator editing source files) must verify + stay in scope too.
   const parts = [PLAN_FIRST, base, CODING_DISCIPLINE]
+  // Panel self-review + orient discipline is SOLO-only: those steps drive the panel_examine tool, which solo runs
+  // carry but collab implementers do NOT (批3 filters it + nulls ctx.panel). For collab, buildCollabSystem adds
+  // its own review note (one consolidated post-completion review by an independent reviewer) instead.
+  if (!collab) parts.push(PANEL_REVIEW_DISCIPLINE)
   // Non-dev agent roles use a chat-style role prompt with no tool awareness — give them the capability note
   // so they know they can act (dev roles already have detailed tool guidance baked into DEV_PROMPT).
   if (!DEV_ROLES.has(roleId)) parts.push(TOOL_AWARENESS)
