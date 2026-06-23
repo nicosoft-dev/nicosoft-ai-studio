@@ -31,6 +31,7 @@ import { runGatedRoleStep } from './coordinator-gate-b'
 import { chooseVerifierRole, runVerifierStep } from './examine/verifier'
 import { runConsolidatedReview } from './examine/agent-panel'
 import { gitHead, changedPathsSince, diffSince } from './examine/diff'
+import { AGENT_ROLE_IDS } from './agent-dispatch'
 import { submitGateC } from './coordinator-gate-c'
 import { runCollaboration } from './coordinator-collab'
 import {
@@ -66,7 +67,14 @@ async function runCollabReview(
   // instead of presenting unchecked work as done (matching single/pipeline's explicit unverified beat). Returning
   // null here was the bug: synthesis got no note and Danny rounded it up to a normal done.
   const UNVERIFIED = 'Independent verification did NOT run for this collaboration (no independent reviewer is bound besides the collaborators, or the verifier could not run). The combined result is UNVERIFIED — do not present it as verified/done; say plainly it was not independently checked.'
-  const reviewer = chooseVerifierRole(roles) // independent of ALL collaborators
+  // C2 §5.2 reviewer election: an explicitly-elected reviewer wins ONLY if it is independent of EVERY collaborator
+  // AND a bound agent role; otherwise auto-pick the independent verifier. electedReviewerRoleId is unset by default
+  // this round (no kickoff election wired yet) → chooseVerifierRole, byte-identical to before.
+  const elected = input.electedReviewerRoleId
+  const reviewer =
+    elected && !roles.includes(elected) && AGENT_ROLE_IDS.has(elected) && rolesService.getBinding(elected)?.endpointId
+      ? elected
+      : chooseVerifierRole(roles)
   if (roles.includes(reviewer)) return UNVERIFIED // only the collaborators themselves are bound → no independent reviewer
   const cwd = input.cwdByRole?.[roles[0]] // collaborators share the project dir; the verifier git-diffs + builds it
   if (!cwd) return UNVERIFIED // no project boundary → the floor verifier can't run git diff / the build
