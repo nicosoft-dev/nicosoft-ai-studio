@@ -24,7 +24,6 @@ import type { AgentRunInput } from '../ipc/contracts'
 import { agentEvents } from './event-bus'
 import { manager as skillManager } from './skill.service'
 import { DEV_ROLES, E2E_TOOLS, toolsForAgentRole } from './agent-tools'
-import { createPanelHandle } from './examine/agent-panel'
 import { buildAgentSystem } from './agent-system'
 import { setActiveServices, clearActiveServices, broadcastConvServices } from './active-services'
 import * as workspaceTasks from './workspace-tasks.service'
@@ -130,7 +129,11 @@ export async function runCollabSession(
     const lsp = DEV_ROLES.has(x.roleId) ? new LSPManager(x.cwd) : undefined
     if (lsp) lspByExpert.push(lsp)
     const tools = [
-      ...toolsForAgentRole(x.roleId),
+      // B3 (collab-review §4.2): collab implementers do NOT carry panel_examine — they self-check per batch
+      // (typecheck/build + self-review, §4.5) and the ONE consolidated panel runs post-completion by the
+      // independent reviewer (runCollabReview). Filtering it here (+ ctx.panel undefined below) kills P1's
+      // concurrent per-expert self-runs at the source: no tool, no handle, so it can't be (mis)invoked.
+      ...toolsForAgentRole(x.roleId).filter((t) => t.name !== 'panel_examine'),
       sendMessageTool,
       assignTaskTool,
       waitTool,
@@ -176,21 +179,11 @@ export async function runCollabSession(
           collab,
           services: registry,
           lsp,
-          // panel_examine bridge (panel-examine §4.1 / closure-loop decision ⑤): collab is precisely the
-          // from-scratch / cross-cutting work the tool targets. Inject the handle iff the expert's kit carries the
-          // panel_examine tool (every agent role now does) — handle-presence ⟺ tool-presence, same guard as the
-          // single-run path. Captures the collab convId/cwd/sig + the expert's hooks.
-          panel: tools.some((t) => t.name === 'panel_examine')
-            ? createPanelHandle({
-                convId,
-                callerRoleId: x.roleId,
-                cwd: x.cwd,
-                permissionMode: x.permissionMode ?? 'default',
-                signal: sig,
-                onStream: (ev) => hooks.onExpertStream(x.roleId, ev),
-                requestPermission: (req, s) => hooks.requestPermission(x.roleId, req, s)
-              })
-            : undefined,
+          // B3 (collab-review §4.2): collab implementers do NOT self-run the expensive multi-agent panel — the ONE
+          // consolidated review runs post-completion by the independent reviewer in runCollabReview (coordinator).
+          // panel is undefined here AND panel_examine is filtered from the kit above, so it can't be (mis)invoked.
+          // (solo dispatch keeps ctx.panel — agent-dispatch.ts — for its own pre-done self-review, unchanged.)
+          panel: undefined,
           onSubAgentToolEvent: (ev) => hooks.onExpertStream(x.roleId, ev),
         }
         const gen = runAgent({
