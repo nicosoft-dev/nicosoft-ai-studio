@@ -75,6 +75,100 @@ async function synthesizeReview(reviewer: string, paths: string[], produced: Sub
   }
 }
 
+// Consolidated REVIEW body shared by BOTH panel_examine entries (panel-examine §4 / collab-review §4.3 A3).
+// Picks an independent reviewer (excluded from EVERY implementer), runs ONE panel over the supplied target,
+// refutes per-candidate, synthesizes, and persists the Tasks card. The agent-tool entry (createPanelHandle)
+// passes its shim callbacks + the single caller as implementer; the collab coordinator entry (runCollabReview)
+// passes its own CoordinatorCallbacks + the FULL collaborator set — so the reviewer is independent of all of
+// them and the panel card streams through whichever cb `opts` carries. `owner` groups the persisted Tasks card.
+export interface ConsolidatedReviewOutcome {
+  ok: boolean
+  message: string
+  reviewer?: string
+  confirmed: Finding[]
+  refuted: Finding[]
+  produced: SubjectFinding[]
+  report: string | null
+}
+
+export async function runConsolidatedReview(
+  opts: RunStepOptions,
+  implementers: string | string[],
+  target: { changed: string[]; diff: string },
+  originalPrompt: string,
+  owner: string
+): Promise<ConsolidatedReviewOutcome> {
+  // §4.2 reviewer selection: an independent BOUND agent role, NEVER any implementer. chooseVerifierRole excludes
+  // the whole implementer set; confirm the pick is actually bound AND outside the set — else there is no panel to
+  // form → an EXPLICIT ok:false (never a silent empty the agent would read as "all clear", §4.2 red line).
+  const reviewer = chooseVerifierRole(implementers)
+  const implSet = new Set(Array.isArray(implementers) ? implementers : [implementers])
+  if (implSet.has(reviewer) || !rolesService.getBinding(reviewer)?.endpointId) {
+    return { ok: false, message: 'panel_examine (review) needs at least one configured expert independent of the implementer(s) to act as the reviewer, but none is bound. Configure another expert (e.g. Analyst/Shuri/Flynn) and retry.', confirmed: [], refuted: [], produced: [], report: null }
+  }
+  const paths = target.changed
+  const gate = { originalPrompt, acceptance: [] as string[] }
+  // SYNTHESIZE runs INSIDE runPanelExamine (a visible 'Synth' step under the still-open card, workflow alignment) —
+  // it calls back with the produced findings; we capture the report here for the tool result / reviewNote.
+  let report: string | null = null
+  const findings = await runPanelExamine(
+    implementers,
+    opts,
+    gate,
+    '(standalone review — no implementer summary to verify)',
+    ulid(),
+    '',
+    [],
+    [],
+    opts.signal,
+    { target, explicit: true, synthesize: async (produced) => (report = await synthesizeReview(reviewer, paths, produced, opts.signal)) }
+  )
+
+  const produced = findings.filter((f) => f.produced)
+  if (produced.length === 0) {
+    // findings === [] → genuinely no risk dimension fired (a standard read suffices). findings present but NONE
+    // produced → subjects WERE selected yet every reviewer dropped at the infra layer (shared reviewer endpoint
+    // faulted). Report THAT as a FAILED run (ok:false) — never as a clean "all clear" (§4.2 silent-empty red line).
+    if (findings.length === 0) {
+      return { ok: true, message: 'panel_examine found no risk dimension worth an independent multi-perspective review for this target — a standard read is sufficient.', reviewer, confirmed: [], refuted: [], produced: [], report: null }
+    }
+    return { ok: false, message: `panel_examine could not complete: all ${findings.length} selected reviewer(s) failed to return a usable verdict (likely a reviewer-endpoint fault). Retry, or review the target manually — this is NOT an all-clear.`, reviewer, confirmed: [], refuted: [], produced: [], report: null }
+  }
+  // Per-candidate accounting (workflow-faithful): confirmed = candidates that SURVIVED refute; refuted = dropped.
+  const confirmed: Finding[] = produced.flatMap((f) => (f.candidates ?? []).filter((c) => !c.refuted))
+  const refutedCands: Finding[] = produced.flatMap((f) => (f.candidates ?? []).filter((c) => c.refuted))
+  const header = `panel_examine (review by ${reviewer}) hunted ${produced.length} lens(es): ${confirmed.length} confirmed defect(s)${refutedCands.length ? `, ${refutedCands.length} dropped as false-positive` : ''}.`
+  const lines = confirmed.length
+    ? confirmed.map((c) => `- [${c.severity}] ${c.title}${c.file ? ` (${c.file}${c.line ? `:${c.line}` : ''})` : ''} — ${c.lens}`)
+    : ['- no candidate defect survived refutation']
+  const message = report ? `${header}\n\n${report}` : `${header}\n${lines.join('\n')}`
+  // Workspace Tasks history (design §5 P13/P14): ONE row per CANDIDATE (confirmed + refuted) so the reconstructed
+  // card shows the real findings; an all-clean review (lenses fired, zero candidates) falls back to per-lens 'pass'.
+  const candidateRows: WorkspaceExamineFindingDto[] = [...confirmed, ...refutedCands].map((c) => ({
+    axis: c.lens,
+    title: c.title,
+    severity: c.severity,
+    file: c.file ? `${c.file}${c.line ? `:${c.line}` : ''}` : undefined,
+    verdict: c.refuted ? 'false-positive' : 'fail',
+    feedback: c.mechanism.slice(0, 4000),
+    refuted: c.refuted,
+    refuteTally: c.refuteTotal ? `${c.refuteYes ?? 0}/${c.refuteTotal}` : undefined
+  }))
+  const persistRows: WorkspaceExamineFindingDto[] = candidateRows.length
+    ? candidateRows
+    : produced.map((f) => ({ axis: f.key, verdict: 'pass' as const, feedback: 'no candidate defect found', why: f.why || undefined }))
+  workspaceTasks.recordExamine(opts.convId, {
+    owner,
+    mode: 'review',
+    subject: paths.join(', '),
+    roster: produced.map((f) => f.key),
+    findings: persistRows,
+    message,
+    examinedAt: Date.now()
+  })
+  return { ok: true, message, reviewer, confirmed, refuted: refutedCands, produced, report }
+}
+
 export function createPanelHandle(deps: PanelHandleDeps): PanelHandle {
   return {
     async examine(input): Promise<PanelExamineResult> {
@@ -129,87 +223,22 @@ export function createPanelHandle(deps: PanelHandleDeps): PanelHandle {
         }
       }
 
-      // REVIEW — §4.2 reviewer selection: an independent BOUND agent role, NEVER the caller. chooseVerifierRole
-      // returns the first bound agent role ≠ caller, else falls back to 'generalist' — so confirm the pick is
-      // actually bound AND ≠ caller; otherwise there is no panel to form → an EXPLICIT ok:false (never silent empty).
-      const reviewer = chooseVerifierRole(deps.callerRoleId)
-      if (reviewer === deps.callerRoleId || !rolesService.getBinding(reviewer)?.endpointId) {
-        return { ok: false, message: 'panel_examine (review) needs at least one other configured expert besides you to act as an independent reviewer, but none is bound. Configure another expert (e.g. Analyst/Shuri/Flynn) and retry.' }
-      }
-      const gate = { originalPrompt: `Independent multi-perspective review requested. Review the following ${paths.length} file(s) for defects, each reviewer from its OWN assigned perspective only: ${paths.join(', ')}.`, acceptance: [] as string[] }
-      // Explicit target (closure-loop P1): give the selector a REAL diff — the caller's own uncommitted changes
-      // to these paths (working tree vs HEAD) — instead of the empty diff that starved selectSubjects. If the
-      // target has no changes (reviewing existing code), the diff is empty and runPanelExamine's content read
-      // (the file bodies) carries the selection. The reviewers still read the files themselves (read-only kit).
+      // REVIEW (panel-examine §4 / collab-review §4.3 A3): delegate to the shared consolidated-review body. Target =
+      // the caller's own uncommitted changes to these paths (working tree vs HEAD); an empty diff is fine (the
+      // content read inside runPanelExamine carries the selection). owner = caller → the Tasks card groups under it.
       const base = await gitHead(deps.cwd)
       const diff = base ? await diffSince(deps.cwd, base, paths) : ''
-      // SYNTHESIZE runs INSIDE runPanelExamine now (as a visible 'Synth' step under the still-open card, workflow
-      // alignment) — the panel calls back with the produced findings; we capture the report here for the tool result.
-      let report: string | null = null
-      const findings = await runPanelExamine(
-        deps.callerRoleId,
+      const outcome = await runConsolidatedReview(
         opts,
-        gate,
-        '(standalone review — no implementer summary to verify)',
-        ulid(),
-        '',
-        [],
-        [],
-        deps.signal,
-        { target: { changed: paths, diff }, explicit: true, synthesize: async (produced) => (report = await synthesizeReview(reviewer, paths, produced, deps.signal)) }
+        deps.callerRoleId,
+        { changed: paths, diff },
+        `Independent multi-perspective review requested. Review the following ${paths.length} file(s) for defects, each reviewer from its OWN assigned perspective only: ${paths.join(', ')}.`,
+        deps.callerRoleId
       )
-
-      const produced = findings.filter((f) => f.produced)
-      if (produced.length === 0) {
-        // findings === [] → genuinely no risk dimension fired (a standard read suffices). findings present but
-        // NONE produced → subjects WERE selected yet every reviewer dropped at the infra layer (e.g. the shared
-        // reviewer endpoint faulted). Report that as a FAILED run (ok:false) — never as a clean "all clear" the
-        // agent would read as "no problem found" (§4.2 silent-empty red line).
-        if (findings.length === 0) {
-          return { ok: true, message: 'panel_examine found no risk dimension worth an independent multi-perspective review for this target — a standard read is sufficient.', findings: [] }
-        }
-        return { ok: false, message: `panel_examine could not complete: all ${findings.length} selected reviewer(s) failed to return a usable verdict (likely a reviewer-endpoint fault). Retry, or review the target manually — this is NOT an all-clear.`, findings: [] }
-      }
-      // Per-candidate accounting (workflow-faithful): confirmed = candidates that SURVIVED refute; refuted = dropped.
-      const confirmed: Finding[] = produced.flatMap((f) => (f.candidates ?? []).filter((c) => !c.refuted))
-      const refutedCands: Finding[] = produced.flatMap((f) => (f.candidates ?? []).filter((c) => c.refuted))
-      const header = `panel_examine (review by ${reviewer}) hunted ${produced.length} lens(es): ${confirmed.length} confirmed defect(s)${refutedCands.length ? `, ${refutedCands.length} dropped as false-positive` : ''}.`
-      // SYNTHESIZE already ran as a visible step inside runPanelExamine (above); `report` holds its output. Fall
-      // back to the flat per-candidate lines if it was unavailable.
-      const lines = confirmed.length
-        ? confirmed.map((c) => `- [${c.severity}] ${c.title}${c.file ? ` (${c.file}${c.line ? `:${c.line}` : ''})` : ''} — ${c.lens}`)
-        : ['- no candidate defect survived refutation']
-      const message = report ? `${header}\n\n${report}` : `${header}\n${lines.join('\n')}`
-      // Workspace Tasks history (design §5 P13/P14): single write point. ONE row per CANDIDATE (confirmed +
-      // refuted) so the reconstructed card shows the real findings — each with its severity / location / refute
-      // tally. An all-clean review (lenses fired but zero candidates) falls back to per-lens 'pass' rows so the
-      // history still records that the review ran + its coverage (recordExamine drops a truly empty findings set).
-      const candidateRows: WorkspaceExamineFindingDto[] = [...confirmed, ...refutedCands].map((c) => ({
-        axis: c.lens,
-        title: c.title,
-        severity: c.severity,
-        file: c.file ? `${c.file}${c.line ? `:${c.line}` : ''}` : undefined,
-        verdict: c.refuted ? 'false-positive' : 'fail',
-        feedback: c.mechanism.slice(0, 4000),
-        refuted: c.refuted,
-        refuteTally: c.refuteTotal ? `${c.refuteYes ?? 0}/${c.refuteTotal}` : undefined
-      }))
-      const persistRows: WorkspaceExamineFindingDto[] = candidateRows.length
-        ? candidateRows
-        : produced.map((f) => ({ axis: f.key, verdict: 'pass' as const, feedback: 'no candidate defect found', why: f.why || undefined }))
-      workspaceTasks.recordExamine(deps.convId, {
-        owner: deps.callerRoleId, // the expert that ran panel_examine → the card is grouped under it in Tasks
-        mode: 'review',
-        subject: paths.join(', '),
-        roster: produced.map((f) => f.key), // stable row roster for the reconstructed card
-        findings: persistRows,
-        message,
-        examinedAt: Date.now()
-      })
       return {
-        ok: true,
-        message,
-        findings: produced.map((f) => ({ subject: f.key, passed: f.passed, refuted: f.refuted, feedback: f.feedback.slice(0, 1200) }))
+        ok: outcome.ok,
+        message: outcome.message,
+        findings: outcome.produced.map((f) => ({ subject: f.key, passed: f.passed, refuted: f.refuted, feedback: f.feedback.slice(0, 1200) }))
       }
     }
   }

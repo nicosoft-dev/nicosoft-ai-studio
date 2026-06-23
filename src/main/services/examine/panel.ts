@@ -157,7 +157,7 @@ async function readTargetContent(cwd: string | undefined, paths: readonly string
 // the caller supplies an explicit { changed, diff } target. The reviewer role is NOT overridden — chooseVerifierRole
 // is deterministic, so the bridge validates "a bound reviewer ≠ caller exists" (§4.2) and this re-picks the IDENTICAL
 // role. Gate B omits override → the git-derived target, byte-identical.
-export async function runPanelExamine(roleId: string, opts: RunStepOptions, gate: { originalPrompt: string; approvedPlan?: string; acceptance?: string[] }, implementationText: string, stepId: string, baseRef: string, baseChanged: string[], implementerFiles: readonly WrittenFile[], signal?: AbortSignal, override?: { target?: { changed: string[]; diff: string }; explicit?: boolean; synthesize?: (produced: SubjectFinding[]) => Promise<string | null> }): Promise<SubjectFinding[]> {
+export async function runPanelExamine(roleId: string | string[], opts: RunStepOptions, gate: { originalPrompt: string; approvedPlan?: string; acceptance?: string[] }, implementationText: string, stepId: string, baseRef: string, baseChanged: string[], implementerFiles: readonly WrittenFile[], signal?: AbortSignal, override?: { target?: { changed: string[]; diff: string }; explicit?: boolean; synthesize?: (produced: SubjectFinding[]) => Promise<string | null> }): Promise<SubjectFinding[]> {
   // Card id is deterministic from stepId (gate-b re-emits onto it after closure). `panelOpened` guards the
   // error path: if anything throws AFTER the parent sub_tool_start, the catch MUST close it (else the card
   // spins 'running' forever — no turn-end net flips a lingering running tool on a finished segment).
@@ -167,7 +167,10 @@ export async function runPanelExamine(roleId: string, opts: RunStepOptions, gate
   // implementer. Hoisted before the try so the catch's card-close targets the SAME role the card opened on.
   // chooseVerifierRole is pure (no I/O); === caller → no independent reviewer → no panel (floor labels 'skipped').
   const verifierRoleId = chooseVerifierRole(roleId)
-  if (verifierRoleId === roleId) return []
+  // B1: roleId is the implementer(s) — a string for floor/Gate-B/agent-entry, a SET for collab consolidated review.
+  // The reviewer must be independent of EVERY implementer, so test set membership, not single-string equality (else
+  // with 2+ collaborators chooseVerifierRole could return collaborator B and "B reviews B" would slip through).
+  if ((Array.isArray(roleId) ? roleId : [roleId]).includes(verifierRoleId)) return []
   let panelOpened = false
   try {
     // M5 kill-switch / A/B baseline (panel-examine §10): the panel amplifier defaults ON; setting
