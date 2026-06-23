@@ -9,6 +9,15 @@ import * as agentService from '../agent-dispatch'
 import { COORDINATOR_VERIFIER_PROMPT, subjectExaminePrompt, reverifyPrompt } from '../../agent/roles/prompts'
 import { runRoleStep, type RunStepOptions } from '../coordinator-step'
 
+// Delta-stall watchdog threshold for panel SUBJECTS (finders/skeptics): 3 min of zero stream activity = a frozen
+// LLM stream (P4 — the dogfood hang: 11 finders streamed 696 deltas then froze, and examine/ has NO timeout
+// anywhere → the find barrier's Promise.all hung until 6h/SIGKILL). Abort the frozen subject so its task degrades
+// to null and the find/refute barrier proceeds. Generous on purpose: a deep-thinking-but-active subject keeps
+// resetting it (any stream event), so only a truly frozen one trips. The FLOOR verifier is exempt (no subject) —
+// it may run a long, silent build. Subjects self-fetch `git diff` + stream reasoning, so 3 min total silence is
+// pathological, not merely slow.
+const EXAMINE_SUBJECT_STALL_MS = 180_000
+
 export function chooseVerifierRole(implementer: string | string[]): string {
   // The verifier runs the agent loop with an overridden read-only kit (Read/Grep/Glob/Bash) + the Gate B
   // verifier persona, so we only need an independent, BOUND agent role for its model/endpoint. It must be an
@@ -111,6 +120,9 @@ export async function runVerifierStep(implementerRoleId: string | string[], opts
       // Stream the subject finder's reasoning live onto its card row (workflow parity); the floor verifier
       // (no card) and the quiet integrator re-verify (no card) pass none.
       streamCard: emitCard ? { toolUseId: toolId, parentToolId } : undefined,
+      // P4 watchdog: bound a panel SUBJECT (finder/skeptic) run so a frozen LLM stream can't hang the find/refute
+      // barrier forever. The FLOOR verifier (no subject) is exempt — it may run a long, silent build.
+      stallTimeoutMs: subject ? EXAMINE_SUBJECT_STALL_MS : undefined,
       signal: signal ?? opts.signal
     })
   } catch (err) {

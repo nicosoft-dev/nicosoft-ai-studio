@@ -106,6 +106,11 @@ export interface RunStepOptions {
   // When a quiet step represents a panel sub-agent (a card row), stream its TEXT deltas to that card as
   // sub_tool_delta events (workflow /workflows parity — watch each finder/skeptic reason live). Absent → no stream.
   streamCard?: { toolUseId: string; parentToolId: string }
+  // Delta-stall watchdog (P4): abort this run if it emits NO stream event for this many ms (a frozen LLM stream
+  // would otherwise hang the examine Promise.all barrier forever — examine/ has no timeout anywhere). Resets on
+  // every stream event, so a slow-but-active run is never killed — only a truly frozen one. Set by examine
+  // subjects (panel finders/skeptics); a normal step leaves it unset (no watchdog). NOT a wall-clock cap.
+  stallTimeoutMs?: number
 }
 
 // Coordinator's system = a base prompt section (direct / synthesis) + his recalled memories + the running
@@ -161,8 +166,24 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
   // the DIRECT persona via systemPromptOverride). Synthesis turns stay on the tool-less llmChat path below.
   if (agentProtocol && ((agentService.AGENT_ROLE_IDS.has(roleId) && !isCoordinatorSelf) || isDirect)) {
     let text = ''
+    // Delta-stall watchdog (P4): a finder/skeptic whose LLM stream FREEZES mid-flight (streams a while, then the
+    // upstream stops sending without closing the stream) hangs the examine Promise.all barrier FOREVER — examine/
+    // has no timeout anywhere. Abort a run that emits NO stream event for stallTimeoutMs so its task degrades to
+    // null and the barrier proceeds. armStall() resets on EVERY onStream event below, so a slow-but-streaming run
+    // is never killed (honors "don't kill genuinely-active work") — only a truly frozen one. Opt-in: subjects set it.
+    const stallMs = opts.stallTimeoutMs
+    const stallCtrl = stallMs ? new AbortController() : undefined
+    let stallTimer: ReturnType<typeof setTimeout> | undefined
+    const armStall = (): void => {
+      if (!stallMs) return
+      if (stallTimer) clearTimeout(stallTimer)
+      stallTimer = setTimeout(() => stallCtrl!.abort(new Error(`examine stall: no stream activity for ${stallMs}ms`)), stallMs)
+    }
+    armStall()
+    const runSignal = stallCtrl ? AbortSignal.any([signal, stallCtrl.signal]) : signal
     const agentCb: agentService.AgentCallbacks = {
       onStream: (ev) => {
+        armStall() // any stream activity = the run is alive → reset the delta-stall watchdog
         // quiet (closure-loop): card-only step — accumulate text for the return value (it becomes the caller's
         // sub_tool card result) but forward NOTHING to the renderer (no segment to stream into; the inner loop's
         // deltas + its own tool cards must not leak onto the verifier segment).
@@ -227,8 +248,8 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
         }
       },
       agentCb,
-      signal
-    )
+      runSignal
+    ).finally(() => { if (stallTimer) clearTimeout(stallTimer) })
     text = res.text
     // The loop guard wound this step down after repeated identical failures (loop.ts thrash guard).
     // Label the text so every downstream reader — the persisted message, synthesis, Gate B's verifier
