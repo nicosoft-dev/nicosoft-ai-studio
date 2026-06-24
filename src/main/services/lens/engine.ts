@@ -166,6 +166,23 @@ export function loadTemplate(raw: string): Template {
   return t
 }
 
+// The engine's domain projections (the subjects fold, the panel-summary) need to know WHICH step is the finder
+// fan-out / the per-file reader / the synthesis — but keying off the literal ids `find`/`read`/`synth` would
+// break the moment a template renamed a step ("orchestration is data" leaks). So identify each by its declared
+// SHAPE — the card type + emit contract, which are the engine's OWN vocabulary (CardSpec.name / EmitSpec.contract,
+// the things the engine renders), not the template author's free-choice id. Rename a step freely; the fold follows.
+function classifySteps(t: Template): { finderId?: string; readerId?: string; synthId?: string } {
+  let finderId: string | undefined
+  let readerId: string | undefined
+  let synthId: string | undefined
+  for (const s of t.phases) {
+    if (s.card?.name === 'Subject' && s.emit?.contract === 'findings') finderId ??= s.id
+    else if (s.card?.name === 'Subject' && s.emit?.contract === 'text') readerId ??= s.id
+    if (s.card?.name === 'Synth') synthId ??= s.id
+  }
+  return { finderId, readerId, synthId }
+}
+
 // --- the engine ---------------------------------------------------------------------------------------------
 
 export async function runLens(template: Template, ctx: LensContext, deps: LensDeps): Promise<LensRun> {
@@ -182,13 +199,17 @@ export async function runLens(template: Template, ctx: LensContext, deps: LensDe
   // the first fan-out phase — once the roster is known (review: select.lenses; understand: paths) — so the card
   // shows queued rows + a stable N, and closes (even on a throw) so it never spins 'running' forever.
   const mode = template.name === 'understand' ? 'understand' : 'review'
+  const { finderId } = classifySteps(template)
   const panelId = panelCardId(ctx.stepId)
   let panelOpened = false
   let panelRole = ctx.roleBySlot.reviewer ?? ctx.roleBySlot.caller ?? 'generalist'
   const openPanelBefore = (step: StepSpec): void => {
     if (panelOpened || !((step.type === 'parallel' || step.type === 'pipeline') && step.card?.name === 'Subject')) return
     panelRole = ctx.roleBySlot[step.role ?? 'reviewer'] ?? panelRole
-    const subjects = mode === 'understand' ? (ctx.paths as string[] ?? []) : ((scope.steps.select as { lenses?: { key: string }[] } | undefined)?.lenses?.map((l) => l.key) ?? [])
+    // roster = the fan-out's OWN `over` list (review: select.lenses → keys; understand: paths), resolved
+    // generically — the panel never hard-codes the producing step's id (orchestration is data).
+    const roster = (resolveValue(stripRef(step.over ?? ''), scope) as unknown[] | undefined) ?? []
+    const subjects = roster.map((it) => (typeof it === 'string' ? it : String((it as { key?: unknown })?.key ?? '')))
     if (subjects.length === 0) return // empty roster (no lens fired / no path) → no panel at all (matches panel.ts's pre-card return)
     deps.cb.onToolEvent?.(panelRole, { type: 'sub_tool_start', toolUseId: panelId, parentToolId: 'coordinator-gate-b', name: 'StudioLens', input: { mode, subjects } })
     panelOpened = true
@@ -214,19 +235,20 @@ export async function runLens(template: Template, ctx: LensContext, deps: LensDe
   const result: Record<string, unknown> = {}
   if (template.result) for (const [k, expr] of Object.entries(template.result)) result[k] = resolveValue(stripRef(expr), scope)
 
-  const subjects = (scope.steps.find as SubjectFinding[] | undefined) ?? []
+  const subjects = (finderId ? (scope.steps[finderId] as SubjectFinding[] | undefined) : undefined) ?? []
   return { steps: scope.steps, result, subjects, reviewerRoleId: ctx.roleBySlot?.reviewer }
 }
 
 // The parent card's close summary (matches panel.ts:338 / understand.ts:115). Review: produced/total reviewers +
 // confirmed-fail count → isError. Understand: files read (+ synthesized).
 function panelSummary(template: Template, scope: Scope): { text: string; isError: boolean } {
+  const { finderId, readerId, synthId } = classifySteps(template)
   if (template.name === 'understand') {
-    const parts = (scope.steps.read as unknown[] | undefined) ?? []
-    const synthed = scope.steps.synth != null
+    const parts = (readerId ? (scope.steps[readerId] as unknown[] | undefined) : undefined) ?? []
+    const synthed = synthId != null && scope.steps[synthId] != null
     return { text: `${parts.length} file(s) read${synthed ? ' + synthesized' : ''}`, isError: false }
   }
-  const subjects = (scope.steps.find as SubjectFinding[] | undefined) ?? []
+  const subjects = (finderId ? (scope.steps[finderId] as SubjectFinding[] | undefined) : undefined) ?? []
   const produced = subjects.filter((s) => s.produced)
   const confirmedFails = subjects.filter((s) => s.produced && !s.passed && !s.refuted).length
   return { text: `${produced.length}/${subjects.length} reviewer(s) reported${confirmedFails ? `, ${confirmedFails} flagged` : ''}`, isError: confirmedFails > 0 }
@@ -533,16 +555,20 @@ async function runRefuteVote(step: StepSpec, ctx: LensContext, deps: LensDeps, c
   // persona with the candidate's carried focus (H-5), falling back to the lens key (matches panel.ts).
   const system = step.system ? personaFor(step.system, candScope, deps) : deps.persona('refutePrompt', cand.focus || cand.lens)
   const prompt = interpolate(step.prompt ?? '', candScope)
+  // failVote (template knob): how a FAILED / unparseable skeptic vote is counted. 'uphold' (default) → this vote
+  // does NOT refute (a broken vote never drops a real defect — the original behavior); 'refute' → it counts as a
+  // refutation (a stricter template that would rather drop on doubt). Wired here so the template knob is real.
+  const failRefuted = step.failVote === 'refute'
   let out: AgentOut
   try {
     out = await deps.runAgent({ roleId, prompt, system, toolNames: kit, stallTimeoutMs: (ctx.stallTimeoutMs as number | undefined) ?? LENS_STALL_MS, streamCard: { toolUseId: toolId, parentToolId: panelId } })
   } catch (e) {
     deps.cb.onToolEvent?.(roleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: panelId, name: 'SubjectRefute', isError: true, input: { phase: 'verify', findingId: cand.id, voter, vote: 'failed' }, result: `refute vote failed: ${e instanceof Error ? e.message : e}` })
-    return { refuted: false, inputTokens: 0, outputTokens: 0 }
+    return { refuted: failRefuted, inputTokens: 0, outputTokens: 0 }
   }
   const text = out.text.trim()
   const contracted = [...text.matchAll(REFUTE_RE)].pop()?.[1]
-  const refuted = contracted ? contracted.toUpperCase() === 'YES' : false
+  const refuted = contracted ? contracted.toUpperCase() === 'YES' : failRefuted
   deps.cb.onToolEvent?.(roleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: panelId, name: 'SubjectRefute', isError: false, input: { phase: 'verify', findingId: cand.id, voter, vote: refuted ? 'refute' : 'uphold' }, result: text || 'no vote' })
   return { refuted, inputTokens: out.inputTokens, outputTokens: out.outputTokens }
 }
