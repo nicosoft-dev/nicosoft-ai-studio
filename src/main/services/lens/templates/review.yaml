@@ -4,11 +4,11 @@
 name: review
 inputs: [paths, diff, content, baseRef, task, implementerSummary, writtenFiles, floorVerdict]
 enabledSetting: gateB.studioLens.enabled
-breadthInput: thorough                 # explicit entry = broad; Gate-B injects 'conservative' (Workflow scale-to-request)
-vars:
-  breadthClause:                       # {{breadthClause}} resolved by breadthInput (no eval) — verbatim from coordinator-route
-    thorough: "Fan out BROADLY — one reviewer per distinct risk surface; bias toward MORE perspectives, not fewer."
-    conservative: "Pick a lens ONLY when the change genuinely risks it; an empty array [] is the right answer for a low-risk change."
+# breadthInput is the caller's ENTRY INTENT, NOT a breadth level: 'thorough' = an EXPLICIT review request
+# (skip the throttle, always panel); 'conservative' = the Gate-B floor-amplifier (run the escalate throttle
+# first). The actual breadth — HOW MANY lenses — is the SELECT step's OWN model-decided call: it authors the
+# count from the code, never a fixed 2-value clause injected by the caller (was vars.breadthClause).
+breadthInput: thorough
 phases:
   # ESCALATE — the Gate-B throttle (only 'conservative' entry runs it; explicit review skips straight to select).
   # Fail-open: a missing/garbled verdict → escalate=true (never silently drop the amplifier).
@@ -46,7 +46,11 @@ phases:
       do NOT re-run them). There is NO fixed list — self-derive the lenses from what THIS code actually does
       and means (a token check that can be bypassed = a security lens; a shared write without a lock = a
       concurrency lens), never from file names.
-      {{breadthClause}}
+
+      Size the panel to THIS code's actual risk surface — author as FEW or as MANY lenses as it genuinely
+      warrants: one lens (or even an empty array [] when the change is trivial and the floor already covers it)
+      for a small contained edit, several for broad, cross-cutting, or risk-laden work. Don't pad the list to
+      look thorough, and don't under-cover a real risk — the COUNT is yours to size to the code, not a quota.
 
       For each lens emit {"key":"<short-kebab-name>","focus":"<one sentence: exactly what this lens hunts
       and the failure it looks for>","why":"<one line citing the specific code — a file:hunk or concrete
