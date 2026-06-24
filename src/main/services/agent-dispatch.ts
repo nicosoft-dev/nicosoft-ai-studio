@@ -173,7 +173,7 @@ export async function runAgentLoop(
     async: asyncReg, // launch_async/await_async (+ studio_lens launches through it when present)
     parkSolo: loop.parkSolo, // 批C2b: direct-chat solo cross-turn park; undefined for dispatched/collab → within-turn await
     lsp,
-    // studio_lens bridge (panel-examine §4.1 / closure-loop decision ⑤) — inject the handle iff this run's kit
+    // studio_lens bridge (studio-lens §4.1 / closure-loop decision ⑤) — inject the handle iff this run's kit
     // actually carries the studio_lens tool (every agent role now does; a fixed-kit verifier / sub-agent does
     // NOT). Handle-presence ⟺ tool-presence is the recursion guard: no tool → no handle, self-enforcing.
     panel: loop.tools.some((t) => t.name === 'studio_lens')

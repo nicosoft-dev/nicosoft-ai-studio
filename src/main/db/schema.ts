@@ -276,7 +276,7 @@ CREATE TABLE IF NOT EXISTS gate_outcomes (
   outcome     TEXT NOT NULL,                      -- B: pass|fixed|false-positive|unresolved|unverified  C: PASS|FAIL|BLOCKED|SKIP
   rounds      INTEGER NOT NULL DEFAULT 1,         -- verifier passes run (B) / e2e rounds (C)
   evidence    TEXT NOT NULL DEFAULT '',           -- verdict tail, truncated — enough to recognize the case
-  row_kind    TEXT NOT NULL DEFAULT 'floor',      -- panel-examine (§6): 'floor' (single verifier, existing behavior) | 'aggregate' (worst-of fold) | 'subject' (per-subject)
+  row_kind    TEXT NOT NULL DEFAULT 'floor',      -- studio-lens (§6): 'floor' (single verifier, existing behavior) | 'aggregate' (worst-of fold) | 'subject' (per-subject)
   step_id     TEXT,                               -- one ulid per gated step; links a floor/aggregate row to its subject rows
   subject     TEXT,                               -- ReviewSubject key for row_kind='subject'; NULL otherwise
   created_at  TEXT NOT NULL

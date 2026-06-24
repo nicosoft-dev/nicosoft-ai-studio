@@ -231,7 +231,7 @@ export interface AnalyticsSummary {
     gateB: { outcome: string; v: number }[]
     gateC: { outcome: string; v: number }[] // background e2e verdicts: PASS / FAIL / BLOCKED / SKIP
     byExpert: { id: string; total: number; ok: number }[] // Gate B per implementer; ok = pass+fixed+false-positive
-    // M5 panel A/B snapshot (panel-examine §10), computed from the built-in floor/subject/aggregate row
+    // M5 panel A/B snapshot (studio-lens §10), computed from the built-in floor/subject/aggregate row
     // split — no separate experiment run. steps = gated steps that ran subjects; caughtBeyondFloor = steps the
     // floor-only baseline would have shipped (floor pass) but a subject flagged; catches = subject-found defects
     // that got fixed; falseReds = subject false positives (the §10 red-line B cost to watch).

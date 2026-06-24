@@ -1,4 +1,4 @@
-// studio_lens — the agent-driven multi-perspective fan-out tool (panel-examine §4 / closure-loop §3.5).
+// studio_lens — the agent-driven multi-perspective fan-out tool (studio-lens §4 / closure-loop §3.5).
 // Lets ANY agent role escalate, on its OWN judgment, to a fan-out of independent read-only agents: 'review'
 // (N reviewers each probing one risk axis + adversarial skeptics refuting false alarms → PASS/FAIL+evidence)
 // or 'understand' (N readers each summarizing one file → a shared map). The actual fan-out lives behind

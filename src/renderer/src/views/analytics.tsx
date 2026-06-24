@@ -157,7 +157,7 @@ export function StatsPage(): ReactElement {
     const e = expertMeta(r.id)
     return { name: e.name, v: r.total ? r.ok / r.total : 0, val: `${r.ok}/${r.total}`, color: e.color }
   })
-  // M5 panel A/B (panel-examine §10): the amplifier's measured catches vs the floor-only baseline,
+  // M5 panel A/B (studio-lens §10): the amplifier's measured catches vs the floor-only baseline,
   // read off the built-in floor/subject/aggregate row split. "caught beyond floor" is the A-signal (floor would
   // have shipped it, a subject flagged); "false reds" is the B-cost (subject false positives).
   const examineImpact = a.verification.examineImpact

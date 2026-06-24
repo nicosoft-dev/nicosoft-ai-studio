@@ -1,4 +1,4 @@
-// Panel examine — the SHARED independent-verifier primitive (panel-examine §7 Phase 1). Extracted
+// Studio Lens — the SHARED independent-verifier primitive (studio-lens §7 Phase 1). Extracted
 // VERBATIM from coordinator-gate-b so the FLOOR verifier (runGatedRoleStep + closeFloor + the subject
 // integrator re-verify) and the PANEL fan-out (examine/panel.ts) call the IDENTICAL function — one verifier body in
 // the codebase. Copying it would let floor and panel drift and break floor byte-identity (Property A), so
@@ -33,7 +33,7 @@ export function chooseVerifierRole(implementer: string | string[]): string {
   )
 }
 
-// Subject context for a panel verifier call (panel-examine §3.3/§3.4). ABSENT → the FLOOR verifier:
+// Subject context for a panel verifier call (studio-lens §3.3/§3.4). ABSENT → the FLOOR verifier:
 // full COORDINATOR_VERIFIER_PROMPT, Read/Grep/Glob/Bash kit, fetches the diff + runs the build itself.
 // PRESENT → an ADDITIVE per-dimension subject: derived persona, SAME Read/Grep/Glob/Bash kit — it SELF-FETCHES
 // the diff (`git diff`) like a Workflow agent (nothing is inlined into its prompt), distinct per-(subject,step) id.
@@ -41,7 +41,7 @@ export interface SubjectContext {
   key: string // an enum ReviewSubject key, OR an agent-derived custom lens key (THOROUGH/explicit path)
   focus: string
   stepId: string
-  // UI (panel-examine §4.4): when set, this subject's sub_tool event nests under the panel card (id=panelId)
+  // UI (studio-lens §4.4): when set, this subject's sub_tool event nests under the panel card (id=panelId)
   // instead of surfacing top-level; `why` is the selection reason shown on the row. Absent → top-level (the
   // floor verifier never sets these).
   panelId?: string

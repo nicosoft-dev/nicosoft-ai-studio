@@ -1,4 +1,4 @@
-// LensCard — the dedicated, foldable render for a studio_lens fan-out (panel-examine §4.4). ONLY
+// LensCard — the dedicated, foldable render for a studio_lens fan-out (studio-lens §4.4). ONLY
 // studio_lens uses this card; every other tool keeps its ToolRun rendering untouched. It reuses the
 // existing chrome (the breathing `.tr-dot`, the `.tr-chev` chevron) rather than inventing new widgets.
 //
@@ -10,7 +10,7 @@
 //   • PERSISTED result view (findingsCard, rebuilt from history) — one row per CONFIRMED/refuted candidate
 //     with its verdict + skeptic tally. The live streams aren't persisted, so the durable card is the result.
 //
-// Token discipline (panel-examine §4.4): the header shows ONLY agent COUNTS, never a token sum — that summing
+// Token discipline (studio-lens §4.4): the header shows ONLY agent COUNTS, never a token sum — that summing
 // was the "↑48.1m" balloon root. No per-row token readout either, so the card structurally cannot balloon.
 
 import { useState } from 'react'

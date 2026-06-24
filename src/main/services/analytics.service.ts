@@ -102,7 +102,7 @@ export function getSummary(): AnalyticsSummary {
   }
   const verifByExpert = [...byRoleMap.entries()].map(([id, e]) => ({ id, ...e })).sort((a, b) => b.total - a.total)
 
-  // M5 panel A/B snapshot (panel-examine §10): the amplifier's measured impact, read off the built-in
+  // M5 panel A/B snapshot (studio-lens §10): the amplifier's measured impact, read off the built-in
   // floor/subject/aggregate row split (no separate experiment). caughtBeyondFloor = the headline A-signal (the
   // floor passed but a subject flagged → panel caught what floor-only would have shipped); falseReds =
   // the B-signal (subject false positives — the red-line cost). catches = subject-found defects that got fixed.

@@ -16,7 +16,7 @@ export interface GateOutcomeInput {
   outcome: string
   rounds: number
   evidence: string
-  // Panel Gate B (panel-examine §6). rowKind defaults to 'floor' — floor rows are the ONLY ones the
+  // Panel Gate B (studio-lens §6). rowKind defaults to 'floor' — floor rows are the ONLY ones the
   // pass-rate readers count, so the single-verifier semantics stay byte-identical. Optional for back-compat.
   rowKind?: 'floor' | 'aggregate' | 'subject'
   stepId?: string // one ulid per gated step; links floor/aggregate row to its subject rows
@@ -81,7 +81,7 @@ export interface SubjectGateCount {
   v: number
 }
 
-// Gate B per-dimension subject outcome counts — the per-dimension miss-tracking source (panel-examine §6,
+// Gate B per-dimension subject outcome counts — the per-dimension miss-tracking source (studio-lens §6,
 // the §5.2 prerequisite for any panel). Reads ONLY row_kind='subject' rows, kept out of the floor pass-rate.
 // In the M5 A/B reading, a subject row's outcome tells real-catch from false-red: 'fixed' = the subject caught a
 // real defect that got fixed; 'false-positive' = a FALSE RED (the §10 red-line B cost to watch).
@@ -97,7 +97,7 @@ export interface SubjectImpactRow {
   v: number
 }
 
-// Panel A/B impact (panel-examine §10 M5): join the floor row (the floor-only baseline outcome) to the
+// Panel A/B impact (studio-lens §10 M5): join the floor row (the floor-only baseline outcome) to the
 // aggregate row (the panel step result) for the SAME step. The headline A/B signal is the cell where
 // floorOutcome='pass' but aggregateOutcome≠'pass' — the panel amplifier caught a real concern the
 // floor-only baseline would have shipped. Reads ONLY steps that ran subjects (an aggregate row exists); the

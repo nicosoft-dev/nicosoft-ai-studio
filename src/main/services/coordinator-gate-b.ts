@@ -33,7 +33,7 @@ import { runVerifierStep, chooseVerifierRole } from './lens/verifier'
 export type GateOutcome = 'pass' | 'fixed' | 'false-positive' | 'unverified' | 'unresolved'
 export type GatedStepResult = Awaited<ReturnType<typeof runRoleStep>> & { gateOutcome?: GateOutcome; gateEvidence?: string }
 
-// --- Panel closure model (panel-examine §3 D2 integrator) ---------------------------------------
+// --- Panel closure model (studio-lens §3 D2 integrator) ---------------------------------------
 
 // Severity ladder for the monotone fold (§3.1 inv1): the STEP outcome is the most-alarming of the floor
 // outcome and every subject outcome. "Can't call it done" (unresolved/unverified) outranks a confirmed close
@@ -50,7 +50,7 @@ function worstOf(outcomes: GateOutcome[]): GateOutcome {
   return outcomes.reduce<GateOutcome>((worst, o) => (OUTCOME_SEVERITY[o] > OUTCOME_SEVERITY[worst] ? o : worst), 'pass')
 }
 
-// Total fix-round backstop (panel-examine §3.1 inv6): the D2 integrator consolidates surviving SUBJECT findings
+// Total fix-round backstop (studio-lens §3.1 inv6): the D2 integrator consolidates surviving SUBJECT findings
 // by owning expert → ONE fix dispatch per expert (vs M4's one-per-subject). This caps the WRITE-heavy fix
 // rounds across the whole step: floor closure (≤1) + the subject-expert groups. Findings beyond the budget are
 // surfaced 'unresolved' (logged), never silently dropped (§5.5 / inv6). Rarely binds (most findings route to
@@ -72,9 +72,9 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
   if (!gate.enabled) return runRoleStep({ ...opts, roleId, prompt, signal: signal ?? opts.signal })
 
   // One ulid per gated step — links this step's floor row (and, post-M3/M4, its subject/aggregate rows) in
-  // gate_outcomes (panel-examine §6). M1: only the floor row is written, tagged rowKind='floor'.
+  // gate_outcomes (studio-lens §6). M1: only the floor row is written, tagged rowKind='floor'.
   const stepId = ulid()
-  // M2 (panel-examine §3.2): record the implementer's STARTING commit + the paths ALREADY changed before
+  // M2 (studio-lens §3.2): record the implementer's STARTING commit + the paths ALREADY changed before
   // it runs (prior pipeline steps share one cwd with no commit between them + any pre-existing user edits),
   // so the content trigger can attribute ONLY this step's delta — not the union of all prior steps. Shadow
   // mode — selection is recorded for precision/recall; subjects don't run.
@@ -95,7 +95,7 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
       console.warn('[coordinator] gate outcome record failed:', e instanceof Error ? e.message : e)
     }
   }
-  // M4 (panel-examine §6): a subject row carries that dimension's FINAL outcome (pass / fixed / false-positive
+  // M4 (studio-lens §6): a subject row carries that dimension's FINAL outcome (pass / fixed / false-positive
   // / unresolved); the aggregate row carries the step's worst-of fold. Both are EXCLUDED from the floor
   // pass-rate by the readers' WHERE row_kind='floor', so floor stats stay byte-identical.
   const recordSubjectOutcome = (subject: string, outcome: string, evidence: string): void => {
@@ -112,7 +112,7 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
       /* stats best-effort */
     }
   }
-  // Panel card (panel-examine §4.4): re-emit each subject's FINAL resolved state — after refute + closure —
+  // Panel card (studio-lens §4.4): re-emit each subject's FINAL resolved state — after refute + closure —
   // onto the panel card (id=panel-<stepId>, the same id runStudioLens opened). Carries the structured
   // outcome / refute tally / fixed-by so the card row renders the final verdict + "→ fixed by X" without
   // re-parsing prose. A no-op when no panel ran (no card with that id exists → the orphan event is ignored).
@@ -198,7 +198,7 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
   const refutedSubjects = subjectFindings.filter((v) => v.produced && !v.passed && v.refuted)
   const droppedSubjects = subjectFindings.filter((v) => !v.produced)
 
-  // PRE-closure gate (panel-examine §4.F step 3 / §5.1): floor-FAIL OR any-subject-FAIL → close the loop.
+  // PRE-closure gate (studio-lens §4.F step 3 / §5.1): floor-FAIL OR any-subject-FAIL → close the loop.
   // All-green (floor PASS + every subject PASS, or no subject) is a real pass; a SKIPPED floor keeps 'unverified'.
   if (verdict.passed && failedSubjects.length === 0 && refutedSubjects.length === 0) {
     const outcome: GateOutcome = verdict.skipped ? 'unverified' : 'pass'
@@ -220,7 +220,7 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
     return { ...result, inputTokens, outputTokens, gateOutcome: outcome, gateEvidence: verdict.skipped ? verdict.feedback : undefined }
   }
 
-  // D2 integrator (panel-examine §3): the floor closes on its own (holistic, own persona, false-positive path);
+  // D2 integrator (studio-lens §3): the floor closes on its own (holistic, own persona, false-positive path);
   // CONFIRMED subjects are consolidated by owning expert into fewer COHERENT fix rounds (vs M4's one handler per
   // subject, which could clobber related code). Snapshot before any edit; rollback point, recovery stays manual.
   const floorFailed = !verdict.passed
@@ -286,7 +286,7 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
   let aggregate = worstOf([floorDomainOutcome, ...subjectOutcomes])
   const hadSurvivingFail = floorFailed || failedSubjects.length > 0
   if (hadSurvivingFail && aggregate === 'pass') {
-    console.warn(`[panel-examine] step ${stepId}: monotonicity guard tripped (floor=${floorDomainOutcome}, ${failedSubjects.length} subject fail) — clamping 'pass' → 'unresolved'`)
+    console.warn(`[studio-lens] step ${stepId}: monotonicity guard tripped (floor=${floorDomainOutcome}, ${failedSubjects.length} subject fail) — clamping 'pass' → 'unresolved'`)
     aggregate = 'unresolved'
   }
   const floorTag = floorFailed ? `[floor — ${floorDomainOutcome}] ${floorClosure?.evidence ?? verdict.feedback}` : ''
@@ -431,7 +431,7 @@ interface SubjectClosure {
   handlerRoleId: string
 }
 
-// The D2 integrator (panel-examine §3 / §3.1): consolidate the CONFIRMED surviving subject findings into ONE fix
+// The D2 integrator (studio-lens §3 / §3.1): consolidate the CONFIRMED surviving subject findings into ONE fix
 // dispatch PER owning expert — the expert sees ALL its findings together and fixes them coherently in one round
 // (vs M4's one-handler-per-subject, which could have separate handlers serially clobber related code). After each
 // expert's consolidated fix, EACH of its findings is re-verified with its OWN focus over one fresh build, so the
@@ -470,7 +470,7 @@ async function integrateSubjectClosures(
     for (const lv of lvs) outcomes.set(lv.key, { outcome: 'unresolved', evidence: `${lv.feedback}\n[exceeded fix-round backstop (${MAX_FIX_ROUNDS}) — surfaced unresolved]`, handlerRoleId: '' })
   }
   if (groups.length > groupsToFix.length) {
-    console.warn(`[panel-examine] step ${stepId}: ${groups.length} owning-expert fix groups exceed budget ${roundsBudget} — fixing ${groupsToFix.length}, ${groups.length - groupsToFix.length} surfaced unresolved (backstop §3.1-6)`)
+    console.warn(`[studio-lens] step ${stepId}: ${groups.length} owning-expert fix groups exceed budget ${roundsBudget} — fixing ${groupsToFix.length}, ${groups.length - groupsToFix.length} surfaced unresolved (backstop §3.1-6)`)
   }
 
   for (const [handlerRoleId, lvs] of groupsToFix) {
