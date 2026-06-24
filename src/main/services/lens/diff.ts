@@ -126,10 +126,11 @@ export async function buildChangedSet(
 export async function readTargetContent(cwd: string | undefined, paths: readonly string[], maxTotal = 24_000, maxFiles = 40): Promise<string> {
   if (!cwd) return ''
   const parts: string[] = []
-  const omitted: string[] = []
+  const overBudget: string[] = [] // not inlined because the file/char cap was already hit — the finders CAN read these
+  const unreadable: string[] = [] // confineReal-rejected / read error — a direct read will ALSO fail (a blind spot)
   let total = 0
   for (const p of paths) {
-    if (parts.length >= maxFiles || total >= maxTotal) { omitted.push(p); continue } // over budget — name it, don't read
+    if (parts.length >= maxFiles || total >= maxTotal) { overBudget.push(p); continue } // over budget — name it, don't read
     try {
       const abs = await confineReal(cwd, p)
       let body = await readFile(abs, 'utf-8')
@@ -138,14 +139,21 @@ export async function readTargetContent(cwd: string | undefined, paths: readonly
       parts.push(block)
       total += block.length
     } catch {
-      omitted.push(p) // unreadable / out-of-bounds — still name it below
+      unreadable.push(p)
     }
   }
-  let out = parts.join('\n\n')
-  if (out.length > maxTotal) out = out.slice(0, maxTotal) + '\n…[content truncated for lens selection]'
-  if (omitted.length) {
-    const named = omitted.slice(0, 60).join(', ')
-    out += `\n\n[${omitted.length} more changed file(s) NOT inlined above (prompt-length cap) — author lenses for these too where the path/role implies risk; the finders read them directly: ${named}${omitted.length > 60 ? `, …+${omitted.length - 60} more` : ''}]`
-  }
-  return out
+  // DISTINCT, accurate notes (never silent, never misdirecting): over-budget files can be read directly by the
+  // finders; unreadable ones cannot, so do NOT tell anyone to "read them directly" — name them as a blind spot.
+  const nameList = (xs: string[]): string => xs.slice(0, 60).join(', ') + (xs.length > 60 ? `, …+${xs.length - 60} more` : '')
+  const notes: string[] = []
+  if (overBudget.length) notes.push(`[${overBudget.length} more changed file(s) NOT inlined above (prompt-length cap) — author lenses for these too where the path/role implies risk; the finders read them directly: ${nameList(overBudget)}]`)
+  if (unreadable.length) notes.push(`[${unreadable.length} changed file(s) could NOT be read (out-of-bounds / unreadable) — not inlined, and a direct read will also fail; note them as a blind spot: ${nameList(unreadable)}]`)
+  const note = notes.length ? '\n\n' + notes.join('\n\n') : ''
+  // Reserve the note's length BEFORE truncating the body so the FINAL string is a TRUE hard ceiling (≤ maxTotal),
+  // not maxTotal + note (the earlier bug appended the note AFTER the maxTotal slice).
+  const SUFFIX = '\n…[content truncated for lens selection]'
+  let body = parts.join('\n\n')
+  const bodyBudget = Math.max(0, maxTotal - note.length)
+  if (body.length > bodyBudget) body = body.slice(0, Math.max(0, bodyBudget - SUFFIX.length)) + SUFFIX
+  return body + note
 }

@@ -48,9 +48,9 @@ phases:
       concurrency lens), never from file names.
 
       Size the panel to THIS code's actual risk surface — author as FEW or as MANY lenses as it genuinely
-      warrants: one lens (or even an empty array [] when the change is trivial and the floor already covers it)
-      for a small contained edit, several for broad, cross-cutting, or risk-laden work. Don't pad the list to
-      look thorough, and don't under-cover a real risk — the COUNT is yours to size to the code, not a quota.
+      warrants: one lens (or even an empty array [] when the change is genuinely trivial and a standard read
+      suffices) for a small contained edit, several for broad, cross-cutting, or risk-laden work. Don't pad the
+      list to look thorough, and don't under-cover a real risk — the COUNT is yours to size to the code, not a quota.
 
       For each lens emit {"key":"<short-kebab-name>","focus":"<one sentence: exactly what this lens hunts
       and the failure it looks for>","why":"<one line citing the specific code — a file:hunk or concrete

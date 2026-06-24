@@ -122,7 +122,7 @@ Report your reasoning first (probe the lens, cite the code). THEN emit your cand
 ]
 \`\`\`
 
-Rules for the block: list EVERY candidate (an empty array \`[]\` ONLY if you genuinely found nothing after probing); one object per DISTINCT defect (don't bundle two issues into one); \`file\`/\`line\` point at the exact site; \`mechanism\` must be concrete, not a vague worry. Set \`confidence\` HONESTLY — it controls how hard the refute stage vets each candidate (lower confidence draws MORE skeptics), so an uncertain "this might be" should say \`low\` rather than overclaim, and a slam-dunk you can fully demonstrate should say \`high\`. Then end your message with EXACTLY ONE final line — nothing after it:
+Rules for the block: list EVERY candidate (an empty array \`[]\` ONLY if you genuinely found nothing after probing); one object per DISTINCT defect (don't bundle two issues into one); \`file\`/\`line\` point at the exact site; \`mechanism\` must be concrete, not a vague worry. Set \`confidence\` by your EVIDENCE, not by how the candidate reads: \`high\` = you can point to the exact reachable code path, the input that triggers it, and the invariant it breaks (a demonstration, not a hunch); \`med\` = the mechanism is plausible and partly evidenced but you cannot fully close it; \`low\` = a "this might be" you cannot yet demonstrate. Calibrate honestly — over-claiming \`high\` on a shaky candidate and hedging a clear one BOTH mislead the review; the confidence is a signal about the EVIDENCE, nothing else. Then end your message with EXACTLY ONE final line — nothing after it:
 VERDICT: FAIL
 or
 VERDICT: PASS

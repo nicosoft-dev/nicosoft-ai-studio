@@ -74,8 +74,7 @@ export interface Template {
   name: string
   inputs?: string[]
   enabledSetting?: string
-  breadthInput?: string
-  vars?: Record<string, Record<string, string>>
+  breadthInput?: string // the template's declared default entry-intent (the caller overrides via ctx.breadthInput)
   phases: StepSpec[]
   result?: Record<string, string>
 }
@@ -196,13 +195,6 @@ function classifySteps(t: Template): { finderId?: string; readerId?: string; syn
 
 export async function runLens(template: Template, ctx: LensContext, deps: LensDeps): Promise<LensRun> {
   const scope: Scope = { steps: {}, ctx }
-  // resolve {{breadthClause}}-style template vars into ctx so interpolation sees them as plain values
-  if (template.vars) {
-    const breadth = String(ctx.breadthInput ?? template.breadthInput ?? '')
-    for (const [name, table] of Object.entries(template.vars)) {
-      ctx[name] = table[breadth] ?? Object.values(table)[0] ?? ''
-    }
-  }
 
   // The StudioLens parent card (StudioLens until L3 renames it) wraps the fan-out rows. It opens just before
   // the first fan-out phase — once the roster is known (review: select.lenses; understand: paths) — so the card
@@ -281,12 +273,13 @@ function resolveKit(step: StepSpec): readonly string[] | null {
 }
 
 // Per-step liveness budget for the P4 delta-stall watchdog (abort a FROZEN stream after this many ms of ZERO
-// activity). step.stallMs (the template's per-step knob) overrides the run-level ctx.stallTimeoutMs overrides the
-// LENS_STALL_MS default — so the orchestration tunes liveness per step instead of relying on a single welded
-// constant. NOT a wall-clock ceiling: a deep-but-ACTIVE agent keeps resetting it (any stream event), so only a
-// truly frozen stream trips it. One resolver so every agent step (finder / reader / refute / select) is consistent.
-function stallFor(step: StepSpec, ctx: LensContext): number {
-  return step.stallMs ?? (ctx.stallTimeoutMs as number | undefined) ?? LENS_STALL_MS
+// activity). step.stallMs (the template's per-step knob) overrides the LENS_STALL_MS default — so the
+// orchestration tunes liveness per step instead of a single welded constant. (An earlier run-level
+// ctx.stallTimeoutMs tier was removed: nothing ever wrote it, so it was a knob no one could turn.) NOT a
+// wall-clock ceiling: a deep-but-ACTIVE agent keeps resetting it (any stream event), so only a truly frozen
+// stream trips it. One resolver so every agent step (finder / reader / refute / select) is consistent.
+function stallFor(step: StepSpec): number {
+  return step.stallMs ?? LENS_STALL_MS
 }
 
 async function runStep(step: StepSpec, scope: Scope, ctx: LensContext, deps: LensDeps): Promise<unknown> {
@@ -336,7 +329,7 @@ async function runAgentStep(step: StepSpec, scope: Scope, ctx: LensContext, deps
 
   // A tool-using non-fan-out step (none of ours today; reserved). Persona from `system:` if present, else the prompt.
   const system = step.system ? personaFor(step.system, scope, deps) : prompt
-  const out = await deps.runAgent({ roleId, prompt, system, toolNames: kit, stallTimeoutMs: stallFor(step, ctx) })
+  const out = await deps.runAgent({ roleId, prompt, system, toolNames: kit, stallTimeoutMs: stallFor(step) })
   return parseOutput(step, out.text)
 }
 
@@ -429,10 +422,10 @@ async function runFanOutItem(step: StepSpec, scope: Scope, ctx: LensContext, dep
   }
   // READER (Subject card, text emit) — replicates understand.ts's per-file reader
   if (step.card?.name === 'Subject' && step.emit?.contract === 'text') {
-    return runReader(step, ctx, deps, item as string, as, roleId, kit ?? ['Read', 'Grep', 'Glob'], index, stepId, panelId, prompt)
+    return runReader(step, deps, item as string, as, roleId, kit ?? ['Read', 'Grep', 'Glob'], index, stepId, panelId, prompt)
   }
   // generic fan-out item (no card) — run + carry binding
-  const out = await deps.runAgent({ roleId, prompt, system: step.system ? personaFor(step.system, itemScope, deps) : prompt, toolNames: kit ?? [], stallTimeoutMs: stallFor(step, ctx) })
+  const out = await deps.runAgent({ roleId, prompt, system: step.system ? personaFor(step.system, itemScope, deps) : prompt, toolNames: kit ?? [], stallTimeoutMs: stallFor(step) })
   return { [as]: item, ...(parseOutput(step, out.text) as object) }
 }
 
@@ -522,7 +515,7 @@ async function runFinder(
     let out: AgentOut
     try {
       // P4 watchdog applies to finders by default (LENS_STALL_MS) — never rely on the caller to set it.
-      out = await deps.runAgent({ roleId, prompt, system, toolNames: kit, stallTimeoutMs: stallFor(step, ctx), streamCard: { toolUseId: toolId, parentToolId: panelId } })
+      out = await deps.runAgent({ roleId, prompt, system, toolNames: kit, stallTimeoutMs: stallFor(step), streamCard: { toolUseId: toolId, parentToolId: panelId } })
     } catch (e) {
       const feedback = `subject verifier infra failure: ${e instanceof Error ? e.message : e}`
       deps.cb.onToolEvent?.(roleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: panelId, name: 'Subject', isError: true, result: feedback })
@@ -559,12 +552,12 @@ async function runFinder(
 }
 
 // One reader (understand) — emits the Subject card (phase:read), runs the read-only reader, returns { path, summary }.
-async function runReader(step: StepSpec, ctx: LensContext, deps: LensDeps, path: string, as: string, roleId: string, kit: readonly string[], index: number, stepId: string, panelId: string, prompt: string): Promise<Record<string, unknown>> {
+async function runReader(step: StepSpec, deps: LensDeps, path: string, as: string, roleId: string, kit: readonly string[], index: number, stepId: string, panelId: string, prompt: string): Promise<Record<string, unknown>> {
   const toolId = readerCardId(index, stepId)
   deps.cb.onToolEvent?.(roleId, { type: 'sub_tool_start', toolUseId: toolId, parentToolId: panelId, name: 'Subject', input: { subject: path, phase: 'read', mode: 'understand' } })
   let summary = ''
   try {
-    const out = await deps.runAgent({ roleId, prompt, system: step.system ? personaFor(step.system, { steps: {}, ctx: {} }, deps) : prompt, toolNames: kit, stallTimeoutMs: stallFor(step, ctx), streamCard: { toolUseId: toolId, parentToolId: panelId } })
+    const out = await deps.runAgent({ roleId, prompt, system: step.system ? personaFor(step.system, { steps: {}, ctx: {} }, deps) : prompt, toolNames: kit, stallTimeoutMs: stallFor(step), streamCard: { toolUseId: toolId, parentToolId: panelId } })
     summary = out.text.trim()
   } catch (e) {
     summary = `(could not read — ${e instanceof Error ? e.message : String(e)})`
@@ -634,7 +627,8 @@ async function refuteCandidates(step: StepSpec, ctx: LensContext, deps: LensDeps
 }
 
 // One skeptic vote — refutePrompt persona, read-only self-fetch, REFUTE: YES/NO parse. Infra fail / no contract
-// → refuted:false (failVote=uphold: a failed vote never drops a real defect).
+// → refuted = failRefuted, which BOTH the catch and the no-contract branch honor: step.failVote 'uphold'
+// (default) → false (a failed vote never drops a real defect); 'refute' → true (a stricter template drops on doubt).
 async function runRefuteVote(step: StepSpec, ctx: LensContext, deps: LensDeps, cand: Finding, roleId: string, kit: readonly string[], voter: number, stepId: string, panelId: string): Promise<{ refuted: boolean; inputTokens: number; outputTokens: number }> {
   const toolId = refuteVoteId(cand.id, voter, stepId)
   deps.cb.onToolEvent?.(roleId, { type: 'sub_tool_start', toolUseId: toolId, parentToolId: panelId, name: 'SubjectRefute', input: { phase: 'verify', findingId: cand.id, subject: cand.lens, lens: cand.lens, title: cand.title.slice(0, 120), severity: cand.severity, voter } })
@@ -649,7 +643,7 @@ async function runRefuteVote(step: StepSpec, ctx: LensContext, deps: LensDeps, c
   const failRefuted = step.failVote === 'refute'
   let out: AgentOut
   try {
-    out = await deps.runAgent({ roleId, prompt, system, toolNames: kit, stallTimeoutMs: stallFor(step, ctx), streamCard: { toolUseId: toolId, parentToolId: panelId } })
+    out = await deps.runAgent({ roleId, prompt, system, toolNames: kit, stallTimeoutMs: stallFor(step), streamCard: { toolUseId: toolId, parentToolId: panelId } })
   } catch (e) {
     deps.cb.onToolEvent?.(roleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: panelId, name: 'SubjectRefute', isError: true, input: { phase: 'verify', findingId: cand.id, voter, vote: 'failed' }, result: `refute vote failed: ${e instanceof Error ? e.message : e}` })
     return { refuted: failRefuted, inputTokens: 0, outputTokens: 0 }
