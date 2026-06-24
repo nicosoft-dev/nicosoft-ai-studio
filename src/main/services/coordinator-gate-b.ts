@@ -8,9 +8,8 @@ import * as settingsService from './settings.service'
 import * as gateOutcomeRepo from '../repos/gate-outcome.repo'
 import { displayName } from '../agent/roles/prompts'
 import { deriveAcceptanceCriteria } from './coordinator-route'
-import { gitHead, changedPathsSince } from './examine/diff'
+import { gitHead, changedPathsSince } from './lens/diff'
 import type { WrittenFile } from '../agent/context'
-import { subjectMeta } from './examine/subjects'
 import { describeSnapshot, snapshotWorkspace } from './git-snapshot'
 import { runRoleStep, type RunStepOptions } from './coordinator-step'
 import { ulid } from '../db/id'
@@ -19,7 +18,7 @@ import { ulid } from '../db/id'
 // the floor (runGatedRoleStep + closeFloor + the subject integrator re-verify) calls the SAME runVerifierStep.
 import { runLensReview, lensEnabled } from './lens/agent-lens'
 import { subjectEvidence, type SubjectFinding } from './lens/types'
-import { runVerifierStep, chooseVerifierRole } from './examine/verifier'
+import { runVerifierStep, chooseVerifierRole } from './lens/verifier'
 
 // How the gated step ended. 'pass' = verifier approved the implementer's change directly. 'fixed' =
 // verifier FAILed, the fail handler claimed a fix AND a re-verification confirmed it. 'false-positive' =
@@ -483,7 +482,7 @@ async function integrateSubjectClosures(
     outputTokens += followUp.outputTokens
     // Each re-verify subject self-fetches the diff (`git diff`) like a Workflow agent — no shared build to inject.
     for (const lv of lvs) {
-      const focus = lv.focus ?? subjectMeta(lv.key)?.focus ?? lv.key // custom lens carries its own focus; enum via subjectMeta
+      const focus = lv.focus ?? lv.key // the lens carries its own model-authored focus (always set; key is the fallback)
       // quiet: reuses the subject's stable toolUseId; an event would clobber the original FAIL row the panel
       // card keeps (the resolved outcome is re-emitted via emitSubjectFinal). reverify: narrow binary fix-confirm
       // persona (NOT the aggressive FIND prompt) so a fresh weak candidate can't flip a real fix to 'unresolved'.

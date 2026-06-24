@@ -12,7 +12,7 @@ import { backgroundVerifyQueue, GATE_C_MAX_ROUNDS, type E2ERoundResult, type E2E
 import { COORDINATOR_E2E_PROMPT } from '../agent/roles/prompts'
 import { describeSnapshot, snapshotWorkspace } from './git-snapshot'
 import { runRoleStep } from './coordinator-step'
-import { chooseVerifierRole } from './examine/verifier'
+import { chooseVerifierRole } from './lens/verifier'
 import type { CoordinatorCallbacks, CoordinatorRunInput, RouteDecision } from './coordinator-types'
 
 // Submit this turn's e2e verification onto the background queue. Never awaited by the caller — the queue
