@@ -700,6 +700,11 @@ export async function* runAgent(
 
     turns += 1
     if (ctx.signal.aborted) return { reason: 'aborted', messages, turns, compactions }
+    // P2: a collab expert that called await_async / wait this turn has PARKED — end the turn NOW (runExpert
+    // handles the park + auto-resume) instead of looping back, which would re-prompt the model to call
+    // await_async AGAIN (the loop continues whenever ANY tool was used). Without this the model spams
+    // await_async within one turn (observed ×19 on a single never-completing handle ≈ 18 wasted LLM rounds).
+    if (ctx.collab?.parkRequested()) return { reason: 'completed', messages, turns, compactions }
     if (thrashStopAtTurn !== undefined && turns >= thrashStopAtTurn) {
       console.warn(`[agent] thrash stop run=${ctx.runId} turn=${turns} — same failure ${THRASH_STOP_AT}×, wrap-up window spent`)
       return { reason: 'thrash_stop', messages, turns, compactions }

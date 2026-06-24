@@ -273,19 +273,24 @@ async function runAgentStep(step: StepSpec, scope: Scope, ctx: LensContext, deps
   //   • SYNTH (card: Synth) — a visible Synth card under the still-open panel; result shaped by output schema.
   //   • SELECT / ESCALATE (no card) — a JSON/contract reply parsed into the output schema (lenses[] / escalate).
   if (!kit) {
-    const text = await deps.runChat({ roleId, prompt })
+    // SYNTH: emit the card's sub_tool_start BEFORE the chat call so it shows a live "running" state while the
+    // lead reviewer writes the report (which takes seconds) — previously both start AND done fired AFTER runChat,
+    // so the Synth card popped into existence already-finished (looked like the panel had stalled/ended). The
+    // finder/refute cards already start-before-run; this brings synth into line. SELECT/ESCALATE carry no card.
     if (step.card?.name === 'Synth') {
       const synthId = synthCardId(stepId)
       deps.cb.onToolEvent?.(roleId, { type: 'sub_tool_start', toolUseId: synthId, parentToolId: panelId, name: 'Synth', input: { phase: step.card.phase ?? 'synth', mode: 'review' } })
+      const text = await deps.runChat({ roleId, prompt })
       deps.cb.onToolEvent?.(roleId, { type: 'sub_tool_done', toolUseId: synthId, parentToolId: panelId, name: 'Synth', isError: false, result: text ?? '(synthesis unavailable)' })
       return shapeChatResult(step, text)
     }
+    const text = await deps.runChat({ roleId, prompt })
     return parseOutput(step, text ?? '')
   }
 
   // A tool-using non-fan-out step (none of ours today; reserved). Persona from `system:` if present, else the prompt.
   const system = step.system ? personaFor(step.system, scope, deps) : prompt
-  const out = await deps.runAgent({ roleId, prompt, system, toolNames: kit, stallTimeoutMs: undefined })
+  const out = await deps.runAgent({ roleId, prompt, system, toolNames: kit, stallTimeoutMs: (ctx.stallTimeoutMs as number | undefined) ?? LENS_STALL_MS })
   return parseOutput(step, out.text)
 }
 
@@ -381,7 +386,7 @@ async function runFanOutItem(step: StepSpec, scope: Scope, ctx: LensContext, dep
     return runReader(step, deps, item as string, as, roleId, kit ?? ['Read', 'Grep', 'Glob'], index, stepId, panelId, prompt)
   }
   // generic fan-out item (no card) — run + carry binding
-  const out = await deps.runAgent({ roleId, prompt, system: step.system ? personaFor(step.system, itemScope, deps) : prompt, toolNames: kit ?? [] })
+  const out = await deps.runAgent({ roleId, prompt, system: step.system ? personaFor(step.system, itemScope, deps) : prompt, toolNames: kit ?? [], stallTimeoutMs: (ctx.stallTimeoutMs as number | undefined) ?? LENS_STALL_MS })
   return { [as]: item, ...(parseOutput(step, out.text) as object) }
 }
 
@@ -456,7 +461,7 @@ async function runReader(step: StepSpec, deps: LensDeps, path: string, as: strin
   deps.cb.onToolEvent?.(roleId, { type: 'sub_tool_start', toolUseId: toolId, parentToolId: panelId, name: 'Subject', input: { subject: path, phase: 'read', mode: 'understand' } })
   let summary = ''
   try {
-    const out = await deps.runAgent({ roleId, prompt, system: step.system ? personaFor(step.system, { steps: {}, ctx: {} }, deps) : prompt, toolNames: kit, streamCard: { toolUseId: toolId, parentToolId: panelId } })
+    const out = await deps.runAgent({ roleId, prompt, system: step.system ? personaFor(step.system, { steps: {}, ctx: {} }, deps) : prompt, toolNames: kit, stallTimeoutMs: LENS_STALL_MS, streamCard: { toolUseId: toolId, parentToolId: panelId } })
     summary = out.text.trim()
   } catch (e) {
     summary = `(could not read — ${e instanceof Error ? e.message : String(e)})`
@@ -530,7 +535,7 @@ async function runRefuteVote(step: StepSpec, ctx: LensContext, deps: LensDeps, c
   const prompt = interpolate(step.prompt ?? '', candScope)
   let out: AgentOut
   try {
-    out = await deps.runAgent({ roleId, prompt, system, toolNames: kit, streamCard: { toolUseId: toolId, parentToolId: panelId } })
+    out = await deps.runAgent({ roleId, prompt, system, toolNames: kit, stallTimeoutMs: (ctx.stallTimeoutMs as number | undefined) ?? LENS_STALL_MS, streamCard: { toolUseId: toolId, parentToolId: panelId } })
   } catch (e) {
     deps.cb.onToolEvent?.(roleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: panelId, name: 'SubjectRefute', isError: true, input: { phase: 'verify', findingId: cand.id, voter, vote: 'failed' }, result: `refute vote failed: ${e instanceof Error ? e.message : e}` })
     return { refuted: false, inputTokens: 0, outputTokens: 0 }

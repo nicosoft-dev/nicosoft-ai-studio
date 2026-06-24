@@ -41,11 +41,11 @@ phases:
           focus: string
           why: string
     prompt: |
-      You DRIVE an independent review. Read the change below and AUTHOR the review LENSES this code
-      warrants — each a risk surface BEYOND standard correctness (the floor verifier already owns
-      correctness / duplication / wrong-problem; do NOT re-run them). There is NO fixed list — self-derive
-      the lenses from what THIS code actually does and means (a token check that can be bypassed = a
-      security lens; a shared write without a lock = a concurrency lens), never from file names.
+      You DRIVE an independent review. AUTHOR the review LENSES this CODE warrants — each a risk surface
+      BEYOND standard correctness (the floor verifier already owns correctness / duplication / wrong-problem;
+      do NOT re-run them). There is NO fixed list — self-derive the lenses from what THIS code actually does
+      and means (a token check that can be bypassed = a security lens; a shared write without a lock = a
+      concurrency lens), never from file names.
       {{breadthClause}}
 
       For each lens emit {"key":"<short-kebab-name>","focus":"<one sentence: exactly what this lens hunts
@@ -57,18 +57,20 @@ phases:
       Task:
       {{task}}
 
-      Changed file(s): {{paths}}
+      File(s) under review: {{paths}}
 
-      Diff:
+      Diff — what changed, IF available. It may be EMPTY (a brand-new file, or a project that is not a git
+      repo): an empty diff is NOT "low risk" — judge entirely from the full file content below either way.
       {{diff}}
 
-      Target file content (the code as it stands):
+      The code as it stands — your PRIMARY source; always review THIS directly:
       {{content}}
 
       Return ONLY a JSON array of lens objects — no prose, no markdown fence.
 
-  # FIND — one independent finder per lens (barrier fan-out, faithful to the current panel). Each self-fetches
-  # the diff, hunts its lens aggressively, and emits a ```findings array (the candidate column). Empty array is
+  # FIND — one independent finder per lens (barrier fan-out, faithful to the current panel). Each READS the
+  # target files directly (git diff is OPTIONAL enrichment, agent's call — works on any tree, git or not),
+  # hunts its lens aggressively, and emits a ```findings array (the candidate column). Empty array is
   # trusted ONLY on VERDICT: PASS — a FAIL with no array degrades to one prose candidate (never swallow a FAIL).
   - id: find
     phase: Review
@@ -82,8 +84,10 @@ phases:
       phase: find
       subject: "${lens.key}"
     prompt: |
-      Run your "{{lens.key}}" lens on the uncommitted change: {{lens.focus}}. Inspect it YOURSELF —
-      `git diff {{baseRef}}` + `git status`, then Read the touched files for your lens — nothing is inlined.
+      Run your "{{lens.key}}" lens on the code under review: {{lens.focus}}. Inspect it YOURSELF — READ the
+      target file(s) ({{paths}}) directly; reading the code is ALWAYS enough on its own. If this happens to
+      be a git repo you MAY also use `git diff {{baseRef}}` / `git status` to isolate the precise change —
+      your call, only if it helps. Nothing is inlined.
 
       Original task:
       {{task}}
@@ -122,9 +126,10 @@ phases:
       subject: "${cand.id}"
     system: "refutePrompt(${cand.focus})"
     prompt: |
-      An independent "{{cand.lens}}" finder flagged ONE candidate defect in the uncommitted change. As a
+      An independent "{{cand.lens}}" finder flagged ONE candidate defect in the code under review. As a
       SKEPTIC, try to REFUTE this single candidate — prove it is a false alarm, or concede it stands.
-      Inspect it YOURSELF (`git diff {{baseRef}} -- {{cand.file}}` + Read the cited file) — nothing is inlined.
+      Inspect it YOURSELF — READ the cited file ({{cand.file}}) directly; that is always enough. If this is a
+      git repo you MAY also `git diff {{baseRef}} -- {{cand.file}}` for the precise hunk — your call.
 
       Candidate to refute:
       [{{cand.severity}}] {{cand.title}}

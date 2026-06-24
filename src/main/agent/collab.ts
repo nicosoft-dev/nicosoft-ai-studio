@@ -40,6 +40,11 @@ export interface CollabHandle {
   // event). settledResults = results of handles ALREADY done at call time, injected alongside on resume so an
   // already-finished op isn't lost. Returns a status line for the tool result.
   awaitHandles: (inflightIds: string[], settledResults: string[]) => string
+  // Whether wait()/await_async requested a park during THIS turn. The agent loop checks it after tool execution
+  // and ENDS the turn (runExpert then parks) — otherwise the loop keeps re-prompting (it continues whenever any
+  // tool was used) and the model re-calls await_async over and over within one turn (observed ×19, all the same
+  // handle, zero progress between). Cleared by runExpert when it actually parks.
+  parkRequested: () => boolean
 }
 
 export interface ExpertSpec {
@@ -171,6 +176,7 @@ export class CollabSession {
         this.onEvent({ kind: 'wait', roleId: self })
         return `Waiting on ${inflightIds.length} async op(s) — your turn will end and resume when they complete (or a peer messages you).`
       },
+      parkRequested: () => this.experts.get(self)!.waitRequested,
     }
   }
 

@@ -66,9 +66,11 @@ export const studioLensTool = buildTool<typeof inputSchema, StudioLensResult>({
         data: {
           ok: true,
           message:
-            `Launched a ${label} as async handle ${handle.id}. It runs in the background — report that it started ` +
-            `(name the handle + what it covers), then call await_async with ["${handle.id}"] to pick up the verdict. ` +
-            `You MAY keep working first; awaiting suspends you until the panel lands (recommended for a long review).`
+            `Studio Lens review launched over ${label}. In your user-facing message, report that "the Studio Lens ` +
+            `review" started + what it covers, and do NOT print, quote, or mention the handle id ANYWHERE in that ` +
+            `message — keep it entirely out of the text the user reads. Then (separately) call await_async with ` +
+            `["${handle.id}"] exactly ONCE to pick up the verdict — that suspends you until the review lands; do NOT ` +
+            `call await_async repeatedly. You MAY do other quick work first.`
         }
       }
     }

@@ -9,6 +9,7 @@ import { anthropicHeaders, anthropicThinkingDirective, applyAnthropicCacheContro
 import { streamIdleGuard, LLM_STREAM_IDLE_MS, streamEnvelopeGuard, LLM_EMPTY_ENVELOPE_MS } from './stream-timeout'
 import { callWithToolsOpenAI } from './llm-openai'
 import { callWithToolsGemini } from './llm-gemini'
+import { acquireLlmSlot } from './llm-gate'
 import type { ThinkingParam } from '../llm/types'
 import type {
   AgentMessage,
@@ -289,9 +290,19 @@ export async function* callWithTools(
   req: AgentLlmRequest,
   onEvent?: (e: AgentLlmEvent) => void,
 ): AsyncGenerator<ToolUseBlock, AssistantTurn, void> {
-  if (req.protocol === 'openai') return yield* callWithToolsOpenAI(req, onEvent)
-  if (req.protocol === 'gemini') return yield* callWithToolsGemini(req, onEvent)
-  return yield* callWithToolsAnthropic(req, onEvent)
+  // P4: every agent LLM request passes through ONE global concurrency cap (llm-gate) so the COMBINED in-flight
+  // load across the lens fan-out + collab experts + coordinator parallelism stays bounded (Workflow parity) —
+  // the lens pool alone capped only lens agents, leaving collab/coordinator's bare Promise.all uncapped. The
+  // slot is held for this one streamed request and freed in the finally (incl. the consumer's early
+  // .return()/abort). Deadlock-free: see llm-gate (the stream is independent I/O; tools are awaited after release).
+  const release = await acquireLlmSlot()
+  try {
+    if (req.protocol === 'openai') return yield* callWithToolsOpenAI(req, onEvent)
+    if (req.protocol === 'gemini') return yield* callWithToolsGemini(req, onEvent)
+    return yield* callWithToolsAnthropic(req, onEvent)
+  } finally {
+    release()
+  }
 }
 
 // Drain the generator to a full turn — for callers that don't stream tool execution (autocompact).
