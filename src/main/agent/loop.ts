@@ -64,11 +64,28 @@ export interface RunAgentParams {
   imageModel?: string // image backend slug for ns_generate_image (designer); Gemini only
   onStream?: (e: AgentLlmEvent) => void // forwarded straight from the LLM call (text + tool deltas)
   onRetry?: (info: { attempt: number; max: number; code: string; waitMs: number }) => void // transient failure → retrying
+  // Collab threads the compaction anchor across an expert's mailbox wakes (see CompactCarry). Omitted by
+  // solo / dispatch (a single runAgent call) → the anchor starts empty on turn 1, exactly as before.
+  seedCompact?: CompactCarry
 }
 
 export type AgentEvent =
   | { type: 'assistant'; message: AgentMessage; usage: AssistantTurn['usage'] }
   | { type: 'tool_results'; message: AgentMessage }
+
+// Cross-invocation compaction anchor. The autocompact estimate is normally seeded only by the running
+// loop's own API usage. In collab an expert runs as MANY short runAgent calls (one per mailbox wake), so
+// without carrying this, each wake's turn-1 estimate falls back to char/4 of the full transcript — which
+// UNDER-counts the fixed system+tools+cache overhead and fires autocompact late (the expert's context
+// overshoots the threshold by ~10–30K before compacting). The scheduler threads this in/out so every wake
+// estimates from the expert's TRUE cumulative context. `autoFails` carries the consecutive proactive-
+// autocompact failure count (CC-style breaker): once it reaches MAX_AUTOCOMPACT_FAILS the loop stops
+// attempting proactive compaction for the rest of the run (the reactive overflow path stays armed).
+export interface CompactCarry {
+  usage?: Usage // real API usage anchoring the [0, usageAt) prefix; undefined → estimate that prefix by char/4
+  usageAt: number // index in messages the usage was measured at; messages.slice(usageAt) is estimated on top
+  autoFails: number // consecutive failed proactive autocompacts, carried across wakes
+}
 
 export interface AgentResult {
   // 'thrash_stop' = the repeated-failure loop guard wound the run down (same failure fingerprint hit
@@ -83,6 +100,9 @@ export interface AgentResult {
   // Compaction firings this run (layer 2 / layer 3) — surfaced into run-stats so long-run behavior
   // (does the agent stay on task across destructive summarization?) is measurable, not anecdotal.
   compactions: { micro: number; auto: number }
+  // The compaction anchor to carry into the NEXT invocation (collab re-feeds it as seedCompact). Solo
+  // callers ignore it — a one-shot runAgent run has no next invocation to seed.
+  compact: CompactCarry
 }
 
 const SUBAGENT_SYSTEM =
@@ -107,6 +127,11 @@ const FILE_CHANGE_NUDGE =
 // tool_search variant used when tools opt into deferral. Regex flavour (the model builds a Python
 // regex over tool names/descriptions); bm25 is the alternative.
 const TOOL_SEARCH_TYPE = 'tool_search_tool_regex_20251119'
+
+// CC-style autocompact circuit breaker: after this many CONSECUTIVE proactive-autocompact failures
+// (carried across collab wakes via CompactCarry) the loop stops attempting proactive compaction for the
+// rest of the run, instead of re-issuing an expensive full-transcript summary every time it overflows.
+const MAX_AUTOCOMPACT_FAILS = 3
 
 // Convert a Tool's zod inputSchema into the Anthropic tools param entry, optionally deferred.
 function toToolSchema(tool: Tool, defer: boolean): ToolSchema {
@@ -225,13 +250,22 @@ export async function* runAgent(
   let turns = 0
   // Compaction (layers 2/3) state: the full context size billed at the last API turn + where that
   // was, so the running estimate = tokensFromUsage(lastUsage) + char/4 of messages added since.
-  let lastUsage: Usage | undefined
-  let lastUsageAt = 0
+  // Seeded by seedCompact in collab (carry the anchor across an expert's wakes); undefined/0 otherwise so a
+  // solo run starts exactly as before. usageAt is clamped to the incoming length (a stale carry can't index
+  // past the array — slice would just be empty, but clamp keeps the intent obvious).
+  let lastUsage: Usage | undefined = params.seedCompact?.usage
+  let lastUsageAt = Math.min(params.seedCompact?.usageAt ?? 0, messages.length)
   const compactConfig: CompactConfig = { protocol: params.protocol, baseUrl, apiKey, model, signal: ctx.signal }
   const threshold = autocompactThreshold(contextWindow)
   const compactions = { micro: 0, auto: 0 } // → AgentResult, for run-stats
   let prevAutoTurn = -2 // turn index of the last proactive autocompact (thrash guard below)
   let autoFloorHit = false // a compact couldn't get the estimate back under the threshold — stop trying
+  // CC-style breaker, carried across collab wakes: consecutive proactive-autocompact failures. Carrying it in
+  // already-tripped means a prior wake exhausted the budget → don't even try this wake.
+  let consecutiveAutoFails = params.seedCompact?.autoFails ?? 0
+  if (consecutiveAutoFails >= MAX_AUTOCOMPACT_FAILS) autoFloorHit = true
+  // Anchor to hand back so the NEXT invocation (next wake) seeds from the expert's true cumulative context.
+  const carryOut = (): CompactCarry => ({ usage: lastUsage, usageAt: lastUsageAt, autoFails: consecutiveAutoFails })
   let reactiveCompacted = false // bounce guard: if a send overflows right after a reactive compact, fail
   // Transient-failure retry budget, PER request (reset after each successful send). A recoverable failure
   // — network drop / idle-timeout abort on a hung upstream (code 'network'), rate limit (429), or a 5xx /
@@ -428,6 +462,7 @@ export async function* runAgent(
           lastUsageAt = 0
           compactions.auto++
           prevAutoTurn = turns
+          consecutiveAutoFails = 0 // a real compaction succeeded → reset the cross-wake breaker
           appendTodoSnapshot(messages)
         } else {
           // B5/#10: autocompact returned the transcript UNCHANGED — the summary call failed (LLM error) or
@@ -437,6 +472,14 @@ export async function* runAgent(
           // prevAutoTurn so the thrash guard above disables proactive compaction next turn. The reactive
           // overflow path stays armed for a genuine overflow.
           prevAutoTurn = turns
+          // CC breaker: count this failure toward the cross-wake budget. The thrash guard above already
+          // disables proactive compaction for the rest of THIS wake; the counter carries the failure forward
+          // so a chronically-broken summarizer is abandoned after MAX_AUTOCOMPACT_FAILS wakes rather than
+          // retried once every wake for the whole run.
+          if (++consecutiveAutoFails >= MAX_AUTOCOMPACT_FAILS) {
+            autoFloorHit = true
+            console.warn(`[agent] autocompact breaker: ${consecutiveAutoFails} consecutive failures — proactive compaction disabled for this run`)
+          }
         }
       }
     }
@@ -530,6 +573,7 @@ export async function* runAgent(
           lastUsageAt = 0
           reactiveCompacted = true
           compactions.auto++
+          consecutiveAutoFails = 0 // the summarizer just worked → reset the cross-wake breaker
           appendTodoSnapshot(messages)
           continue
         }
@@ -542,7 +586,7 @@ export async function* runAgent(
       // A zero-content stream that resolves as the user cancels is an ABORT, not a completion/incompletion
       // or upstream fault — short-circuit before any other verdict (mirrors the tool-path abort guard).
       if (ctx.signal.aborted) {
-        return { reason: 'aborted', messages, turns, compactions }
+        return { reason: 'aborted', messages, turns, compactions, compact: carryOut() }
       }
       // A refusal (stop_reason: 'refusal') with no content would otherwise end on a silent empty turn that
       // reads as a successful "done". Surface it so the user sees the model declined (audit F20).
@@ -550,7 +594,7 @@ export async function* runAgent(
         const note: AgentMessage = { role: 'assistant', content: [{ type: 'text', text: 'The model declined to respond to this request (refusal).' }] }
         messages.push(note)
         yield { type: 'assistant', message: note, usage: assistant.usage }
-        return { reason: 'completed', messages, turns, compactions }
+        return { reason: 'completed', messages, turns, compactions, compact: carryOut() }
       }
       // A max_tokens turn whose ONLY block was a tool_use truncated mid-json had that block dropped by the
       // llm layer, landing here content-less WITH stopReason==='max_tokens'. That is an output-size cap, not
@@ -586,7 +630,7 @@ export async function* runAgent(
       // whose only edit failed then truncated still reads as incomplete (docs/empty-turn-after-work.md).
       const gatedNoEdits = Boolean(params.expectsFileChanges) && (ctx.writtenPaths?.size ?? 0) === 0
       console.warn(`[agent] empty turn after real work — ending the run as ${gatedNoEdits ? 'incomplete (gated, zero edits landed — upstream likely truncated)' : 'completed'} run=${ctx.runId}`)
-      return { reason: gatedNoEdits ? 'incomplete' : 'completed', messages, turns, compactions }
+      return { reason: gatedNoEdits ? 'incomplete' : 'completed', messages, turns, compactions, compact: carryOut() }
     }
 
     // Loop continues iff the assistant requested ≥1 tool — NOT based on stop_reason (§2.1). Compute this
@@ -644,7 +688,7 @@ export async function* runAgent(
         messages.push({ role: 'user', content: [{ type: 'text', text: VERIFY_NUDGE }] })
         continue
       }
-      return { reason: 'completed', messages, turns, compactions }
+      return { reason: 'completed', messages, turns, compactions, compact: carryOut() }
     }
 
     // The tools were already executing as they streamed in (StreamingToolExecutor); drain for results
@@ -699,16 +743,16 @@ export async function* runAgent(
     yield { type: 'tool_results', message: userMsg }
 
     turns += 1
-    if (ctx.signal.aborted) return { reason: 'aborted', messages, turns, compactions }
+    if (ctx.signal.aborted) return { reason: 'aborted', messages, turns, compactions, compact: carryOut() }
     // P2: a collab expert that called await_async / wait this turn has PARKED — end the turn NOW (runExpert
     // handles the park + auto-resume) instead of looping back, which would re-prompt the model to call
     // await_async AGAIN (the loop continues whenever ANY tool was used). Without this the model spams
     // await_async within one turn (observed ×19 on a single never-completing handle ≈ 18 wasted LLM rounds).
-    if (ctx.collab?.parkRequested()) return { reason: 'completed', messages, turns, compactions }
+    if (ctx.collab?.parkRequested()) return { reason: 'completed', messages, turns, compactions, compact: carryOut() }
     if (thrashStopAtTurn !== undefined && turns >= thrashStopAtTurn) {
       console.warn(`[agent] thrash stop run=${ctx.runId} turn=${turns} — same failure ${THRASH_STOP_AT}×, wrap-up window spent`)
-      return { reason: 'thrash_stop', messages, turns, compactions }
+      return { reason: 'thrash_stop', messages, turns, compactions, compact: carryOut() }
     }
-    if (maxTurns !== undefined && turns >= maxTurns) return { reason: 'max_turns', messages, turns, compactions }
+    if (maxTurns !== undefined && turns >= maxTurns) return { reason: 'max_turns', messages, turns, compactions, compact: carryOut() }
   }
 }

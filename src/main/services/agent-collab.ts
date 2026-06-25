@@ -8,7 +8,7 @@ import { dataDir } from '../db/connection'
 import { join } from 'node:path'
 import type { AgentContext, PermissionRequest, PermissionDecision, StudioLensResult } from '../agent/context'
 import type { AgentLlmEvent } from '../agent/llm'
-import { runAgent, type AgentEvent, type AgentResult } from '../agent/loop'
+import { runAgent, type AgentEvent, type AgentResult, type CompactCarry } from '../agent/loop'
 import { promptTokensFromUsage } from '../agent/compact'
 import { isContentBlock } from '../agent/types'
 import type { ServerToolSchema } from '../agent/types'
@@ -160,6 +160,10 @@ export async function runCollabSession(
     // doesn't forget what it read between being woken.
     const readFileState: AgentContext['readFileState'] = new Map()
     const todos: AgentContext['todos'] = []
+    // §4a — the compaction anchor persists across this expert's mailbox wakes. Each wake seeds runAgent with
+    // it so the turn-1 estimate sees the expert's TRUE cumulative context (not char/4 of one wake) → autocompact
+    // fires on time instead of overshooting. Starts empty → the first wake behaves exactly as before.
+    let compactCarry: CompactCarry = { usageAt: 0, autoFails: 0 }
     const toolNames = new Map<string, string>() // tool_use id → name, to pair tool:post with its tool (audit)
     // Per-expert language server (dev roles) — Shuri's TS frontend benefits most; persists across this
     // expert's turns, lazily spawns on the first lsp query, disposed when the collaboration ends.
@@ -250,6 +254,7 @@ export async function runCollabSession(
           ctx,
           contextWindow: x.contextWindow ?? 200_000,
           thinking: x.thinking,
+          seedCompact: compactCarry, // §4a — carry the anchor in from the prior wake
           onStream: (ev) => hooks.onExpertStream(x.roleId, ev),
         })
         let result!: AgentResult
@@ -296,6 +301,7 @@ export async function runCollabSession(
         cacheReadByRole.set(x.roleId, turnCacheRead) // overwrite with this run's last cache-read share
         outTokensByRole.set(x.roleId, (outTokensByRole.get(x.roleId) ?? 0) + turnOut)
         reasonByRole.set(x.roleId, result.reason)
+        compactCarry = result.compact // §4a — hand the anchor to the next wake
         return result.messages
       },
     }
