@@ -41,6 +41,11 @@ export interface PanelHandle {
 export interface ReadFileEntry {
   content: string
   mtimeMs: number
+  // True only when a Read RETURNED the entire file (BOF→EOF) to the model — not a slice, and not a read that
+  // over-cap-threw before returning. The §3a unchanged-re-read stub fires only when this holds: a body that
+  // was cached for the stale-write guard but never fully SHOWN must not masquerade as "already above".
+  // Write/Edit/MultiEdit leave it unset (a re-read after an edit returns the full body rather than a stub).
+  returnedFull?: boolean
 }
 
 // One file the agent CREATED or MODIFIED this run (path relative to cwd + its final content). This is the

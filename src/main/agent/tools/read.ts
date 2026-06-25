@@ -92,23 +92,20 @@ export const readTool = buildTool<typeof inputSchema, string>({
     if (st.size > MAX_BYTES && !input.limit) {
       throw new Error(`File is ${st.size} bytes; pass a limit to read a slice (cap ${MAX_BYTES}).`)
     }
-    // §3a — unchanged FULL re-read → 1-line stub instead of re-dumping the whole file into context. The mtime
-    // match proves the bytes are identical to what was already returned above; offset/limit deliberately
-    // bypasses (a narrow re-read executes). Recoverable: if that earlier copy was compacted away, the stub
-    // tells the model to re-read with offset=1 to force the content back.
+    // §3a — unchanged FULL re-read → 1-line stub instead of re-dumping the whole file into context. Fires ONLY
+    // when the prior read RETURNED THE ENTIRE FILE (prior.returnedFull): a body that was cached for the stale
+    // guard but never fully shown — a sliced read, or a read that over-cap-threw before returning — must NOT
+    // masquerade as "already above". The mtime match proves the bytes are identical; offset/limit bypasses.
+    // Recoverable: if that earlier copy was compacted away, re-read with offset=1 to force the content back.
     const prior = ctx.readFileState.get(abs)
-    if (prior && prior.mtimeMs === st.mtimeMs && !input.offset && !input.limit) {
+    if (prior && prior.returnedFull && prior.mtimeMs === st.mtimeMs && !input.offset && !input.limit) {
       ctx.readFileState.delete(abs) // bump LRU recency without touching disk
       ctx.readFileState.set(abs, prior)
       return {
-        data: `(${input.file_path} unchanged since your last read — ${st.size} bytes omitted, it's already above. If you no longer have it, re-read with offset=1 to force the full content.)`,
+        data: `(${input.file_path} unchanged since your last full read — ${st.size} bytes omitted, the content is already above. If you no longer have it, re-read with offset=1 to force it back.)`,
       }
     }
     const raw = await readFile(abs, 'utf-8')
-    ctx.readFileState.delete(abs) // re-read bumps the file to newest (LRU) before re-inserting
-    ctx.readFileState.set(abs, { content: raw, mtimeMs: st.mtimeMs }) // for stale-write guard
-    evictReadState(ctx.readFileState, ctx.writtenPaths) // §3b — bound retained full-content (written files exempt)
-
     const lines = raw.split('\n')
     const start = input.offset ? input.offset - 1 : 0
     const end = input.limit ? start + input.limit : Math.min(start + DEFAULT_LINE_LIMIT, lines.length)
@@ -119,9 +116,10 @@ export const readTool = buildTool<typeof inputSchema, string>({
         return `${String(start + i + 1).padStart(6)}\t${text}`
       })
       .join('\n')
-    // Over-cap slice → throw, never silently truncate. Read's output is deliberately never persisted
-    // (maxResultSizeChars: Infinity), so spilling isn't an option; a cheap, actionable error beats dropping
-    // 25K+ tokens of dense lines into the context. The model re-reads a narrower window with offset/limit.
+    // Over-cap slice → throw BEFORE caching or returning, never silently truncate. Read's output is deliberately
+    // never persisted (maxResultSizeChars: Infinity), so spilling isn't an option; a cheap, actionable error
+    // beats dropping 25K+ tokens of dense lines into the context. Throwing ahead of the readFileState set below
+    // also means a never-returned body is never cached, so §3a can't later (wrongly) call it "already above".
     if (numbered.length > MAX_OUTPUT_CHARS) {
       const lineCount = end - start
       const suggest = Math.max(1, Math.floor(lineCount / 4))
@@ -130,6 +128,13 @@ export const readTool = buildTool<typeof inputSchema, string>({
           `Re-read a smaller window with offset+limit (e.g. offset=${start + 1}, limit=${suggest}).`,
       )
     }
+    // The read WILL return → cache the body for the stale-write guard, flagging whether THIS read returned the
+    // whole file (BOF through EOF). Only a full return lets §3a later trust "already above"; a slice sets false.
+    // Re-read bumps LRU recency (delete+set); §3b then bounds the retained bodies (written files exempt).
+    const entry: ReadFileEntry = { content: raw, mtimeMs: st.mtimeMs, returnedFull: start === 0 && end >= lines.length }
+    ctx.readFileState.delete(abs)
+    ctx.readFileState.set(abs, entry)
+    evictReadState(ctx.readFileState, ctx.writtenPaths)
     // Signal there's more below the default slice so the model reads on with offset rather than assuming EOF.
     const more = !input.limit && lines.length > end ? `\n\n[${lines.length - end} more lines — continue with offset=${end + 1}]` : ''
     return { data: numbered + more }
