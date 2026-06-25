@@ -21,6 +21,7 @@ const PDF_MAX_BYTES = 20 * 1024 * 1024 // PDFs are binary + larger than text; ca
 const DEFAULT_LINE_LIMIT = 2000 // default slice when no limit given — a large file isn't dumped whole
 const MAX_LINE_CHARS = 2000 // truncate a single very long line (minified bundles) so one line can't flood the context
 const PDF_TEXT_MAX_CHARS = 100_000 // ~25K tokens — cap extracted PDF text instead of injecting a whole book
+const MAX_OUTPUT_CHARS = 100_000 // ~25K tokens — over this, throw (never silently truncate) so the model re-reads a narrower slice
 
 // Read (read-only) may also reach this run's OWN persisted session files under ~/.nsai/sessions/<conv> —
 // ExitPlanMode writes the approved plan there and persistLargeResult writes over-cap tool output there,
@@ -87,6 +88,17 @@ export const readTool = buildTool<typeof inputSchema, string>({
         return `${String(start + i + 1).padStart(6)}\t${text}`
       })
       .join('\n')
+    // Over-cap slice → throw, never silently truncate. Read's output is deliberately never persisted
+    // (maxResultSizeChars: Infinity), so spilling isn't an option; a cheap, actionable error beats dropping
+    // 25K+ tokens of dense lines into the context. The model re-reads a narrower window with offset/limit.
+    if (numbered.length > MAX_OUTPUT_CHARS) {
+      const lineCount = end - start
+      const suggest = Math.max(1, Math.floor(lineCount / 4))
+      throw new Error(
+        `This ${lineCount}-line slice is ${numbered.length} chars (cap ${MAX_OUTPUT_CHARS}). ` +
+          `Re-read a smaller window with offset+limit (e.g. offset=${start + 1}, limit=${suggest}).`,
+      )
+    }
     // Signal there's more below the default slice so the model reads on with offset rather than assuming EOF.
     const more = !input.limit && lines.length > end ? `\n\n[${lines.length - end} more lines — continue with offset=${end + 1}]` : ''
     return { data: numbered + more }
