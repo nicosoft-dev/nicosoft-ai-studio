@@ -33,7 +33,7 @@ interface ResponsesBody {
   stream: true
   store: false
   instructions?: string
-  reasoning?: { effort: 'minimal' | 'none' | 'low' | 'medium' | 'high' | 'xhigh' }
+  reasoning?: { effort: 'minimal' | 'none' | 'low' | 'medium' | 'high' | 'xhigh'; summary?: string }
   prompt_cache_key?: string
 }
 
@@ -86,7 +86,9 @@ function buildBody(req: ChatRequest): ResponsesBody {
   const instructions = toInstructions(req.messages)
   body.instructions = instructions ?? DEFAULT_INSTRUCTIONS
   // OpenAI Responses has no 'max' tier — clamp Anthropic's top tier to the highest OpenAI accepts.
-  if (req.thinking?.effort) body.reasoning = { effort: req.thinking.effort === 'max' ? 'xhigh' : req.thinking.effort }
+  // summary:'auto' surfaces a human-readable summary of the model's reasoning (streamed via
+  // response.reasoning_summary_text.delta) so plain chat shows the thinking too — same as the agent path.
+  if (req.thinking?.effort) body.reasoning = { effort: req.thinking.effort === 'max' ? 'xhigh' : req.thinking.effort, summary: 'auto' }
   if (req.cacheEnabled) body.prompt_cache_key = stablePromptCacheKey(req)
   return body
 }
@@ -131,6 +133,9 @@ export const chatOpenAI: ChatFn = async (req: ChatRequest, onDelta: OnDelta): Pr
           text += ev.delta
           onDelta({ text: ev.delta })
         }
+      } else if (ev.type === 'response.reasoning_summary_text.delta') {
+        // Visible reasoning summary (requested via summary:'auto') → a reasoning delta, rendered like model text.
+        if (typeof ev.delta === 'string' && ev.delta.length > 0) onDelta({ reasoning: ev.delta })
       } else if (ev.type === 'response.completed') {
         const u = ev.response?.usage
         if (u) {

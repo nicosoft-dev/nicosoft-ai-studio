@@ -6,6 +6,7 @@ import type {
   ChatSendInput,
   ChatCompressInput,
   ChatDelta,
+  ChatReasoning,
   ChatDone,
   ChatErrorDto,
   AgentRunInput,
@@ -216,6 +217,11 @@ const api = {
       const h = (_e: IpcRendererEvent, d: ChatDelta): void => cb(d)
       ipcRenderer.on('chat:delta', h)
       return () => ipcRenderer.off('chat:delta', h)
+    },
+    onReasoning: (cb: (d: ChatReasoning) => void): (() => void) => {
+      const h = (_e: IpcRendererEvent, d: ChatReasoning): void => cb(d)
+      ipcRenderer.on('chat:reasoning', h)
+      return () => ipcRenderer.off('chat:reasoning', h)
     },
     onDone: (cb: (d: ChatDone) => void): (() => void) => {
       const h = (_e: IpcRendererEvent, d: ChatDone): void => cb(d)

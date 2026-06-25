@@ -114,6 +114,7 @@ export interface ToolResult {
 // readout can show both ↑in and ↓out together during the turn instead of an estimate.
 export type OnDelta = (delta: {
   text?: string
+  reasoning?: string // the model's VISIBLE thinking (reasoning summary) — surfaced like text, rendered the same way
   usage?: { inTokens: number; outTokens: number; cachedTokens?: number } // cachedTokens = cache-read share of inTokens (cache-aware ↑ split)
   turnFinalUsage?: { inTokens: number; outTokens: number; cacheReadTokens: number; cacheCreationTokens: number }
 }) => void

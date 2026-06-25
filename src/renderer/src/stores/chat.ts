@@ -172,6 +172,10 @@ export const useChat = create<ChatState>((set, get) => {
       appendDelta(meta.convId, d.text)
       clearRetry(meta.convId)
     })
+    api.onReasoning((d) => {
+      const meta = streamMeta.get(d.streamId)
+      if (meta) appendReasoning(meta.convId, d.text)
+    })
     api.onRetry((d) => {
       const meta = streamMeta.get(d.streamId)
       if (!meta) return

@@ -61,6 +61,11 @@ export interface ChatDelta {
   streamId: string
   text: string
 }
+// Plain-chat visible thinking (reasoning summary) streamed live → rendered like any model text.
+export interface ChatReasoning {
+  streamId: string
+  text: string
+}
 export interface ChatDone {
   streamId: string
   text: string

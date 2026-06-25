@@ -22,6 +22,7 @@ export async function send(
   input: ChatSendInput,
   cb: {
     onDelta: (text: string) => void
+    onReasoning?: (text: string) => void // the model's VISIBLE thinking (reasoning summary) → its own reasoning delta
     onUsage?: (inputTokens: number, outputTokens?: number, cachedTokens?: number) => void
     onTurnFinalUsage?: (usage: { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number }) => void
     onRetry?: (info: { attempt: number; max: number; code: string; waitMs: number }) => void
@@ -85,6 +86,7 @@ export async function send(
             emittedAny = true
             cb.onDelta(d.text)
           }
+          if (d.reasoning) cb.onReasoning?.(d.reasoning)
           if (d.usage) cb.onUsage?.(d.usage.inTokens, d.usage.outTokens, d.usage.cachedTokens)
           if (d.turnFinalUsage) {
             cb.onTurnFinalUsage?.({
