@@ -143,6 +143,26 @@ function isSynthesis(msg: ChatMessage): boolean {
   return msg.role === 'assistant' && (msg.expertId ?? null) === 'coordinator' && Array.isArray(msg.dispatch) && msg.dispatch.length > 0
 }
 
+// The model's VISIBLE thinking (Anthropic extended thinking / OpenAI reasoning summary) — a dim, collapsible
+// "Thinking" section. Default-open so terse reasoning models (gpt-5.x, which narrate little in the answer) show
+// what they're doing inline; click to fold it away. Renders markdown (the summary carries bold section titles).
+function ReasoningBlock({ text }: { text: string }): ReactElement {
+  const [open, setOpen] = useState(true)
+  return (
+    <div className={'seg-reasoning' + (open ? ' open' : '')}>
+      <button className="sr-toggle" onClick={() => setOpen((o) => !o)}>
+        <span className="sr-chev">›</span>
+        <span>Thinking</span>
+      </button>
+      {open ? (
+        <div className="sr-body">
+          <Markdown>{text}</Markdown>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 /* — The body of an assistant RUN, walked at BLOCK level across all its turns in emission order. Model text
  *   NEVER folds (assistant text breaks collapse groups): narration and answers render in
  *   place, permanently visible, and they BREAK the tool run — so runs are small count-summary lines sitting
@@ -185,6 +205,15 @@ function RunBody({ msgs, onOpenImage, live }: { msgs: ChatMessage[]; onOpenImage
         if (!b.text) return
         flushFold(false)
         out.push(<Markdown key={`t${m.id}:${bi}`}>{b.text}</Markdown>)
+        return
+      }
+      if (b.kind === 'reasoning') {
+        // The model's VISIBLE thinking → a distinct dim, collapsible "Thinking" section. Flush the tool fold
+        // first so the reasoning lands chronologically where the model paused to think — breaking a long silent
+        // tool streak (terse reasoning models) into readable chunks instead of one opaque count summary.
+        if (!b.text.trim()) return
+        flushFold(false)
+        out.push(<ReasoningBlock key={`r${m.id}:${bi}`} text={b.text} />)
         return
       }
       if (b.kind === 'compaction') {

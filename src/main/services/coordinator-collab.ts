@@ -86,6 +86,9 @@ export async function runCollaboration(
         case 'text':
           cb.onDelta(roleId, ev.delta)
           break
+        case 'reasoning':
+          cb.onReasoning?.(roleId, ev.delta)
+          break
         case 'tool_use_start':
           cb.onToolStart?.(roleId, ev.id, ev.name)
           break

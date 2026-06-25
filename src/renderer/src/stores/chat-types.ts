@@ -20,7 +20,11 @@ export interface ToolCall {
 // lets the renderer interleave reasoning text and tool cards chronologically instead of stacking all text
 // above all cards. msg.text / msg.tools are kept alongside for everything that reads them (live readout,
 // token math, persistence, stop() cleanup); blocks is purely the ORDER overlay.
-export type MsgBlock = { kind: 'text'; text: string } | { kind: 'tool'; id: string } | { kind: 'compaction'; tokens: number; auto: boolean }
+export type MsgBlock =
+  | { kind: 'text'; text: string }
+  | { kind: 'tool'; id: string }
+  | { kind: 'compaction'; tokens: number; auto: boolean }
+  | { kind: 'reasoning'; text: string } // the model's VISIBLE thinking (extended thinking / reasoning summary) — rendered as a distinct dim "Thinking" block, interleaved before the turn's tools
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'

@@ -191,6 +191,9 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
           text += ev.delta
           if (!quiet) cb.onDelta(roleId, ev.delta)
           else if (streamCard) cb.onToolEvent?.(roleId, { type: 'sub_tool_delta', parentToolId: streamCard.parentToolId, toolUseId: streamCard.toolUseId, delta: ev.delta })
+        } else if (ev.type === 'reasoning') {
+          // VISIBLE thinking → its own Thinking block; never folded into `text` (the answer) and never leaked onto a quiet verifier segment.
+          if (!quiet) cb.onReasoning?.(roleId, ev.delta)
         } else if (quiet) {
           return
         } else if (ev.type === 'tool_use_start') {

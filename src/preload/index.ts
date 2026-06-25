@@ -30,6 +30,7 @@ import type {
   AgentToolStart,
   AgentAssistant,
   AgentCompaction,
+  AgentReasoning,
   AgentToolResults,
   AgentSubToolStart,
   AgentSubToolDone,
@@ -54,6 +55,7 @@ import type {
   CoordinatorToolStart,
   CoordinatorAssistant,
   CoordinatorCompaction,
+  CoordinatorReasoning,
   CoordinatorToolResults,
   CoordinatorSubToolStart,
   CoordinatorSubToolDone,
@@ -243,6 +245,7 @@ const api = {
     respondQuestion: (resp: AgentQuestionResponse): Promise<void> =>
       ipcRenderer.invoke('agent:question:respond', resp),
     onDelta: (cb: (d: AgentTextDelta) => void): (() => void) => agentListen('agent:delta', cb),
+    onReasoning: (cb: (d: AgentReasoning) => void): (() => void) => agentListen('agent:reasoning', cb),
     // 批C2b: a parked solo run resumed itself on a new stream — bind it to the conv so the resumed turn streams in.
     onResumeStream: (cb: (d: AgentResumeStream) => void): (() => void) => agentListen('agent:resume-stream', cb),
     onToolStart: (cb: (d: AgentToolStart) => void): (() => void) => agentListen('agent:tool:start', cb),
@@ -272,6 +275,7 @@ const api = {
     onStepStart: (cb: (d: CoordinatorStepStart) => void): (() => void) => agentListen('coordinator:step:start', cb),
     onExpertActive: (cb: (d: CoordinatorExpertActive) => void): (() => void) => agentListen('coordinator:expert:active', cb),
     onDelta: (cb: (d: CoordinatorStepDelta) => void): (() => void) => agentListen('coordinator:delta', cb),
+    onReasoning: (cb: (d: CoordinatorReasoning) => void): (() => void) => agentListen('coordinator:reasoning', cb),
     onStepDone: (cb: (d: CoordinatorStepDone) => void): (() => void) => agentListen('coordinator:step:done', cb),
     onDone: (cb: (d: CoordinatorDoneDto) => void): (() => void) => agentListen('coordinator:done', cb),
     onError: (cb: (d: CoordinatorErrorDto) => void): (() => void) => agentListen('coordinator:error', cb),

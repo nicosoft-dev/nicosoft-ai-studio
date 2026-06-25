@@ -257,6 +257,11 @@ export interface AgentCompaction {
   kind: 'micro' | 'auto'
   freedTokens: number
 }
+// The model's VISIBLE thinking streamed live (Anthropic extended thinking / OpenAI reasoning summary) → the UI's Thinking block.
+export interface AgentReasoning {
+  streamId: string
+  text: string
+}
 // Results of the tools the turn requested (one per tool_use, paired by toolUseId).
 export interface AgentToolResults {
   streamId: string
@@ -299,6 +304,7 @@ export type AgentBlockDto =
   | { type: 'text'; text: string; citations?: { url: string; title?: string }[] } // citations: web_search sources for the answer
   | { type: 'tool_use'; id: string; name: string; input: unknown }
   | { type: 'server'; serverType: string; query?: string; url?: string } // web_search_call: query (search) / url (open_page — a visited site)
+  | { type: 'reasoning'; text: string } // the model's VISIBLE thinking (summary) — rendered as a distinct Thinking block, interleaved in emission order (before that turn's tools)
 // A permission request: the renderer shows an approval dialog and replies with the permissionId.
 export interface AgentPermissionRequest {
   streamId: string
@@ -359,7 +365,7 @@ export interface ToolCallDto {
 // One renderable unit of a rebuilt assistant run, in EMISSION order. A 'tool' block references a tool by
 // id in RunTranscript.tools. Lets a reopened conversation interleave reasoning text and tool cards exactly
 // as they streamed (mirrors the live MsgBlock in the renderer's chat store).
-export type RunBlockDto = { kind: 'text'; text: string } | { kind: 'tool'; id: string }
+export type RunBlockDto = { kind: 'text'; text: string } | { kind: 'tool'; id: string } | { kind: 'reasoning'; text: string }
 // One run's UI artifacts rebuilt from its transcript when reopening a past conversation: the tool
 // cards plus web_search's server-side activity (searched / visited sites) and the answer's citations.
 // `blocks` is the chronological text+tool sequence across all of the run's turns (for interleaved render).
@@ -413,6 +419,12 @@ export interface CoordinatorExpertActive {
   active: boolean
 }
 export interface CoordinatorStepDelta {
+  streamId: string
+  roleId: string
+  text: string
+}
+// A dispatched expert's VISIBLE thinking streamed live → its segment's Thinking block (parity with CoordinatorStepDelta).
+export interface CoordinatorReasoning {
   streamId: string
   roleId: string
   text: string

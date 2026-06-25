@@ -63,6 +63,22 @@ export function isContentBlock(b: AnyBlock): b is ContentBlock {
   return AGENT_BLOCK_TYPES.has(b.type)
 }
 
+// Extract the VISIBLE thinking text from a non-content (server/reasoning) block, across protocols:
+//   OpenAI reasoning item:  { type:'reasoning', summary:[{ type:'summary_text', text }] }  (summary='auto')
+//   Anthropic thinking:     a server block carrying { raw:{ thinking } }  (see llm.ts thinking_delta)
+// Returns '' for any other server block (web_search etc.). Lets the handlers surface reasoning as a distinct,
+// ordered UI block (a "Thinking" section) instead of dropping it as an opaque server block.
+export function reasoningText(b: AnyBlock): string {
+  const r = b as { type?: string; summary?: unknown; raw?: { thinking?: unknown } }
+  if (r.type === 'reasoning' && Array.isArray(r.summary)) {
+    return (r.summary as Array<{ text?: unknown }>)
+      .map((s) => (typeof s.text === 'string' ? s.text : ''))
+      .filter(Boolean)
+      .join('\n\n')
+  }
+  return typeof r.raw?.thinking === 'string' ? r.raw.thinking : ''
+}
+
 export interface AgentMessage {
   role: 'user' | 'assistant'
   content: AnyBlock[]

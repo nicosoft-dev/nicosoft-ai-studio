@@ -108,7 +108,7 @@ interface ResponsesToolBody {
   parallel_tool_calls: boolean
   stream: true
   store: false
-  reasoning?: { effort: string }
+  reasoning?: { effort: string; summary?: string }
   include?: string[]
   prompt_cache_key?: string
 }
@@ -118,6 +118,7 @@ interface RespEvent {
   type: string
   delta?: string
   item_id?: string
+  summary_index?: number // reasoning_summary_part.added: which summary part (the model can split its thinking into several)
   item?: { type?: string; id?: string; call_id?: string; name?: string; arguments?: string; content?: unknown; [k: string]: unknown }
   response?: {
     usage?: { input_tokens?: number; output_tokens?: number; input_tokens_details?: { cached_tokens?: number } }
@@ -144,7 +145,10 @@ export async function* callWithToolsOpenAI(
   }
   // Reasoning: effort + carry encrypted_content across turns (doc 16 §3.5 — don't lose reasoning).
   if (req.thinking?.effort) {
-    body.reasoning = { effort: req.thinking.effort }
+    // summary: 'auto' makes the model emit a human-readable summary of its reasoning (streamed via
+    // response.reasoning_summary_text.delta) — the VISIBLE thinking. encrypted_content still round-trips the
+    // full reasoning verbatim so the server keeps its context across turns; the summary is display-only.
+    body.reasoning = { effort: req.thinking.effort, summary: 'auto' }
     body.include = ['reasoning.encrypted_content']
   }
   if (req.cacheEnabled) body.prompt_cache_key = stablePromptCacheKey(req)
@@ -220,6 +224,21 @@ export async function* callWithToolsOpenAI(
             texts.set(ev.item_id, (texts.get(ev.item_id) ?? '') + ev.delta)
             onEvent?.({ type: 'text', delta: ev.delta })
           }
+          break
+        }
+        case 'response.reasoning_summary_text.delta': {
+          // Reasoning models (gpt-5.x) stream a human-readable summary of their thinking here when summary='auto'
+          // was requested. Surface it to the UI's Thinking block — parity with output_text.delta. The full
+          // reasoning still round-trips encrypted on the reasoning item (output_item.done below).
+          if (typeof ev.delta === 'string' && ev.delta.length > 0) {
+            envelope.markProductive()
+            onEvent?.({ type: 'reasoning', delta: ev.delta })
+          }
+          break
+        }
+        case 'response.reasoning_summary_part.added': {
+          // The model split its thinking into multiple summary parts — separate consecutive parts with a blank line.
+          if (typeof ev.summary_index === 'number' && ev.summary_index > 0) onEvent?.({ type: 'reasoning', delta: '\n\n' })
           break
         }
         case 'response.output_item.done': {

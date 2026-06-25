@@ -64,6 +64,7 @@ export type AgentLlmEvent =
   | { type: 'sub_tool_delta'; parentToolId: string; toolUseId: string; delta: string; subAgentId?: string } // a quiet sub-agent's live text (panel finder/skeptic/reader) → streamed onto its card row (workflow /workflows parity)
   | { type: 'usage'; inputTokens: number; outputTokens: number; cachedTokens?: number } // in-flight request's REAL usage per chunk; cachedTokens = cache-read share of inputTokens (cache-aware split in the ↑ readout)
   | { type: 'turn-final'; usage: FinalUsage } // exactly-once final usage for accumulation
+  | { type: 'reasoning'; delta: string } // the model's VISIBLE thinking — Anthropic extended-thinking text / OpenAI reasoning-summary text — streamed to a distinct UI "Thinking" block (parity with the 'text' channel)
 
 export interface FinalUsage {
   inputTokens: number
@@ -216,6 +217,7 @@ async function* callWithToolsAnthropic(
             blk.json += d.partial_json // accumulate server_tool_use input (not surfaced to the loop)
           } else if (d?.type === 'thinking_delta' && blk?.type === 'server' && typeof d.thinking === 'string') {
             blk.raw.thinking = ((blk.raw.thinking as string) ?? '') + d.thinking // extended-thinking text
+            onEvent?.({ type: 'reasoning', delta: d.thinking }) // surface the thinking to the UI's Thinking block (the server block still round-trips verbatim with its signature)
           } else if (d?.type === 'signature_delta' && blk?.type === 'server' && typeof d.signature === 'string') {
             blk.raw.signature = ((blk.raw.signature as string) ?? '') + d.signature // thinking block signature
           }

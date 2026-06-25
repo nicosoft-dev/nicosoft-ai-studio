@@ -15,7 +15,8 @@ import { dataDir } from '../db/connection'
 import { join } from 'node:path'
 import { ulid } from '../db/id'
 import { buildToolsParam } from '../agent/loop'
-import type { ServerToolSchema } from '../agent/types'
+import type { ServerToolSchema, AnyBlock } from '../agent/types'
+import { reasoningText } from '../agent/types'
 import { lspTool } from '../agent/tools/lsp'
 import { awaitAsyncTool } from '../agent/tools/await-async'
 import { launchAsyncTool } from '../agent/tools/launch-async'
@@ -290,11 +291,16 @@ export function readTranscript(convId: string): Record<string, RunTranscript> {
             }
           }
         } else if (b.type === 'web_search_call') {
-          // search → query, open_page → url (visited site). reasoning/other server blocks aren't shown.
+          // search → query, open_page → url (visited site). Other opaque server blocks aren't shown.
           const sv: { serverType: string; query?: string; url?: string } = { serverType: b.type }
           if (b.action?.query) sv.query = b.action.query
           if (b.action?.url) sv.url = b.action.url
           run.servers.push(sv)
+        } else if (b.type === 'reasoning') {
+          // Visible thinking persisted in the transcript → restore as a reasoning block so a reopened
+          // conversation renders the Thinking section exactly like the live run (parity with appendReasoning).
+          const r = reasoningText(b as unknown as AnyBlock)
+          if (r.trim()) run.blocks.push({ kind: 'reasoning', text: r })
         }
       }
     } else if (obj.event.type === 'tool_results') {

@@ -48,6 +48,7 @@ export interface CoordinatorCallbacks {
   // segmentKind (closure-loop): 'verifier' streams this step as an independent "· Verifier" segment. Undefined = normal.
   onStepStart: (roleId: string, dispatch: string[] | null, model: string, segmentKind?: string) => void
   onDelta: (roleId: string, text: string) => void
+  onReasoning?: (roleId: string, text: string) => void // the expert's VISIBLE thinking (reasoning summary) streamed live → its Thinking block; optional (gate/verification paths don't surface it)
   onStepDone: (roleId: string, text: string, inputTokens: number, outputTokens?: number, sentTokens?: number) => void
   onUsage?: (roleId: string, inputTokens: number, outputTokens?: number, cachedTokens?: number) => void // live ↑in + ↓out per chunk (cachedTokens = cache-read share); roleId tags the dispatched step so the renderer isolates per-segment (coordinator path)
   onTurnFinalUsage?: (usage: { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number }) => void

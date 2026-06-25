@@ -36,6 +36,18 @@ export const useChat = create<ChatState>((set, get) => {
     cur.blocks = blocks
   }
 
+  // Append a reasoning (visible-thinking) delta into the ordered block list: extend the trailing reasoning
+  // block, or open a new one if the list is empty or ends in a different block kind. Reasoning is kept SEPARATE
+  // from cur.text (the answer) — it lives only in blocks, rendered as a distinct "Thinking" section that breaks
+  // the tool fold exactly where the model paused to think.
+  const pushReasoningDelta = (cur: ChatMessage, text: string): void => {
+    const blocks = cur.blocks ? [...cur.blocks] : []
+    const last = blocks[blocks.length - 1]
+    if (last && last.kind === 'reasoning') blocks[blocks.length - 1] = { kind: 'reasoning', text: last.text + text }
+    else blocks.push({ kind: 'reasoning', text })
+    cur.blocks = blocks
+  }
+
   // Append a text delta to the last streaming assistant message; start a fresh one if the last isn't
   // streaming. Agent turns are multi-step (assistant → tool results → assistant …) so each new turn
   // becomes its own message, leaving the prior turn's text + tool cards intact.
@@ -49,6 +61,21 @@ export const useChat = create<ChatState>((set, get) => {
       }
       cur.text += text
       pushTextDelta(cur, text)
+      return { byConversation: { ...s.byConversation, [convId]: msgs } }
+    })
+  }
+
+  // Append a reasoning (visible-thinking) delta to the last streaming assistant message; start a fresh one if
+  // the last isn't streaming. Mirrors appendDelta but routes to the reasoning block (never cur.text).
+  const appendReasoning = (convId: string, text: string): void => {
+    set((s) => {
+      const msgs = (s.byConversation[convId] ?? []).map((m) => ({ ...m }))
+      let cur = msgs[msgs.length - 1]
+      if (!cur || cur.role !== 'assistant' || !cur.streaming) {
+        cur = { id: uid(), role: 'assistant', text: '', streaming: true }
+        msgs.push(cur)
+      }
+      pushReasoningDelta(cur, text)
       return { byConversation: { ...s.byConversation, [convId]: msgs } }
     })
   }
@@ -83,6 +110,23 @@ export const useChat = create<ChatState>((set, get) => {
         }
       }
       return s // no matching streaming bubble yet (step:start creates it first) — drop rather than mis-route
+    })
+  }
+
+  // Coordinator: route a dispatched expert's visible-thinking delta to ITS streaming bubble's reasoning block
+  // (parity with appendDeltaToRole). Never touches cur.text — reasoning stays out of the answer prose.
+  const appendReasoningToRole = (convId: string, roleId: string, text: string): void => {
+    set((s) => {
+      const msgs = (s.byConversation[convId] ?? []).map((m) => ({ ...m }))
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === 'assistant' && msgs[i].streaming && msgs[i].expertId === roleId) {
+          const cur = { ...msgs[i] }
+          pushReasoningDelta(cur, text)
+          msgs[i] = cur
+          return { byConversation: { ...s.byConversation, [convId]: msgs } }
+        }
+      }
+      return s
     })
   }
 
@@ -205,6 +249,10 @@ export const useChat = create<ChatState>((set, get) => {
       appendDelta(meta.convId, d.text)
       clearRetry(meta.convId)
     })
+    ag.onReasoning((d) => {
+      const meta = agentMeta.get(d.streamId)
+      if (meta) appendReasoning(meta.convId, d.text)
+    })
     // A tool just started (streamed before the turn finishes) — show a running card immediately so the
     // user sees the call in flight instead of silence until onAssistant. The full input (and the card's
     // summary) arrives when the turn completes; onAssistant then overwrites cur.tools with the authoritative
@@ -292,8 +340,17 @@ export const useChat = create<ChatState>((set, get) => {
         // now interleaves text and tool cards exactly as the model emitted them. (server blocks render
         // separately as faint status rows, so they're not part of the interleave.)
         cur.blocks = d.blocks
-          .filter((b): b is { type: 'text'; text: string } | { type: 'tool_use'; id: string; name: string; input: unknown } => b.type === 'text' || b.type === 'tool_use')
-          .map((b) => (b.type === 'text' ? { kind: 'text' as const, text: b.text } : { kind: 'tool' as const, id: b.id }))
+          .filter(
+            (b): b is { type: 'text'; text: string } | { type: 'tool_use'; id: string; name: string; input: unknown } | { type: 'reasoning'; text: string } =>
+              b.type === 'text' || b.type === 'tool_use' || b.type === 'reasoning'
+          )
+          .map((b) =>
+            b.type === 'text'
+              ? { kind: 'text' as const, text: b.text }
+              : b.type === 'reasoning'
+                ? { kind: 'reasoning' as const, text: b.text }
+                : { kind: 'tool' as const, id: b.id }
+          )
         cur.servers = d.blocks
           .filter((b): b is { type: 'server'; serverType: string; query?: string; url?: string } => b.type === 'server' && SHOWN_SERVER_BLOCKS.has(b.serverType))
           .map((b) => ({ serverType: b.serverType, query: b.query, url: b.url }))
@@ -515,6 +572,10 @@ export const useChat = create<ChatState>((set, get) => {
     at.onDelta((d) => {
       const meta = coordinatorMeta.get(d.streamId)
       if (meta) appendDeltaToRole(meta.convId, d.roleId, d.text)
+    })
+    at.onReasoning((d) => {
+      const meta = coordinatorMeta.get(d.streamId)
+      if (meta) appendReasoningToRole(meta.convId, d.roleId, d.text)
     })
     at.onStepDone((d) => {
       const meta = coordinatorMeta.get(d.streamId)

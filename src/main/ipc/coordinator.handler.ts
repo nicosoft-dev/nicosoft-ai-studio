@@ -10,7 +10,7 @@ import { dataDir } from '../db/connection'
 import { join, resolve, sep } from 'node:path'
 import { ulid } from '../db/id'
 import type { PermissionDecision } from '../agent/context'
-import { isContentBlock } from '../agent/types'
+import { isContentBlock, reasoningText } from '../agent/types'
 import * as coordinatorService from '../services/coordinator.service'
 import { LlmError } from '../llm/types'
 import { broadcastConvImage, broadcastConvTodos, broadcastUsage } from './usage-broadcast'
@@ -21,6 +21,7 @@ import type {
   CoordinatorDispatchEvent,
   CoordinatorStepStart,
   CoordinatorStepDelta,
+  CoordinatorReasoning,
   CoordinatorStepDone,
   CoordinatorDoneDto,
   CoordinatorErrorDto,
@@ -78,6 +79,10 @@ export function registerCoordinatorHandlers(): void {
             const ev: CoordinatorStepDelta = { streamId, roleId, text }
             send('coordinator:delta', ev)
           },
+          onReasoning: (roleId, text) => {
+            const ev: CoordinatorReasoning = { streamId, roleId, text }
+            send('coordinator:reasoning', ev)
+          },
           onStepDone: (roleId, text, inputTokens, outputTokens, sentTokens) => {
             const ev: CoordinatorStepDone = { streamId, roleId, text, inputTokens, outputTokens, sentTokens }
             send('coordinator:step:done', ev)
@@ -120,6 +125,10 @@ export function registerCoordinatorHandlers(): void {
               const blocks: AgentBlockDto[] = []
               for (const b of evt.message.content) {
                 if (!isContentBlock(b)) {
+                  // Reasoning/thinking server block → surface its VISIBLE summary as a distinct ordered block
+                  // (interleaved before this turn's tools, so it breaks the tool fold and shows what the model thought).
+                  const reasoning = reasoningText(b)
+                  if (reasoning) { blocks.push({ type: 'reasoning', text: reasoning }); continue }
                   // web_search_call action: search → query, open_page → url (visited site). Surface both.
                   const action = (b as { action?: { query?: string; url?: string } }).action
                   const dto: AgentBlockDto = { type: 'server', serverType: b.type }

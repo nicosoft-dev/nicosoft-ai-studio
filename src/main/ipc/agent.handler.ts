@@ -1,7 +1,7 @@
 import { ipcMain, type WebContents } from 'electron'
 import { ulid } from '../db/id'
 import type { PermissionDecision } from '../agent/context'
-import { isContentBlock } from '../agent/types'
+import { isContentBlock, reasoningText } from '../agent/types'
 import { LlmError } from '../llm/types'
 import { broadcastConvImage, broadcastConvTodos, broadcastUsage } from './usage-broadcast'
 import { StreamRegistry } from './stream-lifecycle'
@@ -76,6 +76,7 @@ function startAgentRun(input: AgentRunInput, sender: WebContents, opts?: { resum
       {
           onStream: (ev) => {
             if (ev.type === 'text') send('agent:delta', { streamId, text: ev.delta })
+            else if (ev.type === 'reasoning') send('agent:reasoning', { streamId, text: ev.delta })
             else if (ev.type === 'tool_use_start') send('agent:tool:start', { streamId, id: ev.id, name: ev.name })
             else if (ev.type === 'sub_tool_start') send('agent:sub-tool:start', { streamId, ...ev })
             else if (ev.type === 'sub_tool_done') send('agent:sub-tool:done', { streamId, ...ev })
@@ -101,6 +102,9 @@ function startAgentRun(input: AgentRunInput, sender: WebContents, opts?: { resum
               const blocks: AgentBlockDto[] = []
               for (const b of ev.message.content) {
                 if (!isContentBlock(b)) {
+                  // Reasoning/thinking server block → surface its VISIBLE summary as a distinct ordered block.
+                  const reasoning = reasoningText(b)
+                  if (reasoning) { blocks.push({ type: 'reasoning', text: reasoning }); continue }
                   // web_search_call action: search → query, open_page → url (the visited site). Surface both.
                   const action = (b as { action?: { query?: string; url?: string } }).action
                   const dto: AgentBlockDto = { type: 'server', serverType: b.type }
