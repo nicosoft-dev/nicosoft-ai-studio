@@ -198,7 +198,13 @@ export function summarizeRun(tools: ToolCall[]): string {
     }
   }
   const parts = [...cats.values()].map((c) => c.phrase(c.files ? c.files.size : c.count))
-  const joined = parts.join(', ')
+  // Adaptive truncation: a turn that touches many DISTINCT tool kinds (reasoning models fan out across custom
+  // tools — assign_task, plan-mode, wait, send_message, …) produces a dozen categories that overflow the
+  // collapsed summary into an unreadable, mid-word-clipped single line. Cap it; the rest fold into "+N more"
+  // and stay one click away (expand shows every individual call). Keeps the count summary scannable at a glance.
+  const MAX_PARTS = 6
+  const shown = parts.length > MAX_PARTS ? [...parts.slice(0, MAX_PARTS), `+${parts.length - MAX_PARTS} more`] : parts
+  const joined = shown.join(', ')
   return joined.charAt(0).toUpperCase() + joined.slice(1)
 }
 
