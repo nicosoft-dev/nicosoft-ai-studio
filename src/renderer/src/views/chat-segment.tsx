@@ -166,9 +166,20 @@ function RunBody({ msgs, onOpenImage, live }: { msgs: ChatMessage[]; onOpenImage
           ...(m.text ? [{ kind: 'text' as const, text: m.text }] : []),
           ...tools.map((tl) => ({ kind: 'tool' as const, id: tl.id }))
         ]
-    // Defensive: tools missing from the block list still render, appended at the message's end.
+    // Defensive: tools AND text missing from the block list still render, appended at the message's end.
+    // A coordinator/collab turn slots only TOOL cards into blocks — its answer text lives in m.text, never as a
+    // text block (chat.ts at.onAssistant: "Do NOT set text — step:done is authoritative"); a compaction-appended
+    // turn likewise can hold a blocks array with no text entry. Because a present-but-textless blocks array takes
+    // precedence over the text+tools reconstruction above, that answer text would silently vanish — leaving an
+    // empty segment (the "content gone + white bar" bug). Fold m.text back in as a trailing block, mirroring the
+    // reload safety-net in chat.ts openConversation so live and reopened transcripts render identically.
     const covered = new Set(blocks.flatMap((b) => (b.kind === 'tool' ? [b.id] : [])))
-    const walk: MsgBlock[] = [...blocks, ...tools.filter((tl) => !covered.has(tl.id)).map((tl) => ({ kind: 'tool' as const, id: tl.id }))]
+    const hasText = blocks.some((b) => b.kind === 'text' && !!b.text)
+    const walk: MsgBlock[] = [
+      ...blocks,
+      ...tools.filter((tl) => !covered.has(tl.id)).map((tl) => ({ kind: 'tool' as const, id: tl.id })),
+      ...(!hasText && m.text ? [{ kind: 'text' as const, text: m.text }] : [])
+    ]
     walk.forEach((b, bi) => {
       if (b.kind === 'text') {
         if (!b.text) return
@@ -177,11 +188,15 @@ function RunBody({ msgs, onOpenImage, live }: { msgs: ChatMessage[]; onOpenImage
         return
       }
       if (b.kind === 'compaction') {
+        // Only autocompaction (the lossy LLM summary) is surfaced. Microcompaction notes — non-lossy per-turn
+        // tool-output trimming — are no longer emitted (loop.ts), but transcripts recorded before that change
+        // persisted one note per turn; skip them so reopened/scrolled-back conversations aren't flooded.
+        if (!b.auto) return
         flushFold(false)
         const k = b.tokens >= 1000 ? `${Math.round(b.tokens / 1000)}k` : `${b.tokens}`
         out.push(
           <div key={`c${m.id}:${bi}`} className="seg-compaction">
-            🗜 {b.auto ? 'Summarized older context' : 'Cleared old tool output'} · freed ~{k} tokens to stay within the window
+            🗜 Summarized older context · freed ~{k} tokens to stay within the window
           </div>
         )
         return

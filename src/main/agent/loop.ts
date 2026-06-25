@@ -435,8 +435,10 @@ export async function* runAgent(
     const mc = microcompact(messages)
     messages = mc.messages
     if (mc.freedChars > 0) compactions.micro++
-    // Surface a MEANINGFUL micro-compaction to the UI (skip tiny per-turn clears to avoid spam).
-    if (mc.freedChars > 8000) yield { type: 'compaction', kind: 'micro', freedTokens: Math.ceil(mc.freedChars / CHARS_PER_TOKEN) }
+    // Microcompaction is NON-LOSSY housekeeping (clears aged-out tool-result BODIES from the model's context;
+    // the rendered tool cards stay intact — the user loses nothing) and it runs EVERY turn, so surfacing it
+    // floods the transcript with a note per turn. Only autocompaction below (the lossy LLM summary, which can
+    // make the model "forget") is worth a UI 'compaction' event.
     // Layer 3: autocompact when the running estimate crosses the threshold. The estimate subtracts the
     // chars microcompact just freed (still counted inside lastUsage.inTokens until the next real send)
     // and adds a fixed reserve for the gateway-injected system prompt estimateTokens can't see — but
