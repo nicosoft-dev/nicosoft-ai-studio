@@ -189,6 +189,22 @@ async function runReviewViaScript(
   const deps = makeLensDeps(opts)
   const panelId = panelCardId(stepId)
   const targetDesc = describeTarget(target)
+  // Resolve the orchestration path UP FRONT — canAuthorScript is a cheap slug check, it does NOT run the (slow)
+  // author LLM call — so the panel opens IMMEDIATELY, before authoring. A strong model self-AUTHORS a bespoke
+  // fan-out; everything else runs the fixed CODE_REVIEW_TEMPLATE.
+  const slug = rolesService.getBinding(reviewerRoleId)?.model ?? ''
+  const willAuthor = canAuthorScript(slug)
+  // Open the panel NOW — before the authoring turn (tens of seconds on a high-effort model), so the review is
+  // VISIBLE the moment it starts (else the card only appears after authoring → "lens didn't start"). NO pre-baked
+  // roster: rows derive from the agents the script ACTUALLY spawns (the old hardcoded `shape.angles` roster made an
+  // AUTHORED run look like the fixed 10-angle template, every row stuck at "queued").
+  deps.cb.onToolEvent?.(reviewerRoleId, {
+    type: 'sub_tool_start',
+    toolUseId: panelId,
+    parentToolId: 'coordinator-gate-b',
+    name: 'StudioLens',
+    input: { mode: 'review', subjects: [], orchestration: willAuthor ? 'authored' : 'template' },
+  })
   let review: ScriptReview = { subjects: [], confirmed: [], refuted: [], report: null, reviewerRoleId }
   try {
     const spawnAgent = makeSpawnAgent(deps, reviewerRoleId, panelId, stepId)
@@ -196,28 +212,15 @@ async function runReviewViaScript(
     // args serve BOTH the template (angles/caps/…) and an authored script (diff/paths/target).
     const args = { ...codeReviewArgs(shape, targetDesc), diff: target.diff, paths: target.changed, baseRef, target: targetDesc }
 
-    // Decide WHICH path drives the review BEFORE opening the panel: a strong model AUTHORS a bespoke orchestration
-    // script; everything else runs the fixed CODE_REVIEW_TEMPLATE.
     let src = CODE_REVIEW_TEMPLATE
-    const slug = rolesService.getBinding(reviewerRoleId)?.model ?? ''
-    if (canAuthorScript(slug)) {
+    if (willAuthor) {
       const authored = await authorScript(deps, reviewerRoleId, targetDesc, target.changed.join('\n'))
       if (authored) src = authored
     }
+    // Monitoring event — the AUTHORITATIVE signal (catches a rare authored→template fallback the up-front badge
+    // can't): greppable in the wire / main log, distinguishing a self-authored fan-out from the fixed template.
     const driver = src === CODE_REVIEW_TEMPLATE ? 'template' : 'authored'
-    // Monitoring event — the signal that distinguishes a SELF-AUTHORED fan-out from the fixed-template fallback
-    // (greppable in the wire / main log; mirrored to the card as a badge).
     console.info(`[studio-lens] review orchestration=${driver} reviewer=${reviewerRoleId} model=${slug || '∅'} tier=${shape.tier}`)
-    // Open the panel with NO pre-baked roster — finder rows derive from the agents the script ACTUALLY spawns. The
-    // old hardcoded `shape.angles` roster made an AUTHORED run (custom lenses) look like the fixed 10-angle template:
-    // the renderer built its rows from the roster, so the real authored finders never showed and read as "queued".
-    deps.cb.onToolEvent?.(reviewerRoleId, {
-      type: 'sub_tool_start',
-      toolUseId: panelId,
-      parentToolId: 'coordinator-gate-b',
-      name: 'StudioLens',
-      input: { mode: 'review', subjects: [], orchestration: driver },
-    })
     let result = await runScript({ src, args, orchestration })
     // An authored script that FAILED or returned an unusable shape → fall back to the built-in template.
     if (src !== CODE_REVIEW_TEMPLATE && (!result.ok || !isReviewResult(result.value))) {
