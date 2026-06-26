@@ -6,7 +6,7 @@
 import type { RunStepOptions } from '../coordinator-step'
 import type { AgentSpec } from './contracts'
 
-// Per-agent turn cap — Workflow's `FORKED_AGENT_DEFAULT_MAX_TURNS` (cc 2.1.186: `dbo = 50`). WITHOUT this,
+// Per-agent turn cap — the Workflow tool's per-agent default of 50 turns. WITHOUT this,
 // runRoleStep inherits maxTurns = undefined → the agent loop is UNBOUNDED (loop.ts), and a lens finder ran ~300
 // self-read turns (each re-sending a 92k–237k-token context ≈ 399M tokens/review = the channel-killer observed in
 // the dogfood wire log). 50 is Workflow's exact default; a finder that reviews the pinned diff converges in ~5-10.

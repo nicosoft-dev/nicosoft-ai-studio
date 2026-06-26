@@ -1,14 +1,14 @@
-// Studio Lens — the review SHAPE as a function of the current reasoning effort, decoded from Workflow `code-review`
-// (cc 2.1.186). Workflow does NOT run one fixed review shape: its angle count, per-finder candidate cap, verify
-// bias, gap-sweep, and report cap are all chosen from the effort tier the review runs at (CZa/k5n/RZa/vZa). Lens
+// Studio Lens — the review SHAPE as a function of the current reasoning effort, modeled on Workflow's
+// `code-review`. Workflow does NOT run one fixed review shape: its angle count, per-finder candidate cap, verify
+// bias, gap-sweep, and report cap are all chosen from the effort tier the review runs at. Lens
 // mirrors that exactly — the reviewer role's effective thinking depth IS the review's effort, so the shape is
 // derived from it, never hardcoded.
 //
-//   low      → 1 combined finder, no verify, ≤4 findings                    (Workflow CZa)
-//   medium   → 8 angles  · ≤6 candidates · precision verify · no sweep · ≤8   (k5n)
-//   high     → 8 angles  · ≤6 candidates · recall verify    · no sweep · ≤10  (RZa)
-//   xhigh    → 10 angles · ≤8 candidates · recall verify    · + sweep  · ≤15  (vZa, "extra-high")
-//   max      → 10 angles · ≤8 candidates · recall verify    · + sweep  · ≤15  (vZa, "maximum")
+//   low      → 1 combined finder, no verify, ≤4 findings
+//   medium   → 8 angles  · ≤6 candidates · precision verify · no sweep · ≤8
+//   high     → 8 angles  · ≤6 candidates · recall verify    · no sweep · ≤10
+//   xhigh    → 10 angles · ≤8 candidates · recall verify    · + sweep  · ≤15  ("extra-high")
+//   max      → 10 angles · ≤8 candidates · recall verify    · + sweep  · ≤15  ("maximum")
 //
 // This module is PURE (no @shared / runtime deps) so the shape matrix unit-tests off-Electron (e2e/lens-tiers.mts).
 // The reviewer-depth → effective-tier resolution (which needs @shared/thinking) lives in agent-lens.ts.
@@ -21,7 +21,7 @@ export interface TierShape {
   tier: ReviewTier
   angles: ReviewAngle[] // the finder angle set (1 combined at low; 8 at med/high; 10 at xhigh/max)
   candidateCap: number // per-finder candidate cap (Workflow: ≤4 low, ≤6 med/high, ≤8 xhigh/max)
-  verify: 'none' | 'precision' | 'recall' // low: NO dedup/verify (single pass); medium precision (eyo); high/xhigh/max recall (tyo)
+  verify: 'none' | 'precision' | 'recall' // low: NO dedup/verify (single pass); medium precision; high/xhigh/max recall
   sweep: boolean // a gap-sweep finder after verify (Workflow xhigh/max only)
   reportCap: number // final report cap, most-severe-first (Workflow 4/8/10/15)
 }

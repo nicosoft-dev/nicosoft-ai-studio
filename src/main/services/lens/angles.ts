@@ -1,11 +1,11 @@
-// Studio Lens — the FIXED review-angle taxonomy, decoded from Claude Code's Workflow `code-review` (cc 2.1.186).
-// The angles are a FIXED set baked into the workflow — there is NO model "author the lenses" step. Which angles
+// Studio Lens — the built-in review-angle taxonomy, modeled on Claude Code's Workflow `code-review`. This is the
+// FALLBACK set the code-review template uses; a strong reviewer authors its own dimensions instead. Which angles
 // run is a function of the current reasoning effort (the Workflow tiers), NOT a hardcoded shape:
 //   • medium / high → 3 correctness (A,B,C) + 3 cleanup (reuse,simplification,efficiency) + altitude + conventions = 8
 //   • xhigh / max   → 5 correctness (A,B,C,D,E) + the same 5 quality angles = 10
-// (low runs inline with no finder angles; see tiers.ts.) The angle bodies are adapted from the decoded Workflow
-// prose (raw vars _Za..cmt in docs/workflow-decoded/raw/code-review-template-vars.md): the only edit is PR/diff →
-// "change", because the Lens reviews work that is often uncommitted (no PR). Bug-hunting substance is preserved.
+// (low runs inline with no finder angles; see tiers.ts.) The angle bodies follow Claude Code's Workflow
+// code-review prose, with PR/diff phrased as "change" because the Lens reviews work that is often uncommitted
+// (no PR). The bug-hunting substance is preserved.
 
 import type { ReviewTier } from './tiers'
 
@@ -122,8 +122,8 @@ export function anglesFor(tier: ReviewTier): ReviewAngle[] {
   return [...correctness, ...QUALITY_ANGLES]
 }
 
-// LOW tier — a single combined finder, no verify, ≤4 findings from the hunks alone (Workflow `CZa`: "1 diff pass
-// → no verify → ≤4", "No full-file reads"). Lens has no in-the-main-agent inline path (the driver already called
+// LOW tier — a single combined finder, no verify, ≤4 findings from the hunks alone (the Workflow low tier: 1 diff
+// pass → no verify → ≤4, no full-file reads). Lens has no in-the-main-agent inline path (the driver already called
 // the tool), so the architectural floor is ONE finder running this brief — no fan-out, no skeptics.
 export const LOW_REVIEW_ANGLE: ReviewAngle = {
   key: 'review',

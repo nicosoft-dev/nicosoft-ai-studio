@@ -1,66 +1,61 @@
-// Studio Lens — the node:vm script executor (批 1: sandbox skeleton, no primitives/bridge yet).
+// Studio Lens — the node:vm script executor.
 //
-// This is the engine half of the lens rewrite: the reviewer AUTHORS a deterministic JS orchestration
-// script (批 4) and this module SAFELY EXECUTES it — replacing the old YAML-engine auto-fan-out. It is a
-// faithful reimplementation of Claude Code's Workflow tool execution engine, decoded verbatim from the
-// cc 2.1.186 binary (~/.local/share/claude/versions/2.1.186, strings offsets cited inline). Aligning to
-// the REAL running binary — not speculation — is the hard rule here.
+// This is the engine half of the lens rewrite: the reviewer AUTHORS a deterministic JS orchestration script
+// and this module SAFELY EXECUTES it, replacing the old YAML-engine auto-fan-out. It mirrors how Claude
+// Code's Workflow tool runs model-authored scripts — a hardened node:vm sandbox, the orchestration primitives
+// (agent/parallel/pipeline), and a cross-realm async bridge — so the dynamic review fans out the way the model
+// intends rather than being multiplied by an engine.
 //
-// 批 1 scope (this file,纯函数, off-channel): parse + validate the `export const meta` header, transpile
-// the body, build the hardened node:vm sandbox, and run a PURE-COMPUTATION script (args in, return value
-// out). The orchestration primitives (agent/parallel/pipeline) and the cross-realm async bridge
-// (bindVMAwait) are 批 2 — this file deliberately injects NONE of them yet, so a script that calls agent()
-// gets a ReferenceError until 批 2 wires it.
+// Pipeline: parse + validate the `export const meta` header, transpile the body, build the hardened sandbox,
+// then run the script. Without orchestration hooks it runs as a pure computation (args in, return value out)
+// and a script that calls agent() gets a ReferenceError; with them, the primitives are injected so the script
+// can fan sub-agents out.
 //
-// Binary alignment map (cc 2.1.186):
-//   • sandbox       — createContext({__proto__:null},{codeGeneration:{strings:false,wasm:false}})   @20146026 / @20297222
-//   • harden (X6e)  — delete 14 dangerous globals + freeze Error.prepareStackTrace                  @20134844 / @20135037
-//   • date/rand shim— Math.random/Date.now throw + ShimDate (bare/no-arg throw, arg'd OK)            @20285503 / @20285669
-//   • meta validate — acorn parse(sourceType:module) → body[0] ExportNamedDeclaration → pure-literal @20292504 / @20286344
-//   • pure-literal  — PKa/OKa/yBp recursive (Literal/Array/Object/Template-no-interp/neg-number)     @20292400
-//   • transpile     — slice off meta decl; wrap body in `(async () => {'use strict'; … })()`         @20281990 (fBp)
-//   • execute       — new vm.Script(wrapped,{importModuleDynamically:throw}); runInContext{timeout}  @20284800 / @20297222
-//   • settle bridge — runInContext('(async v => ({__proto__:null, v: await v}))')                    @20142011 (Apt)
+// The hardening, in order: a null-prototype context with code generation disabled (eval/Function throw); a
+// prelude that deletes the dangerous globals + freezes Error.prepareStackTrace; a determinism shim
+// (Date.now/Math.random throw, an explicit `new Date(ts)` is fine); acorn validation that the first statement
+// is a pure-literal `export const meta`; a transpile that wraps the body in an async IIFE; and execution under
+// a sync timeout with dynamic import() disabled.
 
 import vm from 'node:vm'
 import { parse, type Node } from 'acorn'
 import * as walk from 'acorn-walk'
 
 // acorn's Node type is intentionally loose (estree shapes aren't bundled); widen for property access and
-// rely on the RUNTIME node.type checks below (which is exactly what the binary's validator does too).
+// rely on the RUNTIME node.type checks below.
 type Ast = Node & { [k: string]: unknown }
 
-// ── Constants (verbatim from cc 2.1.186) ────────────────────────────────────────────────────────────────
+// ── Constants ───────────────────────────────────────────────────────────────────────────────────────────
 
-// xqn=30000 — the vm.Script runInContext timeout. NOTE: a vm timeout bounds the SYNCHRONOUS portion only
-// (it cannot interrupt an awaited microtask); it's a runaway-sync backstop, not an overall wall-clock. The
-// async budget is governed elsewhere (批 2 agent cap / abort signal). 30s mirrors the Workflow default.
+// The vm.Script runInContext timeout. NOTE: a vm timeout bounds the SYNCHRONOUS portion only (it cannot
+// interrupt an awaited microtask); it's a runaway-sync backstop, not an overall wall-clock. The async budget
+// is governed elsewhere (the agent cap / abort signal). 30s matches the Workflow default.
 export const LENS_SCRIPT_TIMEOUT_MS = 30_000
 
-// Rp="__wRg$" — the reserved internal-variable prefix (binary @20284800). The transpiler rejects any
-// user identifier starting with it so a script can't collide with / shadow the bridge variables 批 2 injects.
+// The reserved internal-variable prefix. The transpiler rejects any user identifier starting with it so a
+// script can't collide with / shadow the bridge variables the primitives inject.
 const RESERVED_PREFIX = '__wRg$'
 
-// X6e (@20135037): globals with no orchestration use case that either run host-loop callbacks outside any
-// try/catch (FinalizationRegistry — DoS shape) or expose shared-memory / debug-shell primitives (pure
-// attack-surface reduction). eval/Function are NOT deleted here — they're blocked harder by the context's
-// codeGeneration:false (createContext option below), which makes `Function('…')` throw at construction.
+// Globals with no orchestration use case that either run host-loop callbacks outside any try/catch
+// (FinalizationRegistry — DoS shape) or expose shared-memory / debug-shell primitives (pure attack-surface
+// reduction). eval/Function are NOT deleted here — they're blocked harder by the context's codeGeneration:
+// false (createContext option below), which makes `Function('…')` throw at construction.
 const DELETED_GLOBALS = [
   'ShadowRealm', 'WebAssembly', 'FinalizationRegistry', 'WeakRef', 'Atomics', 'SharedArrayBuffer',
   'queueMicrotask', '$vm', 'gc', 'edenGC', 'fullGC', 'print', 'readFile', 'Loader',
 ]
 
-// Reserved meta key names (gBp): block prototype-pollution vectors even though OKa builds onto a
+// Reserved meta key names: block prototype-pollution vectors even though the extractor builds onto a
 // null-prototype object — defense in depth.
 const RESERVED_META_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
 
-// X6e harden prelude — run INSIDE the vm realm (so it hardens the script's globals, not the host's).
-// Freezes Error.prepareStackTrace (deny stack-trace callback as an escape vector) and deletes the
-// dangerous globals. Shape from @20134844, MINUS the SES-style prototype freeze + enable-override the
-// binary also does: a vm context gets its OWN intrinsics (a script polluting its Object.prototype can't
-// reach the host's), and every review builds a FRESH context, so self-pollution neither escapes nor
-// persists. The freeze is defense-in-depth (keeps a script from corrupting its own orchestration); 批 2
-// adds it alongside the bridge, which depends on clean intrinsics.
+// Harden prelude — runs INSIDE the vm realm (so it hardens the script's globals, not the host's): freezes
+// Error.prepareStackTrace (deny the stack-trace callback as an escape vector) and deletes the dangerous
+// globals. It does NOT freeze the realm's prototypes (a full SES-style intrinsic freeze): a vm context has
+// its OWN intrinsics, so a script polluting its Object.prototype can't reach the host's, and every review
+// builds a FRESH context, so self-pollution neither escapes nor persists. A prototype freeze would be pure
+// defense-in-depth and is intentionally deferred — it needs the SES enable-override dance to avoid breaking
+// Error subclasses, which isn't load-bearing under this threat model.
 const HARDEN_PRELUDE = `(() => {
   Object.defineProperty(Error, 'prepareStackTrace', {
     value: (err) => String((err && err.stack) ?? err),
@@ -71,11 +66,10 @@ const HARDEN_PRELUDE = `(() => {
   }
 })()`
 
-// Date/Math.random shim (mBp @20285503) — disable non-deterministic sources so a review over the same diff
-// is reproducible (the binary's stated reason is resume-safety; lens has no resume, but the same
-// determinism makes reviews testable + stops scripts keying behavior off wall-clock). `new Date(ts)` with
-// an explicit argument is still allowed (parsing a passed-in timestamp); only Date.now()/`new Date()` (no
-// arg)/bare `Date()` throw. ShimDate logic verbatim from @20285669.
+// Date/Math.random shim — disable non-deterministic sources so a review over the same diff is reproducible
+// (determinism makes reviews testable + stops scripts keying behavior off wall-clock). `new Date(ts)` with an
+// explicit argument is still allowed (parsing a passed-in timestamp); only Date.now()/`new Date()` (no arg)/
+// bare `Date()` throw.
 const NOW_ERR =
   'Date.now() / new Date() are unavailable in lens scripts (reproducibility). Pass any needed timestamp via args.'
 const RANDOM_ERR =
@@ -114,7 +108,7 @@ export type ParseResult = { meta: ScriptMeta; scriptBody: string } | { error: st
 
 // ── meta validation + transpile (acorn) ─────────────────────────────────────────────────────────────────
 
-// _Bp (@20292504): the first statement must be `export const meta = { … }` — exactly one const declarator
+// The first statement must be `export const meta = { … }` — exactly one const declarator
 // named `meta` whose init is an object literal.
 function isMetaExport(node: Ast): boolean {
   const decl = node.declaration as Ast | undefined
@@ -128,7 +122,7 @@ function isMetaExport(node: Ast): boolean {
   return id?.type === 'Identifier' && id.name === 'meta' && init?.type === 'ObjectExpression'
 }
 
-// yBp (@20292400): extract a property key (Identifier or Literal), rejecting reserved/pollution names.
+// Extract a property key (Identifier or Literal), rejecting reserved/pollution names.
 function literalKey(prop: Ast): string {
   const key = prop.key as Ast
   let name: string
@@ -139,7 +133,7 @@ function literalKey(prop: Ast): string {
   return name
 }
 
-// PKa (@20292400): recursively materialize a PURE-LITERAL node into its JS value, or throw. Allowed:
+// Recursively materialize a PURE-LITERAL node into its JS value, or throw. Allowed:
 // Literal, Array (no holes/spread), Object, TemplateLiteral (no interpolation), negative-number unary.
 // Anything else (Identifier, Call, spread, …) means meta isn't a pure literal → throw → caller reports it.
 function literalValue(node: Ast): unknown {
@@ -170,7 +164,7 @@ function literalValue(node: Ast): unknown {
   }
 }
 
-// OKa (@20292400): build a null-prototype object from an ObjectExpression's plain (non-computed,
+// Build a null-prototype object from an ObjectExpression's plain (non-computed,
 // non-method, init-kind) properties.
 function literalObject(node: Ast): Record<string, unknown> {
   const out: Record<string, unknown> = Object.create(null)
@@ -183,7 +177,7 @@ function literalObject(node: Ast): Record<string, unknown> {
   return out
 }
 
-// TBp (@20292504): required meta fields. name + description are mandatory non-empty strings (name shows in
+// Required meta fields. name + description are mandatory non-empty strings (name shows in
 // the permission dialog / run list, description is the one-liner). phases/whenToUse are optional.
 function validateMetaFields(meta: Record<string, unknown>): string | null {
   if (typeof meta.name !== 'string' || !meta.name.trim()) return 'meta.name must be a non-empty string'
@@ -192,7 +186,7 @@ function validateMetaFields(meta: Record<string, unknown>): string | null {
 }
 
 // Parse + validate the script header, returning the materialized meta and the body with the meta
-// declaration sliced off. Mirrors the binary's validator (@20292504) exactly: acorn parse as a module
+// declaration sliced off. Validates the header: acorn parse as a module
 // (so `export` is legal) with top-level await/return allowed, first statement must be the meta export,
 // then strip it to get the executable body.
 export function parseScript(src: string): ParseResult {
@@ -226,12 +220,12 @@ export function parseScript(src: string): ParseResult {
   }
   const fieldError = validateMetaFields(raw)
   if (fieldError) return { error: fieldError }
-  // Strip the meta declaration: everything after its end, with a leading `;`/blank line trimmed (@20292504).
+  // Strip the meta declaration: everything after its end, with a leading `;`/blank line trimmed.
   const scriptBody = src.slice(first.end).replace(/^[;\s]*\n/, '').trimStart()
   return { meta: raw as ScriptMeta, scriptBody }
 }
 
-// fBp (@20281990): wrap the body in an async IIFE under strict mode so top-level await + top-level return
+// Wrap the body in an async IIFE under strict mode so top-level await + top-level return
 // are legal and the return value is the IIFE's resolution. Then re-parse the WRAPPED form as a script and
 // walk every identifier to reject the reserved `__wRg$` prefix (collision guard for 批 2's bridge vars).
 export function transpile(scriptBody: string): { code: string } | { error: string } {
@@ -253,7 +247,7 @@ export function transpile(scriptBody: string): { code: string } | { error: strin
   return { code }
 }
 
-// HKa (@20286344): a friendly STATIC pre-check — does the body statically reference Date.now / Math.random
+// A friendly STATIC pre-check — does the body statically reference Date.now / Math.random
 // / no-arg `new Date()`? The runtime shim already throws on these, but flagging them statically gives a
 // clearer signal than a deep-in-execution throw. Non-fatal: returns the offending names (caller may warn).
 export function detectNonDeterminism(scriptBody: string): string[] {
@@ -291,10 +285,10 @@ export function detectNonDeterminism(scriptBody: string): string[] {
 
 // ── orchestration primitives (批 2) ─────────────────────────────────────────────────────────────────────
 
-// Parity with cc 2.1.186 (zKa=1000): the total agent() spawns across ONE review's lifetime — a runaway
+// The total agent() spawns across ONE review's lifetime — a runaway
 // backstop set far above any real review (~32-40 agents), never a normal throttle. The CONCURRENCY cap
 // (min(16,cores-2)) is deliberately NOT here: it lives in the spawnAgent hook (批 5 → pool.ts), exactly like
-// the binary, where parallel/pipeline just fire the thunks and a semaphore wraps each individual agent spawn.
+// the Workflow tool, where parallel/pipeline just fire the thunks and a semaphore wraps each individual spawn.
 export const LENS_MAX_AGENTS = 1000
 // The per-call fan-out cap (parallel thunks / pipeline items) — an oversized batch is rejected, not fired.
 export const LENS_MAX_FANOUT = 4096
@@ -337,19 +331,19 @@ interface VmBridge {
   toVm: (hostVal: unknown) => unknown
 }
 
-// Compile the cross-realm bridge helpers INSIDE the vm realm (binary AKa/Apt/Eqn/Aqn). The load-bearing rule:
-// EVERYTHING the script can touch must be a vm-realm value. A HOST object or function placed on the context
-// leaks the host realm's Function via `.constructor` (objects: `.constructor.constructor`) — codeGeneration:
-// false only neuters the VM context, so the host realm still generates code → sandbox escape (empirically
-// verified). So:
-//   • call (AKa)    — `(fn,...args) => fn(...args)` — invoke a vm-realm function (a thunk / stage)
-//   • settle (Apt)  — `async v => ({__proto__:null, v: await v})` — await a vm-realm thenable IN-realm, handing
-//                     back a {v} envelope so the host never holds a raw cross-realm thenable
-//   • vmClone       — `s => JSON.parse(s)` — materialize a host JSON value as a FRESH vm-realm object (severs
-//                     host references AND host-realm prototype chain). Binary's Eqn is a deep structured clone;
-//                     the JSON round-trip is the lens-scoped equivalent (§5.4 benign model, JSON-safe data).
-//   • wrapHost (Aqn)— `h => async (...a) => h(...a)` — present a host primitive to the script as a VM-realm
-//                     async function (its `.constructor` is the neutered vm Function), the host fn only closed over.
+// Compile the cross-realm bridge helpers INSIDE the vm realm. The load-bearing rule: EVERYTHING the script can
+// touch must be a vm-realm value. A HOST object or function placed on the context leaks the host realm's
+// Function via `.constructor` (objects: `.constructor.constructor`) — codeGeneration:false only neuters the VM
+// context, so the host realm still generates code → sandbox escape (empirically verified). So:
+//   • call    — `(fn,...args) => fn(...args)` — invoke a vm-realm function (a thunk / stage)
+//   • settle  — `async v => ({__proto__:null, v: await v})` — await a vm-realm thenable IN-realm, handing back
+//               a {v} envelope so the host never holds a raw cross-realm thenable
+//   • vmClone — `s => JSON.parse(s)` — materialize a host JSON value as a FRESH vm-realm object (severs host
+//               references AND the host-realm prototype chain). A JSON round-trip is enough for lens's
+//               JSON-safe data under this benign threat model.
+//   • wrapHost— present a host primitive to the script as a VM-realm async function (its `.constructor` is the
+//               neutered vm Function), cloning BOTH the resolve AND the reject path so a host throw never leaks
+//               a host object the script could walk back to the host Function.
 function vmBridge(ctx: vm.Context): VmBridge {
   const call = vm.runInContext('((fn, ...args) => fn(...args))', ctx, { filename: 'lens:call' }) as VmBridge['call']
   const settle = vm.runInContext('(async v => ({__proto__: null, v: await v}))', ctx, {
@@ -370,16 +364,16 @@ function vmBridge(ctx: vm.Context): VmBridge {
   return { call, settle, vmClone, wrapHost, toVm }
 }
 
-// Inject agent/parallel/pipeline/phase/log onto the vm context, faithfully mirroring the Workflow engine
-// (cc 2.1.186 @20320689 region). Each primitive is a host closure; it is exposed to the script ONLY through
-// bridge.wrapHost so the script-visible function is vm-realm (no host-Function escape).
+// Inject agent/parallel/pipeline/phase/log onto the vm context, mirroring the Workflow tool's primitives. Each
+// primitive is a host closure; it is exposed to the script ONLY through bridge.wrapHost so the script-visible
+// function is vm-realm (no host-Function escape).
 function injectPrimitives(ctx: vm.Context, bridge: VmBridge, hooks: OrchestrationHooks): void {
   const { call, settle, toVm, wrapHost } = bridge
   const maxAgents = hooks.maxAgents ?? LENS_MAX_AGENTS
   let agentCount = 0
   let currentPhase: string | undefined
 
-  // binary E(): cap check before any spawn / fan-out.
+  // Cap check before any spawn / fan-out.
   const checkCap = (): void => {
     if (agentCount >= maxAgents) {
       throw new Error(
@@ -409,7 +403,7 @@ function injectPrimitives(ctx: vm.Context, bridge: VmBridge, hooks: Orchestratio
   }
   const aborted = (): boolean => hooks.signal?.aborted === true
 
-  // agent(prompt, opts) — spawn ONE read-only reviewer sub-agent (binary U). Counts toward the cap, threads
+  // agent(prompt, opts) — spawn ONE read-only reviewer sub-agent. Counts toward the cap, threads
   // the current phase onto opts, returns the result cloned into the vm realm.
   const agent = async (prompt: unknown, opts?: unknown): Promise<unknown> => {
     if (aborted()) throw new Error('review aborted')
@@ -421,7 +415,7 @@ function injectPrimitives(ctx: vm.Context, bridge: VmBridge, hooks: Orchestratio
     return toVm(result)
   }
 
-  // parallel(thunks) — concurrency barrier (binary V): fire every thunk; a fulfilled thunk → its value, a
+  // parallel(thunks) — concurrency barrier: fire every thunk; a fulfilled thunk → its value, a
   // thrown thunk → null (degrade, never reject the whole batch). Returns a vm-realm array.
   const parallel = async (vmArr: unknown): Promise<unknown> => {
     if (aborted()) return toVm([])
@@ -446,7 +440,7 @@ function injectPrimitives(ctx: vm.Context, bridge: VmBridge, hooks: Orchestratio
     return toVm(out.map(jsonSafe))
   }
 
-  // pipeline(items, ...stages) — NO barrier (binary z): each item flows through all stages independently;
+  // pipeline(items, ...stages) — NO barrier: each item flows through all stages independently;
   // every stage receives (prevResult, originalItem, index); a null result short-circuits the item's remaining
   // stages; a thrown stage → null for that item. Returns a vm-realm array.
   const pipeline = async (vmItems: unknown, ...stages: unknown[]): Promise<unknown> => {
@@ -496,7 +490,7 @@ export interface SandboxHooks {
   phase?: (title: string) => void
 }
 
-// Build the hardened vm context (@20297222 main path): null-prototype sandbox with code generation
+// Build the hardened vm context: a null-prototype sandbox with code generation
 // disabled (eval/Function throw → blocks the classic `constructor.constructor('return process')()` escape),
 // then run the harden + date/random preludes INSIDE the realm, then inject args + log/phase. Returns the
 // context ready for a compiled vm.Script.
@@ -508,13 +502,12 @@ export function createLensSandbox(
   const ctx = vm.createContext(Object.create(null), {
     codeGeneration: { strings: false, wasm: false },
   })
-  // Harden the realm's intrinsics, then disable non-deterministic sources. Order matches the binary
-  // (Iqn(f) then X6e(f) at @20297222); either order is safe since they touch disjoint globals.
+  // Run the determinism shim then the harden prelude; either order is safe since they touch disjoint globals.
   vm.runInContext(DATE_RANDOM_SHIM, ctx, { filename: 'lens:shim' })
   vm.runInContext(HARDEN_PRELUDE, ctx, { filename: 'lens:harden' })
 
   const bridge = vmBridge(ctx)
-  // args injection (@20298180): clone INTO the vm realm. A host object here would expose host Function via
+  // args injection: clone INTO the vm realm. A host object here would expose host Function via
   // `args.constructor.constructor` (a sandbox escape, verified) — the round-trip both severs host aliasing
   // and makes args a vm-realm object. undefined stays undefined. (A circular value throws → runScript's try.)
   const clonedArgs = args === undefined ? undefined : bridge.vmClone(JSON.stringify(args))
@@ -568,7 +561,7 @@ export async function runScript(opts: RunScriptOptions): Promise<RunScriptResult
   try {
     script = new vm.Script(t.code, {
       filename: 'lens-script.js',
-      // import() is unavailable — a lens script is self-contained, not a module loader (@20284800).
+      // import() is unavailable — a lens script is self-contained, not a module loader.
       importModuleDynamically: (() => {
         throw new Error('import() is not available in lens scripts.')
       }) as never,
@@ -582,7 +575,7 @@ export async function runScript(opts: RunScriptOptions): Promise<RunScriptResult
   // instead of escaping runScript.
   try {
     const ctx = createLensSandbox(opts.args, opts.hooks, opts.orchestration)
-    // Apt settle bridge (@20142011): the wrapped IIFE returns a vm-realm Promise. Awaiting a cross-realm
+    // settle bridge: the wrapped IIFE returns a vm-realm Promise. Awaiting a cross-realm
     // thenable directly is brittle, so we await it INSIDE the realm via a tiny helper that hands back a
     // null-prototype { v } envelope — the host then reads `.v`.
     const settle = vm.runInContext('(async v => ({__proto__: null, v: await v}))', ctx, {

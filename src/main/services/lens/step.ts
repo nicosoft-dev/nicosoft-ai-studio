@@ -38,15 +38,12 @@ function buildPersona(name: string, focus: string): string {
 
 // Build the production LensDeps from a coordinator RunStepOptions (the bridge/Gate-B already owns convId / cb /
 // signal / cwd / permissionMode). The engine owns all card events; runRoleStep runs quiet (no segment of its own).
-// Workflow parity (verified in cc 2.1.186): "Total agent count across a workflow's lifetime is capped at 1000 — a
-// runaway-loop backstop set far above any real workflow." The lens fan-out is now a FIXED 8-angle taxonomy ×
-// ≤6 candidates × 1 skeptic (a real review is ~32-40 agents), but a pathological finder reply could still emit
-// many candidates, so the SAME backstop applies: nothing spawns unboundedly. Counted per review (the closure lives
-// per makeLensDeps == per examine() call, mirroring Workflow's per-workflow lifetime) and only over runAgent
-// (finder/skeptic/reader = the agent() equivalent; synth/escalate are tool-less orchestration turns, not agents).
-// 1000 is the far-above-normal runaway ceiling, never a normal throttle.
+// Workflow parity: a review's lifetime agent count is capped at 1000 — a runaway-loop backstop set far above any
+// real review (a real review is a few dozen agents). Counted per review (the closure lives per makeLensDeps ==
+// per examine() call) and only over runAgent (finder/skeptic/reader = the agent() equivalent; tool-less
+// orchestration turns are not agents). 1000 is the far-above-normal runaway ceiling, never a normal throttle.
 const LENS_MAX_AGENTS = 1000
-// #6 Workflow parity (cc 2.1.186 `GKa=5`): re-run a STALLED agent up to this many times before giving up.
+// Workflow parity: re-run a STALLED agent up to this many times before giving up.
 const LENS_STALL_RETRIES = 5
 // LENS_MAX_TURNS (the per-agent turn cap, Workflow FORKED_AGENT_DEFAULT_MAX_TURNS=50) + the runRoleStep option
 // shape now live in ./runstep so the wiring unit-tests off-Electron (e2e/lens-maxturns.mts).
@@ -60,7 +57,7 @@ export function makeLensDeps(opts: RunStepOptions): LensDeps {
       if (++agentCount > LENS_MAX_AGENTS) {
         throw new Error(`studio_lens exceeded the ${LENS_MAX_AGENTS}-agent lifetime cap (runaway fan-out backstop) — this agent is dropped and the review folds with what completed.`)
       }
-      // #6 Workflow parity (GKa=5): re-run a STALLED finder/skeptic up to 5× (a frozen stream that the watchdog
+      // Workflow parity: re-run a STALLED finder/skeptic up to 5× (a frozen stream that the watchdog
       // aborted — a fresh attempt usually lands). Only LensStallError is retried; a real abort / any other error is
       // terminal. The 1000-cap counts the logical agent ONCE (above), not each stall-retry — same as Workflow
       // (retries accrue under one agent). After 5 stalls, propagate → the engine's catch drops it / counts an uphold.
