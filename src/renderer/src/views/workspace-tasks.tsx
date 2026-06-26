@@ -519,7 +519,7 @@ function PhaseCard({ phase, t }: { phase: WorkspacePhase; t: ReturnType<typeof u
         {phase.items.map((i, idx) => (
           <div className="ws-hist-item" key={idx}>
             <span className={'ws-hist-dot ' + (i.status === 'completed' ? 'done' : i.status === 'in_progress' ? 'doing' : 'todo')} />
-            <span className={i.status === 'completed' ? 'ws-hist-strike' : ''}>{i.content}</span>
+            <span className={i.status === 'completed' ? 'ws-hist-done' : ''}>{i.content}</span>
           </div>
         ))}
       </div>

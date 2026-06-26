@@ -1323,7 +1323,7 @@
 .ws-hist-dot.done { background: var(--success, #43c478); }
 .ws-hist-dot.doing { background: var(--warning, #e0a83b); }
 .ws-hist-dot.todo { background: var(--text-4); }
-.ws-hist-strike { color: var(--text-4); text-decoration: line-through; }
+.ws-hist-done { color: var(--text-4); }
 .ws-verdict { flex: 0 0 auto; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 6px; border-radius: 5px; }
 .ws-verdict.pass { color: var(--success, #43c478); background: color-mix(in oklch, var(--success, #43c478) 16%, transparent); }
 .ws-verdict.fail { color: var(--warning, #e0a83b); background: color-mix(in oklch, var(--warning, #e0a83b) 16%, transparent); }

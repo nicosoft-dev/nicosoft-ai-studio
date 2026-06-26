@@ -339,9 +339,10 @@ function ReaderRow({ path, tool }: { path: string; tool?: ToolCall }): ReactElem
 function LiveCard({ tool }: { tool: ToolCall }): ReactElement {
   // Live cards open by default — the point is to WATCH the fan-out, like the Workflow /workflows view.
   const [open, setOpen] = useState(true)
-  const input = (tool.input ?? {}) as { mode?: string; subjects?: string[] }
+  const input = (tool.input ?? {}) as { mode?: string; subjects?: string[]; orchestration?: string }
   const mode = input.mode ?? 'review'
   const isUnderstand = mode === 'understand'
+  const orchestration = input.orchestration // 'authored' (the model wrote the fan-out) | 'template' (fixed fallback)
   const roster = Array.isArray(input.subjects) ? input.subjects : []
   const subs = tool.subTools ?? []
   const running = tool.status === 'running'
@@ -369,7 +370,11 @@ function LiveCard({ tool }: { tool: ToolCall }): ReactElement {
 
   // Real agent count (workflow parity): EVERY agent() call — finders/readers + each skeptic vote + the synth.
   // Candidate 'Finding' rows are groupings, not agents → excluded.
-  const finderN = Math.max(roster.length, finders.size)
+  // Rows come from the agents ACTUALLY spawned, unioned with any pre-declared roster (understand mode still
+  // pre-lists its files). A review no longer pre-bakes a fixed angle roster, so an AUTHORED fan-out renders its
+  // real lenses instead of 10 hardcoded angles stuck at "queued".
+  const finderKeys = [...new Set([...roster, ...finders.keys()])]
+  const finderN = finderKeys.length
   const allSkeptics = [...skepticsByFinding.values()].flat()
   const agentN = finderN + (isUnderstand ? 0 : allSkeptics.length) + (synth ? 1 : 0)
   const finderDoneN = [...finders.values()].filter(isDone).length
@@ -386,6 +391,7 @@ function LiveCard({ tool }: { tool: ToolCall }): ReactElement {
         <span className="pe-name">studio_lens</span>
         <span className="pe-sep">·</span>
         <span className="pe-mode">{mode}</span>
+        {orchestration ? (<><span className="pe-sep">·</span><span className="pe-meta">{orchestration}</span></>) : null}
         <span className="pe-sep">·</span>
         <span className="pe-meta">{agentN} {agentN === 1 ? 'agent' : 'agents'}</span>
         <span className="pe-sep">·</span>
@@ -405,7 +411,7 @@ function LiveCard({ tool }: { tool: ToolCall }): ReactElement {
           {isUnderstand ? (
             <>
               <PhaseHeader label="Read" done={finderDoneN} total={finderN} />
-              {roster.map((p) => <ReaderRow key={p} path={p} tool={finders.get(p)} />)}
+              {finderKeys.map((p) => <ReaderRow key={p} path={p} tool={finders.get(p)} />)}
               {synth ? (
                 <>
                   <PhaseHeader label="Synthesize map" done={isDone(synth) ? 1 : 0} total={1} />
@@ -416,7 +422,7 @@ function LiveCard({ tool }: { tool: ToolCall }): ReactElement {
           ) : (
             <>
               <PhaseHeader label="Find" done={finderDoneN} total={finderN} />
-              {roster.map((lens) => (
+              {finderKeys.map((lens) => (
                 <FinderRow key={lens} lens={lens} tool={finders.get(lens)} cands={candidates.filter((c) => subjInput(c).lens === lens)} />
               ))}
               {candidates.length > 0 ? (

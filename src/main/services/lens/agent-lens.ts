@@ -91,15 +91,20 @@ function makeSpawnAgent(deps: LensDeps, reviewerRoleId: string, panelId: string,
     const label = String(opts.label || `agent-${n}`)
     const toolId = subjectCardId(`${label}-${n++}`, stepId)
     const phase = cardPhase(label)
-    // Card name per phase so the renderer (lens-card.tsx) partitions correctly: finders → Subject, skeptics →
-    // SubjectRefute, the synth → Synth (emitting everything as 'Subject' mis-rendered the verify + synth rows).
+    // The renderer (lens-card.tsx) matches finder ROWS to the panel roster — `shape.angles`' BARE keys — by the
+    // card's `subject`. So the key must be the bare key: strip the `<phase>:` label prefix (`find:line-by-line`
+    // → `line-by-line`; `verify:<lens>` → `<lens>`). Storing the prefixed label here left every roster row stuck
+    // at "queued" while the header count advanced — the roster lookup never matched the prefixed key.
+    const key = label.includes(':') ? label.slice(label.indexOf(':') + 1) : label
+    // Card name per phase so the renderer partitions correctly: finders → Subject, skeptics → SubjectRefute, the
+    // synth → Synth (emitting everything as 'Subject' mis-rendered the verify + synth rows).
     const name = phase === 'verify' ? 'SubjectRefute' : phase === 'synth' ? 'Synth' : 'Subject'
     deps.cb.onToolEvent?.(reviewerRoleId, {
       type: 'sub_tool_start',
       toolUseId: toolId,
       parentToolId: panelId,
       name,
-      input: { subject: label, lens: label, findingId: label, phase, mode: 'review' },
+      input: { subject: key, lens: key, findingId: key, phase, mode: 'review' },
     })
     try {
       const spec: AgentSpec = {
@@ -184,13 +189,6 @@ async function runReviewViaScript(
   const deps = makeLensDeps(opts)
   const panelId = panelCardId(stepId)
   const targetDesc = describeTarget(target)
-  deps.cb.onToolEvent?.(reviewerRoleId, {
-    type: 'sub_tool_start',
-    toolUseId: panelId,
-    parentToolId: 'coordinator-gate-b',
-    name: 'StudioLens',
-    input: { mode: 'review', subjects: shape.angles.map((a) => a.key) },
-  })
   let review: ScriptReview = { subjects: [], confirmed: [], refuted: [], report: null, reviewerRoleId }
   try {
     const spawnAgent = makeSpawnAgent(deps, reviewerRoleId, panelId, stepId)
@@ -198,12 +196,28 @@ async function runReviewViaScript(
     // args serve BOTH the template (angles/caps/…) and an authored script (diff/paths/target).
     const args = { ...codeReviewArgs(shape, targetDesc), diff: target.diff, paths: target.changed, baseRef, target: targetDesc }
 
+    // Decide WHICH path drives the review BEFORE opening the panel: a strong model AUTHORS a bespoke orchestration
+    // script; everything else runs the fixed CODE_REVIEW_TEMPLATE.
     let src = CODE_REVIEW_TEMPLATE
     const slug = rolesService.getBinding(reviewerRoleId)?.model ?? ''
     if (canAuthorScript(slug)) {
       const authored = await authorScript(deps, reviewerRoleId, targetDesc, target.changed.join('\n'))
       if (authored) src = authored
     }
+    const driver = src === CODE_REVIEW_TEMPLATE ? 'template' : 'authored'
+    // Monitoring event — the signal that distinguishes a SELF-AUTHORED fan-out from the fixed-template fallback
+    // (greppable in the wire / main log; mirrored to the card as a badge).
+    console.info(`[studio-lens] review orchestration=${driver} reviewer=${reviewerRoleId} model=${slug || '∅'} tier=${shape.tier}`)
+    // Open the panel with NO pre-baked roster — finder rows derive from the agents the script ACTUALLY spawns. The
+    // old hardcoded `shape.angles` roster made an AUTHORED run (custom lenses) look like the fixed 10-angle template:
+    // the renderer built its rows from the roster, so the real authored finders never showed and read as "queued".
+    deps.cb.onToolEvent?.(reviewerRoleId, {
+      type: 'sub_tool_start',
+      toolUseId: panelId,
+      parentToolId: 'coordinator-gate-b',
+      name: 'StudioLens',
+      input: { mode: 'review', subjects: [], orchestration: driver },
+    })
     let result = await runScript({ src, args, orchestration })
     // An authored script that FAILED or returned an unusable shape → fall back to the built-in template.
     if (src !== CODE_REVIEW_TEMPLATE && (!result.ok || !isReviewResult(result.value))) {
