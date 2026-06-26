@@ -132,3 +132,59 @@ export function codeReviewArgs(shape: TierShape, target: string): CodeReviewArgs
     reportCap: shape.reportCap,
   }
 }
+
+// ── reviewer author prompt (批 4) ───────────────────────────────────────────────────────────────────────
+
+export interface ReviewScope {
+  target: string // human description of what to review, e.g. "the pinned diff (HEAD~2..HEAD)"
+  scopeBrief?: string // optional: a short map of what changed (files / subsystems) to ground the grouping
+}
+
+// The instruction handed to a STRONG reviewer (canAuthorScript === true) so it AUTHORS a deterministic
+// orchestration script instead of being fed a fixed angle taxonomy. The reviewer's reply IS the script (raw
+// JS), which agent-lens parses + runs through the script-executor. This replicates the real Workflow tool's
+// author guidance, scoped to code review — the fan-out lives in the model's creation view, so it owns the
+// count (§1.2/§4). The discipline is prompt + model judgment; the engine only backstops catastrophic runaway.
+export function buildAuthorPrompt(scope: ReviewScope): string {
+  return `You are the ORCHESTRATOR of a code review. Do NOT review the code yourself in this reply — instead AUTHOR a deterministic JavaScript orchestration script that fans the review out across sub-agents. The engine executes your script in a sandbox; the sub-agents do the actual reading and judging.
+
+# What you're reviewing
+${scope.target}
+${scope.scopeBrief ? `\nWhat changed:\n${scope.scopeBrief}\n` : ''}
+# Output
+Output ONLY the script — raw JavaScript, no prose, no markdown fences. It MUST begin with a PURE-LITERAL meta:
+
+  export const meta = {
+    name: 'review-...',                                  // short kebab id
+    description: '...',                                  // one line: what this covers + how it's grouped
+    phases: [{ title: 'Review' }, { title: 'Verify' }, { title: 'Synthesize' }],
+  }
+
+After meta the body runs in an async context (use await directly). The sandbox gives you:
+  • agent(prompt, opts?) -> Promise<result> — spawn ONE read-only reviewer sub-agent. opts: { label, phase,
+    schema? }. With a JSON-schema \`schema\` the sub-agent returns validated structured output (use it for
+    findings/verdicts); without, it returns its final text. Sub-agents only READ — they cannot edit.
+  • parallel(thunks) -> Promise<any[]> — run () => agent(...) thunks concurrently (a barrier). A thunk that
+    throws becomes null in that slot, never rejecting the batch.
+  • pipeline(items, ...stages) -> Promise<any[]> — each item flows through all stages independently (NO
+    barrier); stage N receives (prevResult, originalItem, index); a null result short-circuits that item's
+    remaining stages. DEFAULT to pipeline() for find -> verify.
+  • phase(title) / log(msg) — progress.
+  • args — your injected inputs (may include the diff / paths).
+
+# Discipline — you are the orchestrator; the agent count is yours to choose and to defend
+- GROUP BY THE ACTUAL SCOPE first: split the change into its real subsystems / themes / risk areas, and pick
+  each group's review dimensions from "what THIS group changed + how it could break" — do not sweep one generic
+  angle set across everything. The dimensions that matter are specific to this change.
+- Each finder: cap its candidates (≤6 is a good default). Each candidate: ONE adversarial skeptic that tries to
+  refute it from the code — keep it unless it is refuted (recall bias).
+- SCALE TO THE TASK: a small focused change wants a few finders; only a large or heterogeneous scope warrants
+  many groups. Do not spawn agents you would yourself think excessive.
+- Synthesize at the end: one agent that writes the report, most-severe-first, each finding citing file:line.
+- If the diff is simple and homogeneous, a minimal script that just reviews it directly is fine — author what
+  the change actually needs, not ceremony.
+
+# Hard limits (engine-enforced backstops, not budgets to spend)
+Concurrency is auto-capped; each sub-agent is bounded to 50 turns; the whole review may spawn at most 1000
+sub-agents before the engine aborts. A real review is a few dozen agents — stay well inside these.`
+}
