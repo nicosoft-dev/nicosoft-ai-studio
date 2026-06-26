@@ -16,6 +16,13 @@
 // (Date.now/Math.random throw, an explicit `new Date(ts)` is fine); acorn validation that the first statement
 // is a pure-literal `export const meta`; a transpile that wraps the body in an async IIFE; and execution under
 // a sync timeout with dynamic import() disabled.
+//
+// SECURITY BOUNDARY: this contains a TRUSTED-BUT-FALLIBLE author — the user's OWN configured model reviewing
+// the user's OWN code. The hardening contains an author that ERRS (no host object or function reaches the
+// script, code generation is disabled, and results AND rejections are cloned into the vm realm). It is NOT a
+// defense against a deliberately MALICIOUS author — a compromised or spoofed-slug reviewer endpoint — because
+// node:vm is not a hard isolation boundary. Reviewing untrusted code, or wiring an untrusted reviewer
+// endpoint, is OUT OF SCOPE for these guarantees and would require isolated-vm.
 
 import vm from 'node:vm'
 import { parse, type Node } from 'acorn'
