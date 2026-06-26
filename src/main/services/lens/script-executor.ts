@@ -289,10 +289,183 @@ export function detectNonDeterminism(scriptBody: string): string[] {
   return [...found]
 }
 
+// ── orchestration primitives (批 2) ─────────────────────────────────────────────────────────────────────
+
+// Parity with cc 2.1.186 (zKa=1000): the total agent() spawns across ONE review's lifetime — a runaway
+// backstop set far above any real review (~32-40 agents), never a normal throttle. The CONCURRENCY cap
+// (min(16,cores-2)) is deliberately NOT here: it lives in the spawnAgent hook (批 5 → pool.ts), exactly like
+// the binary, where parallel/pipeline just fire the thunks and a semaphore wraps each individual agent spawn.
+export const LENS_MAX_AGENTS = 1000
+
+// The script-facing agent() options — the Workflow agent opts (label/phase/schema/model/effort/isolation/
+// agentType). Passed through to the spawnAgent hook; unknown keys are preserved.
+export interface AgentOpts {
+  label?: string
+  phase?: string
+  schema?: unknown
+  model?: string
+  effort?: string
+  isolation?: string
+  agentType?: string
+  [k: string]: unknown
+}
+
+export interface OrchestrationHooks {
+  // The host agent-spawn seam: receives the script's prompt + opts, returns the sub-agent's result as
+  // JSON-safe data (text, or parsed structured output). 批 5 wires this to lens step.ts (runAgent over
+  // pool.ts + maxTurns=50); unit tests inject a fake to prove the primitives off-channel.
+  spawnAgent: (prompt: string, opts: AgentOpts) => Promise<unknown>
+  onLog?: (msg: string) => void
+  onPhase?: (title: string) => void
+  maxAgents?: number
+}
+
+function reasonMessage(reason: unknown): string {
+  if (reason instanceof Error) return reason.message
+  if (reason && typeof reason === 'object' && 'message' in reason) return String((reason as { message: unknown }).message)
+  return String(reason)
+}
+
+interface VmBridge {
+  call: (fn: unknown, ...a: unknown[]) => unknown
+  settle: (p: unknown) => Promise<{ v: unknown }>
+  vmClone: (s: string) => unknown
+  wrapHost: (h: unknown) => (...a: unknown[]) => Promise<unknown>
+  toVm: (hostVal: unknown) => unknown
+}
+
+// Compile the cross-realm bridge helpers INSIDE the vm realm (binary AKa/Apt/Eqn/Aqn). The load-bearing rule:
+// EVERYTHING the script can touch must be a vm-realm value. A HOST object or function placed on the context
+// leaks the host realm's Function via `.constructor` (objects: `.constructor.constructor`) — codeGeneration:
+// false only neuters the VM context, so the host realm still generates code → sandbox escape (empirically
+// verified). So:
+//   • call (AKa)    — `(fn,...args) => fn(...args)` — invoke a vm-realm function (a thunk / stage)
+//   • settle (Apt)  — `async v => ({__proto__:null, v: await v})` — await a vm-realm thenable IN-realm, handing
+//                     back a {v} envelope so the host never holds a raw cross-realm thenable
+//   • vmClone       — `s => JSON.parse(s)` — materialize a host JSON value as a FRESH vm-realm object (severs
+//                     host references AND host-realm prototype chain). Binary's Eqn is a deep structured clone;
+//                     the JSON round-trip is the lens-scoped equivalent (§5.4 benign model, JSON-safe data).
+//   • wrapHost (Aqn)— `h => async (...a) => h(...a)` — present a host primitive to the script as a VM-realm
+//                     async function (its `.constructor` is the neutered vm Function), the host fn only closed over.
+function vmBridge(ctx: vm.Context): VmBridge {
+  const call = vm.runInContext('((fn, ...args) => fn(...args))', ctx, { filename: 'lens:call' }) as VmBridge['call']
+  const settle = vm.runInContext('(async v => ({__proto__: null, v: await v}))', ctx, {
+    filename: 'lens:settle',
+  }) as VmBridge['settle']
+  const vmClone = vm.runInContext('(s => JSON.parse(s))', ctx, { filename: 'lens:clone' }) as VmBridge['vmClone']
+  const wrapHost = vm.runInContext('(h => async (...a) => h(...a))', ctx, {
+    filename: 'lens:wrap',
+  }) as VmBridge['wrapHost']
+  const toVm = (hostVal: unknown): unknown => (hostVal === undefined ? undefined : vmClone(JSON.stringify(hostVal)))
+  return { call, settle, vmClone, wrapHost, toVm }
+}
+
+// Inject agent/parallel/pipeline/phase/log onto the vm context, faithfully mirroring the Workflow engine
+// (cc 2.1.186 @20320689 region). Each primitive is a host closure; it is exposed to the script ONLY through
+// bridge.wrapHost so the script-visible function is vm-realm (no host-Function escape).
+function injectPrimitives(ctx: vm.Context, bridge: VmBridge, hooks: OrchestrationHooks): void {
+  const { call, settle, toVm, wrapHost } = bridge
+  const maxAgents = hooks.maxAgents ?? LENS_MAX_AGENTS
+  let agentCount = 0
+  let currentPhase: string | undefined
+
+  // binary E(): cap check before any spawn / fan-out.
+  const checkCap = (): void => {
+    if (agentCount >= maxAgents) {
+      throw new Error(
+        `studio_lens exceeded the ${maxAgents}-agent lifetime cap (runaway fan-out backstop) — the review folds with what completed.`,
+      )
+    }
+  }
+  // Coerce a vm-realm array-like into a host array (the binary's Rqn intake clone): Array.from keeps element
+  // references (thunks stay callable) while giving the host a clean array to map over.
+  const asArray = (v: unknown, what: string): unknown[] => {
+    if (Array.isArray(v) || (v && typeof v === 'object' && typeof (v as { length?: unknown }).length === 'number')) {
+      return Array.from(v as ArrayLike<unknown>)
+    }
+    throw new TypeError(what)
+  }
+
+  // agent(prompt, opts) — spawn ONE read-only reviewer sub-agent (binary U). Counts toward the cap, threads
+  // the current phase onto opts, returns the result cloned into the vm realm.
+  const agent = async (prompt: unknown, opts?: unknown): Promise<unknown> => {
+    checkCap()
+    agentCount++
+    const o: AgentOpts = opts && typeof opts === 'object' ? { ...(opts as AgentOpts) } : {}
+    if (currentPhase !== undefined && o.phase === undefined) o.phase = currentPhase
+    const result = await hooks.spawnAgent(String(prompt), o)
+    return toVm(result)
+  }
+
+  // parallel(thunks) — concurrency barrier (binary V): fire every thunk; a fulfilled thunk → its value, a
+  // thrown thunk → null (degrade, never reject the whole batch). Returns a vm-realm array.
+  const parallel = async (vmArr: unknown): Promise<unknown> => {
+    const thunks = asArray(vmArr, 'parallel() expects an array of functions')
+    if (thunks.length === 0) return toVm([])
+    checkCap()
+    for (const t of thunks) {
+      if (typeof t !== 'function') {
+        throw new TypeError('parallel() expects an array of functions, not promises. Wrap each call: () => agent(...)')
+      }
+    }
+    // `async (t) =>` so a thunk that throws SYNCHRONOUSLY rejects its slot (→ null below) instead of
+    // propagating out of .map and rejecting the whole batch. Upholds the Workflow contract ("a thunk that
+    // throws → null; the call itself never rejects") even for sync throws; normal `() => agent(...)` thunks
+    // reject asynchronously and behave identically.
+    const settled = await Promise.allSettled(thunks.map(async (t) => settle(call(t))))
+    const out = settled.map((r, i) => {
+      if (r.status === 'fulfilled') return r.value.v
+      hooks.onLog?.(`parallel[${i}] failed: ${reasonMessage(r.reason)}`)
+      return null
+    })
+    return toVm(out)
+  }
+
+  // pipeline(items, ...stages) — NO barrier (binary z): each item flows through all stages independently;
+  // every stage receives (prevResult, originalItem, index); a null result short-circuits the item's remaining
+  // stages; a thrown stage → null for that item. Returns a vm-realm array.
+  const pipeline = async (vmItems: unknown, ...stages: unknown[]): Promise<unknown> => {
+    const items = asArray(vmItems, 'pipeline() expects an array as the first argument')
+    if (items.length === 0) return toVm([])
+    checkCap()
+    for (const s of stages) {
+      if (typeof s !== 'function') {
+        throw new TypeError('pipeline() stages must be functions: pipeline(items, item => ..., result => ...)')
+      }
+    }
+    const settled = await Promise.allSettled(
+      items.map(async (item, idx) => {
+        let env = await settle(item)
+        for (const stage of stages) {
+          if (env.v === null) break
+          env = await settle(call(stage, env.v, item, idx))
+        }
+        return env.v
+      }),
+    )
+    const out = settled.map((r, i) => {
+      if (r.status === 'fulfilled') return r.value
+      hooks.onLog?.(`pipeline[${i}] failed: ${reasonMessage(r.reason)}`)
+      return null
+    })
+    return toVm(out)
+  }
+
+  const phaseFn = (t: unknown): void => {
+    currentPhase = typeof t === 'string' ? t : String(t)
+    hooks.onPhase?.(currentPhase)
+  }
+  const logFn = (m: unknown): void => hooks.onLog?.(typeof m === 'string' ? m : `[${typeof m}]`)
+
+  for (const [name, fn] of Object.entries({ agent, parallel, pipeline, phase: phaseFn, log: logFn })) {
+    Object.defineProperty(ctx, name, { value: wrapHost(fn), writable: true, enumerable: true, configurable: true })
+  }
+}
+
 // ── sandbox ─────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface SandboxHooks {
-  // 批 1 surface: orchestration logging only. agent/parallel/pipeline arrive in 批 2.
+  // 批 1 surface: orchestration logging only. agent/parallel/pipeline are injected from OrchestrationHooks (批 2).
   log?: (msg: string) => void
   phase?: (title: string) => void
 }
@@ -301,7 +474,11 @@ export interface SandboxHooks {
 // disabled (eval/Function throw → blocks the classic `constructor.constructor('return process')()` escape),
 // then run the harden + date/random preludes INSIDE the realm, then inject args + log/phase. Returns the
 // context ready for a compiled vm.Script.
-export function createLensSandbox(args: unknown, hooks: SandboxHooks = {}): vm.Context {
+export function createLensSandbox(
+  args: unknown,
+  hooks: SandboxHooks = {},
+  orchestration?: OrchestrationHooks,
+): vm.Context {
   const ctx = vm.createContext(Object.create(null), {
     codeGeneration: { strings: false, wasm: false },
   })
@@ -310,22 +487,30 @@ export function createLensSandbox(args: unknown, hooks: SandboxHooks = {}): vm.C
   vm.runInContext(DATE_RANDOM_SHIM, ctx, { filename: 'lens:shim' })
   vm.runInContext(HARDEN_PRELUDE, ctx, { filename: 'lens:harden' })
 
-  // args injection (@20298180 uses a cross-realm clone bridge; 批 1 uses a JSON-safe host deep-clone — args
-  // are plain data, and the clone severs any aliasing back to the host object. 批 2 swaps in the real clone
-  // bridge for non-JSON values). undefined stays undefined.
-  const clonedArgs = args === undefined ? undefined : JSON.parse(JSON.stringify(args))
+  const bridge = vmBridge(ctx)
+  // args injection (@20298180): clone INTO the vm realm. A host object here would expose host Function via
+  // `args.constructor.constructor` (a sandbox escape, verified) — the round-trip both severs host aliasing
+  // and makes args a vm-realm object. undefined stays undefined. (A circular value throws → runScript's try.)
+  const clonedArgs = args === undefined ? undefined : bridge.vmClone(JSON.stringify(args))
   Object.defineProperty(ctx, 'args', { value: clonedArgs, writable: true, enumerable: true, configurable: true })
 
-  const log = hooks.log ?? (() => {})
-  const phase = hooks.phase ?? (() => {})
-  Object.defineProperty(ctx, 'log', {
-    value: (m: unknown) => log(typeof m === 'string' ? m : `[${typeof m}]`),
-    writable: true, enumerable: true, configurable: true,
-  })
-  Object.defineProperty(ctx, 'phase', {
-    value: (t: unknown) => phase(typeof t === 'string' ? t : String(t)),
-    writable: true, enumerable: true, configurable: true,
-  })
+  if (orchestration) {
+    // 批 2: inject agent/parallel/pipeline + the async bridge; phase/log route to the orchestration hooks.
+    injectPrimitives(ctx, bridge, orchestration)
+  } else {
+    // 批 1: orchestration logging only, no primitives — a script that calls agent() ReferenceErrors. log/phase
+    // go through bridge.wrapHost so they're vm-realm functions, not host-Function escape vectors.
+    const log = hooks.log ?? (() => {})
+    const phase = hooks.phase ?? (() => {})
+    Object.defineProperty(ctx, 'log', {
+      value: bridge.wrapHost((m: unknown) => log(typeof m === 'string' ? m : `[${typeof m}]`)),
+      writable: true, enumerable: true, configurable: true,
+    })
+    Object.defineProperty(ctx, 'phase', {
+      value: bridge.wrapHost((t: unknown) => phase(typeof t === 'string' ? t : String(t))),
+      writable: true, enumerable: true, configurable: true,
+    })
+  }
   return ctx
 }
 
@@ -335,14 +520,17 @@ export interface RunScriptOptions {
   src: string
   args?: unknown
   hooks?: SandboxHooks
+  // When present, agent/parallel/pipeline are injected (批 2) and the script can orchestrate sub-agents.
+  // Absent → 批 1 pure-computation path (no primitives).
+  orchestration?: OrchestrationHooks
   timeoutMs?: number
 }
 
 export type RunScriptResult = { ok: true; meta: ScriptMeta; value: unknown } | { ok: false; error: string }
 
-// The 批 1 end-to-end path (no primitives): parse+validate → transpile → sandbox → compile → run → settle.
-// A pure-computation script (args in, value out) proves the sandbox, the transpile, the determinism shim,
-// and args injection. Scripts that call agent()/parallel()/pipeline() ReferenceError until 批 2.
+// End-to-end: parse+validate → transpile → sandbox → compile → run → settle. Without opts.orchestration this
+// is the 批 1 pure-computation path (args in, value out). With it (批 2), agent/parallel/pipeline are live and
+// the script orchestrates sub-agents through the injected spawnAgent hook.
 export async function runScript(opts: RunScriptOptions): Promise<RunScriptResult> {
   const parsed = parseScript(opts.src)
   if ('error' in parsed) return { ok: false, error: parsed.error }
@@ -367,7 +555,7 @@ export async function runScript(opts: RunScriptOptions): Promise<RunScriptResult
   // (e.g. a circular value), a prelude throw, a script throw, or a sync-timeout — degrades to ok:false
   // instead of escaping runScript.
   try {
-    const ctx = createLensSandbox(opts.args, opts.hooks)
+    const ctx = createLensSandbox(opts.args, opts.hooks, opts.orchestration)
     // Apt settle bridge (@20142011): the wrapped IIFE returns a vm-realm Promise. Awaiting a cross-realm
     // thenable directly is brittle, so we await it INSIDE the realm via a tiny helper that hands back a
     // null-prototype { v } envelope — the host then reads `.v`.
