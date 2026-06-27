@@ -42,6 +42,7 @@ interface SubjectInput {
   tokens?: number // this agent's output-token count, set on its done event — the Workflow per-agent token readout
   lastTool?: string // #8: the tool this agent is CURRENTLY running (Workflow lastToolName) — coarse per-tool liveness
   lastToolSummary?: string // #8: a short hint of that tool's input (Workflow lastToolSummary), e.g. the file/pattern/command
+  cardNote?: string // a short outcome summary set on done (e.g. a finder's "3 findings") so the row isn't blank/misleading
 }
 const subjInput = (t: ToolCall | undefined): SubjectInput => ((t?.input ?? {}) as SubjectInput)
 const firstLine = (s?: string): string => (s ?? '').split('\n').map((x) => x.trim()).find(Boolean) ?? ''
@@ -231,11 +232,13 @@ function FinderRow({ lens, tool, cands }: { lens: string; tool?: ToolCall; cands
     ? (toolHint(inp) || 'finding…')
     : queued
       ? 'queued'
-      : hasVerdict
-        ? firstLine(tool?.result)
-        : cands.length > 0
-          ? breakdown
-          : 'no candidate'
+      : inp.cardNote
+        ? inp.cardNote
+        : hasVerdict
+          ? firstLine(tool?.result)
+          : cands.length > 0
+            ? breakdown
+            : firstLine(tool?.result) || 'done'
   return (
     <div className="pe-row-wrap">
       <div className={'pe-row pe-find' + (flagged ? ' flagged' : '') + (queued ? ' queued' : '')}>

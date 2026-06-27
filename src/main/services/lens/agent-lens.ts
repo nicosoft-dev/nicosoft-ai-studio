@@ -82,6 +82,22 @@ function reviewShapeFor(reviewerRoleId: string): ReturnType<typeof shapeFor> {
 const schemaHint = (schema: unknown): string =>
   `\n\nReturn ONLY a single \`\`\`json fenced block that matches this JSON Schema — no prose before or after:\n${JSON.stringify(schema)}`
 
+// A short, human card summary from a sub-agent's parsed structured reply, so the panel row reflects the ACTUAL
+// outcome: a finder's finding COUNT (not a misleading "no candidate"), a skeptic's REFUTE/uphold vote (not "—").
+// Tolerant of the common shapes the template + a well-authored script use; an unknown shape → nothing (the row
+// falls back to the agent's own first line of output).
+function cardSummary(parsed: unknown): { cardNote?: string; vote?: string } {
+  if (!parsed || typeof parsed !== 'object') return {}
+  const o = parsed as Record<string, unknown>
+  if (Array.isArray(o.findings)) {
+    const n = o.findings.length
+    return { cardNote: n === 0 ? 'no issues' : `${n} finding${n === 1 ? '' : 's'}` }
+  }
+  if (typeof o.stands === 'boolean') return { vote: o.stands ? 'uphold' : 'refute' } // defect stands = couldn't refute
+  if (typeof o.refuted === 'boolean') return { vote: o.refuted ? 'refute' : 'uphold' }
+  return {}
+}
+
 // The spawnAgent hook the script-executor calls for every agent(): emit the Subject card, run the sub-agent over
 // step.ts (maxTurns=50 + pool slot + 1000-cap), parse a schema'd reply. A throw propagates so parallel()/
 // pipeline() degrade that slot to null (never aborting the batch).
@@ -118,6 +134,9 @@ function makeSpawnAgent(deps: LensDeps, reviewerRoleId: string, panelId: string,
       // Acquire the global pool slot (min(16,cores-2), Workflow parity) AROUND the spawn — parallel()/pipeline()
       // fire all thunks at once, so the concurrency cap MUST live here at the leaf, not in the fan-out primitives.
       const out = await withLensSlot(() => deps.runAgent(spec))
+      // Parse the structured reply ONCE (schema'd agents only) — reused for the return value AND the card summary
+      // so the row shows the agent's outcome (finding count / refute verdict), not a misleading "no candidate"/"—".
+      const parsed = opts.schema ? parseStructured(out.text) : undefined
       deps.cb.onToolEvent?.(reviewerRoleId, {
         type: 'sub_tool_done',
         toolUseId: toolId,
@@ -125,9 +144,9 @@ function makeSpawnAgent(deps: LensDeps, reviewerRoleId: string, panelId: string,
         name,
         isError: false,
         result: out.text,
-        input: { tokens: out.outputTokens },
+        input: { tokens: out.outputTokens, ...cardSummary(parsed) },
       })
-      return opts.schema ? (parseStructured(out.text) ?? {}) : out.text
+      return opts.schema ? (parsed ?? {}) : out.text
     } catch (e) {
       deps.cb.onToolEvent?.(reviewerRoleId, {
         type: 'sub_tool_done',
