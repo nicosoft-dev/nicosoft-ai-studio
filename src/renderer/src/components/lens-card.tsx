@@ -411,7 +411,15 @@ function LiveCard({ tool }: { tool: ToolCall }): ReactElement {
       </button>
       {open ? (
         <div className="pe-body">
-          {isUnderstand ? (
+          {running && agentN === 0 ? (
+            // The panel opens BEFORE the (slow) authoring LLM call, so for a beat no agents exist yet. Show a status
+            // line instead of an empty "Find 0/0", so the card never reads as stuck/empty while the model authors.
+            <div className="pe-row pe-find">
+              <span className="tr-dot pe-row-dot" />
+              <span className="pe-subject">{orchestration === 'authored' ? 'creating' : 'starting'}</span>
+              <span className="pe-summary">{orchestration === 'authored' ? 'the reviewer is planning the review…' : 'starting the review…'}</span>
+            </div>
+          ) : isUnderstand ? (
             <>
               <PhaseHeader label="Read" done={finderDoneN} total={finderN} />
               {finderKeys.map((p) => <ReaderRow key={p} path={p} tool={finders.get(p)} />)}
