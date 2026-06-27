@@ -303,8 +303,9 @@ export function ChatSegment({
   // Foldable: a dispatched expert step inside a panel/debate (has a chain, isn't Coordinator's intro/synthesis).
   // Parallel/council stack many of these, so once a step finishes streaming we collapse it to a one-line
   // summary — the user watches it stream live, then it folds away, leaving Coordinator's synthesis prominent.
-  // A Verifier segment never folds: it is a primary step of the closure flow (full verdict body + its panel).
-  const foldable = !isUser && !synthesis && !verifier && !!first.dispatch?.length && first.expertId != null && first.expertId !== 'coordinator'
+  // Verifier folds like any other non-host expert step: in a coordinator/collab conversation only the host
+  // (Coordinator) stays expanded; every other speaker — implementers AND the verifier — collapses to a window.
+  const foldable = !isUser && !synthesis && !!first.dispatch?.length && first.expertId != null && first.expertId !== 'coordinator'
   const [expanded, setExpanded] = useState(false)
   const bodyRef = useRef<HTMLDivElement>(null)
   // Folded expert steps render in a fixed-height scroll WINDOW from the start (not collapsed to a line):

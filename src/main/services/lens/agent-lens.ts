@@ -93,8 +93,19 @@ function cardSummary(parsed: unknown): { cardNote?: string; vote?: string } {
     const n = o.findings.length
     return { cardNote: n === 0 ? 'no issues' : `${n} finding${n === 1 ? '' : 's'}` }
   }
+  // Skeptic verdict — the fallback template uses `stands`, but an AUTHORED script may name the field differently.
+  // Tolerate the common boolean/string shapes so the row shows REFUTE/uphold instead of a bare "—"; unknown → none.
   if (typeof o.stands === 'boolean') return { vote: o.stands ? 'uphold' : 'refute' } // defect stands = couldn't refute
   if (typeof o.refuted === 'boolean') return { vote: o.refuted ? 'refute' : 'uphold' }
+  if (typeof o.upheld === 'boolean') return { vote: o.upheld ? 'uphold' : 'refute' }
+  if (typeof o.real === 'boolean') return { vote: o.real ? 'uphold' : 'refute' }
+  if (typeof o.isRealDefect === 'boolean') return { vote: o.isRealDefect ? 'uphold' : 'refute' }
+  if (typeof o.falsePositive === 'boolean') return { vote: o.falsePositive ? 'refute' : 'uphold' }
+  if (typeof o.verdict === 'string') {
+    const v = o.verdict.toLowerCase()
+    if (v.includes('refut') || v.includes('false') || v === 'fp') return { vote: 'refute' }
+    if (v.includes('uphold') || v.includes('upheld') || v.includes('stand') || v.includes('confirm') || v.includes('real')) return { vote: 'uphold' }
+  }
   return {}
 }
 
@@ -213,6 +224,14 @@ async function runReviewViaScript(
   // fan-out; everything else runs the fixed CODE_REVIEW_TEMPLATE.
   const slug = rolesService.getBinding(reviewerRoleId)?.model ?? ''
   const willAuthor = canAuthorScript(slug)
+  // Give the reviewer its OWN chat segment + live "Thinking…" the SAME way an implementer (Flynn/Shuri) surfaces:
+  // onStepStart opens its bubble, the streaming flag drives the live readout, onStepDone (finally) settles it with
+  // the verdict. The reviewer orchestrates sub-agents and emits no prose itself, so WITHOUT this it never appears
+  // in chat — only its panel card does. segmentKind 'verifier' tags identity; fold/activity/layout render exactly
+  // like the implementer segments. (The ctx.panel shim no-ops onStepStart, so the bubble surfaces on the gate-b
+  // path; the panel card is unaffected either way.)
+  deps.cb.onStepStart(reviewerRoleId, opts.dispatch ?? [reviewerRoleId], slug, 'verifier')
+  deps.cb.onExpertActive?.(reviewerRoleId, true)
   // Open the panel NOW — before the authoring turn (tens of seconds on a high-effort model), so the review is
   // VISIBLE the moment it starts (else the card only appears after authoring → "lens didn't start"). NO pre-baked
   // roster: rows derive from the agents the script ACTUALLY spawns (the old hardcoded `shape.angles` roster made an
@@ -256,6 +275,10 @@ async function runReviewViaScript(
   } finally {
     const summary = `${review.confirmed.length} confirmed, ${review.refuted.length} dropped across ${review.subjects.length} lens(es)`
     deps.cb.onToolEvent?.(reviewerRoleId, { type: 'sub_tool_done', toolUseId: panelId, parentToolId: 'coordinator-gate-b', name: 'StudioLens', isError: false, result: summary })
+    // Settle the reviewer's chat segment — its verdict (report, else the count summary) becomes the bubble text,
+    // clear the live readout, end the turn. Mirrors an implementer's onStepDone.
+    deps.cb.onExpertActive?.(reviewerRoleId, false)
+    deps.cb.onStepDone(reviewerRoleId, review.report ?? summary, 0)
   }
   return review
 }

@@ -449,7 +449,7 @@ function LiveCard({ tool }: { tool: ToolCall }): ReactElement {
                 // in the header (agentN) but never shown (header said 11 agents while the body listed only 9).
                 <>
                   <PhaseHeader label="Verify" done={allSkeptics.filter(isDone).length} total={allSkeptics.length} />
-                  {allSkeptics.map((s, i) => <SkepticLine key={s.id} tool={s} idx={i} />)}
+                  <div className="pe-row-wrap">{allSkeptics.map((s, i) => <SkepticLine key={s.id} tool={s} idx={i} />)}</div>
                 </>
               ) : null}
               {synth ? (
