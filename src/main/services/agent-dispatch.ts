@@ -288,7 +288,7 @@ export async function runAgentLoop(
     // Reclaim playwright_browser sessions this run launched and never closed — without this, a run that ends,
     // aborts, or errors mid-verification leaks a live Chromium/Electron process per forgotten session.
     void disposePlaywrightSessionsOwnedBy(loop.runId).then((n) => {
-      if (n > 0) console.warn(`[agent] reclaimed ${n} unclosed e2e browser session(s) for run ${loop.runId}`)
+      if (n > 0) console.warn(`[agent] reclaimed ${n} unclosed playwright browser session(s) for run ${loop.runId}`)
     })
   }
 
