@@ -67,6 +67,11 @@ export interface CollabHooks {
   // A collab expert entered/left a turn batch (active true/false) — drives the parked-readout toggle so a
   // parked expert (done its turn, waiting) stops showing "Thinking…".
   onExpertActive?: (roleId: string, active: boolean) => void
+  // The studio_lens reviewer (chooseVerifierRole) runs NESTED inside a builder's turn (ctx.panel), so it is not
+  // a top-level expert — these forward its OWN step lifecycle to the coordinator (→ cb.onStepStart/onStepDone)
+  // so it gets a verifier chat bubble the same way Gate-B's reviewer does. Active reuses onExpertActive.
+  onReviewerStepStart?: (roleId: string, dispatch: string[] | null, model: string) => void
+  onReviewerStepDone?: (roleId: string, text: string) => void
   requestPermission: (roleId: string, req: PermissionRequest, signal?: AbortSignal) => Promise<PermissionDecision>
   // phase 5c-C3: snapshot of the live dev services the collaboration started (empty when none / on teardown).
   onServices?: (services: ServiceInfo[]) => void
@@ -263,7 +268,12 @@ export async function runCollabSession(
                 permissionMode: x.permissionMode ?? 'default',
                 signal: sig,
                 onStream: (ev) => hooks.onExpertStream(x.roleId, ev),
-                requestPermission: (req, s) => hooks.requestPermission(x.roleId, req, s)
+                requestPermission: (req, s) => hooks.requestPermission(x.roleId, req, s),
+                // Reviewer bubble (③b): forward its step lifecycle out so a ctx.panel-driven review surfaces a
+                // verifier bubble. Presence of onReviewerStepStart also gates persistence (solo leaves it unset).
+                onReviewerStepStart: hooks.onReviewerStepStart,
+                onReviewerStepDone: hooks.onReviewerStepDone,
+                onReviewerActive: hooks.onExpertActive
               })
             : undefined,
           onSubAgentToolEvent: (ev) => hooks.onExpertStream(x.roleId, ev),

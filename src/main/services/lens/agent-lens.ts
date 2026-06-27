@@ -15,6 +15,7 @@ import { ulid } from '../../db/id'
 import * as rolesService from '../roles.service'
 import * as settingsService from '../settings.service'
 import * as workspaceTasks from '../workspace-tasks.service'
+import * as convService from '../conversation.service'
 import { chooseVerifierRole } from './verifier'
 import { shapeFor, tierFromDepth } from './tiers'
 import { makeLensDeps, READER_SYSTEM } from './step'
@@ -209,6 +210,7 @@ async function runReviewViaScript(
   baseRef: string,
   breadthInput: 'thorough' | 'conservative',
   stepId: string,
+  persist: boolean,
 ): Promise<ScriptReview> {
   // Docs-only target on the conservative (Gate-B floor) path → no code risk → no panel, zero LLM. An EXPLICIT
   // review (thorough) is honored even for a .md (the user asked).
@@ -277,8 +279,32 @@ async function runReviewViaScript(
     deps.cb.onToolEvent?.(reviewerRoleId, { type: 'sub_tool_done', toolUseId: panelId, parentToolId: 'coordinator-gate-b', name: 'StudioLens', isError: false, result: summary })
     // Settle the reviewer's chat segment — its verdict (report, else the count summary) becomes the bubble text,
     // clear the live readout, end the turn. Mirrors an implementer's onStepDone.
+    const verdict = review.report ?? summary
+    // PERSIST that verdict as the reviewer's OWN segment (segmentKind 'verifier'), the SAME way an implementer's
+    // turn lands via convService.append — onStepDone only emits the live IPC, so without this the bubble is
+    // runtime-only and vanishes on reopen. The reviewer is a sub-expert nested in a builder's turn (ctx.panel) or
+    // the Gate-B floor: it's in NO top-level collab `results` map and its finder/skeptic sub-agents run `quiet`, so
+    // this finally is the ONE place its verdict can be stored. It orchestrates sub-agents and bills no LLM tokens
+    // itself → 0. `persist` is false ONLY on the solo path (no coordinator step stream there yet — deferred).
+    if (persist && verdict) {
+      try {
+        convService.append(opts.convId, {
+          author: 'expert',
+          expertId: reviewerRoleId,
+          model: slug,
+          content: verdict,
+          dispatch: opts.dispatch ?? [reviewerRoleId],
+          segmentKind: 'verifier',
+          inputTokens: 0,
+          outputTokens: 0,
+          sentTokens: 0,
+        })
+      } catch (e) {
+        console.warn('[studio-lens] failed to persist reviewer verifier segment (bubble stays runtime-only):', e instanceof Error ? e.message : e)
+      }
+    }
     deps.cb.onExpertActive?.(reviewerRoleId, false)
-    deps.cb.onStepDone(reviewerRoleId, review.report ?? summary, 0)
+    deps.cb.onStepDone(reviewerRoleId, verdict, 0)
   }
   return review
 }
@@ -303,7 +329,9 @@ export async function runLensReview(
     const target = await buildChangedSet(opts.cwd, baseRef, baseChanged, implementerFiles)
     if (target.changed.length === 0) return []
     const reviewOpts: RunStepOptions = { ...opts, signal: signal ?? opts.signal }
-    const run = await runReviewViaScript(reviewOpts, reviewer, target, baseRef, 'conservative', stepId)
+    // Gate-B floor: deps.cb is the REAL coordinator callback (not the shim), so the reviewer bubble already
+    // fires live — persist=true lands it in the conversation store too (③a).
+    const run = await runReviewViaScript(reviewOpts, reviewer, target, baseRef, 'conservative', stepId, true)
     if (run.failed) console.warn('[studio-lens] gate-b review script failed — floor verdict stands (no lens amplification)')
     return run.subjects
   } catch (e) {
@@ -332,6 +360,7 @@ export async function runConsolidatedReview(
   originalPrompt: string,
   owner: string,
   baseRef = 'HEAD',
+  persist = true,
 ): Promise<ConsolidatedReviewOutcome> {
   const reviewer = chooseVerifierRole(implementers)
   const implSet = new Set(Array.isArray(implementers) ? implementers : [implementers])
@@ -339,7 +368,7 @@ export async function runConsolidatedReview(
     return { ok: false, message: 'studio_lens (review) needs at least one configured expert independent of the implementer(s) to act as the reviewer, but none is bound. Configure another expert (e.g. Analyst/Shuri/Flynn) and retry.', confirmed: [], refuted: [], produced: [], report: null }
   }
   const paths = target.changed
-  const run = await runReviewViaScript(opts, reviewer, target, baseRef, 'thorough', ulid())
+  const run = await runReviewViaScript(opts, reviewer, target, baseRef, 'thorough', ulid(), persist)
 
   if (run.failed) {
     return { ok: false, message: 'studio_lens could not complete: the review script failed to execute (likely a reviewer-endpoint or sandbox fault). Retry, or review the target manually — this is NOT an all-clear.', reviewer, confirmed: [], refuted: [], produced: [], report: null }
@@ -453,6 +482,14 @@ export interface LensHandleDeps {
   onStream: (e: AgentLlmEvent) => void
   onToolImage?: (attachment: MessageAttachmentDto) => void
   requestPermission: (req: PermissionRequest, signal?: AbortSignal) => Promise<PermissionDecision>
+  // The reviewer's OWN chat segment (segmentKind 'verifier'), forwarded to the coordinator so a ctx.panel-driven
+  // review surfaces a bubble the SAME way Gate-B does (the shim used to no-op these → the bubble only appeared on
+  // Gate-B). Optional + only set on the collab path: the solo path (agent-dispatch) leaves them unset — solo has
+  // no coordinator step stream yet (bubble unification deferred), so the shim no-ops them and persistence is off
+  // (the persist gate is `!!onReviewerStepStart`). onReviewerActive reuses the existing per-expert active toggle.
+  onReviewerStepStart?: (roleId: string, dispatch: string[] | null, model: string) => void
+  onReviewerStepDone?: (roleId: string, text: string) => void
+  onReviewerActive?: (roleId: string, active: boolean) => void
 }
 
 export function createLensHandle(deps: LensHandleDeps): PanelHandle {
@@ -469,9 +506,16 @@ export function createLensHandle(deps: LensHandleDeps): PanelHandle {
 
       const shim: CoordinatorCallbacks = {
         onDispatch: () => {},
-        onStepStart: () => {},
+        // The reviewer (chooseVerifierRole) is the ONLY caller of onStepStart/onStepDone on this shim — its
+        // finder/skeptic sub-agents run `quiet` and surface solely through onToolEvent. Forward the reviewer's
+        // step lifecycle so it gets its OWN chat bubble on the ctx.panel path too (a collab builder driving
+        // studio_lens in its turn), exactly as it does on Gate-B. (These were no-ops → the bubble only ever
+        // appeared on Gate-B.) onToolEvent is UNCHANGED: the panel card stays under the builder (the intended
+        // "card-only" panel behavior — the chat bubble is the only thing that was missing).
+        onStepStart: (roleId, dispatch, model) => deps.onReviewerStepStart?.(roleId, dispatch, model),
         onDelta: () => {},
-        onStepDone: () => {},
+        onStepDone: (roleId, text) => deps.onReviewerStepDone?.(roleId, text),
+        onExpertActive: (roleId, active) => deps.onReviewerActive?.(roleId, active),
         onToolEvent: (_roleId, ev: AgentEvent | AgentLlmEvent) => {
           if (ev.type !== 'assistant' && ev.type !== 'tool_results' && ev.type !== 'compaction') deps.onStream(ev)
         },
