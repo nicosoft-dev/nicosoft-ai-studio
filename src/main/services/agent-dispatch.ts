@@ -242,7 +242,7 @@ export async function runAgentLoop(
   // Gated by hasAny so a session with no SessionStart hook pays nothing.
   if (hookRegistry.hasAny('SessionStart')) {
     const ss = await runHooks('SessionStart', { ...baseHookPayload('SessionStart', ctx) }, hookContextFromAgent(ctx))
-    if (ss.watchPaths.length > 0) fileWatchManager.arm(loop.convId, ss.watchPaths, { cwd, sessionDir, roleId: loop.roleId })
+    if (ss.watchPaths.length > 0) await fileWatchManager.arm(loop.convId, ss.watchPaths, { cwd, sessionDir, roleId: loop.roleId })
   }
   try {
     for (;;) {

@@ -207,6 +207,10 @@ function mergeResults(event: HookEventName, results: HookOutcome[]): MergedHookR
     perm = 'passthrough'
     merged.blockingErrors = []
     merged.preventContinuation = false
+    // A non-blocking event also can't rewrite a tool's input/output — there is no action to mutate — so drop
+    // those too, or a misconfigured notification hook could smuggle a mutation out through such an event.
+    merged.updatedInput = undefined
+    merged.updatedToolOutputs = []
   }
   merged.permissionBehavior = perm === 'passthrough' ? undefined : perm
   merged.permissionReason = reason

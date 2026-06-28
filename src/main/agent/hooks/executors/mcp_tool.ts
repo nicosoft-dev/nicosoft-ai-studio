@@ -14,6 +14,9 @@ function lookupPath(root: unknown, path: string): unknown {
   let cur: unknown = root
   for (const seg of path.split('.')) {
     if (cur == null || typeof cur !== 'object') return undefined
+    // Never traverse prototype-chain keys — a config-authored ${__proto__.…} / ${constructor.…} must not read
+    // built-in machinery into the MCP input. Treat such a segment as a missing field.
+    if (seg === '__proto__' || seg === 'constructor' || seg === 'prototype') return undefined
     cur = (cur as Record<string, unknown>)[seg]
   }
   return cur

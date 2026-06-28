@@ -7,6 +7,7 @@
 // own `if` (e.g. "Bash(git *)") is a finer permission-rule prefilter evaluated against the actual tool call so
 // a non-matching call never even spawns the hook.
 
+import { basename } from 'node:path'
 import * as settingsService from '../../services/settings.service'
 import type { HookConfig } from './types'
 import type { HookEventName, HookPayload } from './events'
@@ -44,14 +45,39 @@ export function loadSettingsHooks(event: HookEventName): MatchedHook[] {
   return out
 }
 
+// The field a matcher selects against is event-specific (mirrors the reference's per-event query selection): a
+// tool event matches on the tool name; SubagentStart/SubagentStop on the sub-agent type; SessionStart on its
+// source; FileChanged on the changed file's basename; PreCompact on the compaction trigger. Reading tool_name
+// for every event silently broke matchers on non-tool events (e.g. a SubagentStop matcher, wired this batch,
+// never fired). An event with no selectable field resolves to '' → only the empty/"*" matcher matches it.
+function matcherQuery(payload: HookPayload): string {
+  const s = (v: unknown): string => (typeof v === 'string' ? v : '')
+  switch (payload.hook_event_name) {
+    case 'SubagentStart':
+    case 'SubagentStop':
+      return s(payload.agent_type)
+    case 'SessionStart':
+      return s(payload.source)
+    case 'FileChanged': {
+      const f = s(payload.filename) || s(payload.path)
+      return f ? basename(f) : ''
+    }
+    case 'PreCompact':
+      return s(payload.trigger)
+    default:
+      return s(payload.tool_name)
+  }
+}
+
 // gHm matcher: empty / "*" → match all; a pure identifier (optionally "A|B|C") → literal/alias membership; any
-// other string → regex. Matched against the tool name for a tool event (the only thing a matcher selects on).
+// other string → regex. Matched against the event's selectable field (see matcherQuery): the tool name for a
+// tool event, the sub-agent type for SubagentStop, etc.
 export function matchesMatcher(matcher: string | undefined, payload: HookPayload): boolean {
   if (!matcher || matcher === '*') return true
-  const toolName = typeof payload.tool_name === 'string' ? payload.tool_name : ''
-  if (/^[A-Za-z0-9_|]+$/.test(matcher)) return matcher.split('|').includes(toolName)
+  const query = matcherQuery(payload)
+  if (/^[A-Za-z0-9_|]+$/.test(matcher)) return matcher.split('|').includes(query)
   try {
-    return new RegExp(matcher).test(toolName)
+    return new RegExp(matcher).test(query)
   } catch {
     return false // an invalid regex matches nothing rather than throwing
   }

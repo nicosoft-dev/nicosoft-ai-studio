@@ -68,7 +68,50 @@ export async function safeFetch(url: string, init?: Parameters<typeof undiciFetc
       lookup: (_hostname, _options, cb: (err: Error | null, address: string, family: number) => void) => cb(null, pinned.address, pinned.family),
     },
   })
-  return undiciFetch(url, { ...init, dispatcher: agent }) as unknown as Response
+  // The Agent is a connection pool holding its own keep-alive socket, and it is created PER CALL (the pinned
+  // lookup is per-request). It MUST be destroyed or the socket leaks across the repeating cadence this guard
+  // runs on — the Monitor probe (per interval) and the http hook (per event). Tie its lifetime to the response
+  // body: destroy once the caller finishes reading it (done), cancels it, or the stream errors — or immediately
+  // if there is no body / the request never produced a response. destroyAgent is idempotent.
+  let destroyed = false
+  const destroyAgent = (): void => {
+    if (destroyed) return
+    destroyed = true
+    void agent.destroy()
+  }
+  let res: Response
+  try {
+    res = (await undiciFetch(url, { ...init, dispatcher: agent })) as unknown as Response
+  } catch (err) {
+    destroyAgent()
+    throw err
+  }
+  if (!res.body) {
+    destroyAgent()
+    return res
+  }
+  const source = res.body.getReader()
+  const wrapped = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await source.read()
+        if (done) {
+          destroyAgent()
+          controller.close()
+          return
+        }
+        controller.enqueue(value)
+      } catch (err) {
+        destroyAgent()
+        controller.error(err)
+      }
+    },
+    cancel(reason) {
+      destroyAgent()
+      return source.cancel(reason)
+    },
+  })
+  return new Response(wrapped, { status: res.status, statusText: res.statusText, headers: res.headers })
 }
 
 // Private / loopback / link-local / CGNAT / cloud-metadata / ULA / multicast / unspecified ranges. We use

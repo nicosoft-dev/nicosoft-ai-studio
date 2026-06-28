@@ -328,6 +328,10 @@ export class CollabSession {
       }
     }
     e.exited = true // the loop is gone — injectExternal must not route a note here (it can never drain again)
+    // If the loop ERROR-exited with notes still queued (an inject landed while it was running, then the turn threw
+    // before its pre-park drain), reroute them to a surviving live expert — `exited` is already set so they can't
+    // route back here. No live peer → injectExternal drops them (documented terminal loss), never a dead queue.
+    if (e.pendingResults.length) for (const note of e.pendingResults.splice(0)) this.injectExternal(note)
     e.status = 'parked'
     // Mark this expert parked + drained so the quiescence sweep doesn't keep waiting on it. A peer parked in
     // wait() on a reply from this expert resolves via the global quiescence check (all parked → end), so a
