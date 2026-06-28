@@ -97,7 +97,11 @@ export interface AgentResult {
   // 'incomplete' = an implementation-gated run (expectsFileChanges) ended via the empty-turn-after-work
   // path with ZERO file edits: the upstream returned empty content (provider fault / mid-turn truncation),
   // not the model deciding it was done. Must NOT read as a clean completion — see docs/empty-turn-after-work.md.
-  reason: 'completed' | 'max_turns' | 'aborted' | 'thrash_stop' | 'incomplete'
+  // 'refusal' = the model declined (stop_reason: 'refusal') with no content. A DISTINCT terminal, never folded
+  // into 'completed': re-dispatching the SAME context refuses identically, so callers must surface it as blocking
+  // and NOT retry blindly (Gate B short-circuits its verify/closure loop on it) — laundering it into a clean
+  // 'completed' was the hollow-DONE bug (refuse → verify "empty diff" → re-dispatch → refuse → "done", zero work).
+  reason: 'completed' | 'max_turns' | 'aborted' | 'thrash_stop' | 'incomplete' | 'refusal'
   messages: AgentMessage[]
   turns: number
   // Compaction firings this run (layer 2 / layer 3) — surfaced into run-stats so long-run behavior
@@ -604,7 +608,9 @@ export async function* runAgent(
         const note: AgentMessage = { role: 'assistant', content: [{ type: 'text', text: 'The model declined to respond to this request (refusal).' }] }
         messages.push(note)
         yield { type: 'assistant', message: note, usage: assistant.usage }
-        return { reason: 'completed', messages, turns, compactions, compact: carryOut() }
+        // Distinct 'refusal' reason (NOT 'completed'): the model declined. The dispatch/Gate-B layer surfaces it as
+        // blocking and skips the verify/closure re-dispatch — re-sending the same context refuses identically.
+        return { reason: 'refusal', messages, turns, compactions, compact: carryOut() }
       }
       // A max_tokens turn whose ONLY block was a tool_use truncated mid-json had that block dropped by the
       // llm layer, landing here content-less WITH stopReason==='max_tokens'. That is an output-size cap, not

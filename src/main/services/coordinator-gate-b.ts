@@ -148,6 +148,23 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
   }
   gate.approvedPlan = result.text
 
+  // Model REFUSAL short-circuit (mirrors the verifier-infra-failure guard below): the implementer's loop ended on
+  // a refusal (stop_reason: 'refusal') — the model declined to act on this request as framed. Running the verifier
+  // + closure loop is futile: every re-dispatch carries the SAME context and refuses identically (the dogfood saw
+  // refuse → verify "empty diff" → re-dispatch → refuse again, then a hollow "done" with zero work). Stop here —
+  // record it as 'unresolved' (can't call it done; surfaces to the user) and return WITHOUT the verify/closure
+  // loop. Never launder a refusal into a clean completion.
+  if (result.reason === 'refusal') {
+    console.warn(`[coordinator] gate-b implementer REFUSED (${roleId}) — surfacing as unresolved, skipping verify/closure (a re-dispatch would refuse identically)`)
+    recordOutcome('unresolved', 1, 'model refused (stop_reason: refusal)')
+    return {
+      ...result,
+      gateOutcome: 'unresolved',
+      gateEvidence: 'The model refused to act on this request as framed (stop_reason: refusal). Re-dispatching the same context refuses identically — a human must adjust the request or context.',
+      text: `${result.text}\n\n[BLOCKED — model refusal: the implementer declined to act on this request as framed. The verify/closure loop was skipped because re-dispatching the same context refuses identically. Surface to the user; this is NOT a completed step.]`
+    }
+  }
+
   // Gate B is an INDEPENDENT quality check, not a coordinator-driven fix loop: the implementer already
   // self-tests inside its own agent loop, so no blanket "retry N times" here. One verification of the
   // implementer's result; on FAIL, one fail-handler closure; the ONLY extra verifier pass is checking a

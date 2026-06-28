@@ -319,6 +319,13 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
     if (res.reason === 'incomplete') {
       text = `${text ? `${text}\n\n` : ''}[Upstream interruption: this step was cut off with zero file edits — the implementation did not land; treat the result as incomplete.]`
     }
+    // The model REFUSED this request (stop_reason: 'refusal'). Label it loudly so every downstream reader (the
+    // persisted message, synthesis, Gate B) sees a refusal, not a clean result — re-dispatching the SAME context
+    // refuses identically, so it is surfaced as blocking and never retried blindly (Gate B short-circuits its
+    // verify/closure loop on this reason).
+    if (res.reason === 'refusal') {
+      text = `${text ? `${text}\n\n` : ''}[Model refusal: the model declined to act on this request as framed. Re-dispatching the same context will refuse again — surface this to the user; do not retry blindly.]`
+    }
     // Persist the step + any images its tools generated (Georgia) — text OR an attachment lands the message,
     // so a reopened conversation re-reads the image from the DB. Empty + image-only turns still persist.
     // quiet (closure-loop): a card-only step persists NO segment of its own (it rides the caller's sub_tool card).
