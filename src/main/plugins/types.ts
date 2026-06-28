@@ -2,8 +2,10 @@ import { z } from 'zod'
 
 // A plugin manifest (plugin.json) — studio's simplified take on a plugin-manifest schema. mcpServers
 // are declared inline (the same shape studio's McpManager understands); roles are studio custom-role
-// definitions; skills live under a skills/ folder (auto-discovered, each subdir holding a SKILL.md).
-// marketplace / git / hooks / commands / lsp / outputStyles are intentionally out of scope.
+// definitions; skills live under a skills/ folder (auto-discovered, each subdir holding a SKILL.md);
+// hooks use the same settings.json `hooks` shape (event → matcher groups) and are surfaced to the hook
+// registry for enabled plugins (source 'plugin'). marketplace / git / commands / lsp / outputStyles
+// are intentionally out of scope.
 export const PluginManifestSchema = z.object({
   name: z.string().min(1),
   version: z.string().optional(),
@@ -21,7 +23,10 @@ export const PluginManifestSchema = z.object({
         exampleQueries: z.array(z.string()).optional()
       })
     )
-    .optional()
+    .optional(),
+  // event name → array of matcher groups (`[{ matcher?, hooks: [config...] }]`), same shape as settings.json
+  // `hooks`. Validated structurally here; each hook config is validated when flattened (config.ts).
+  hooks: z.record(z.string(), z.array(z.unknown())).optional()
 })
 export type PluginManifest = z.infer<typeof PluginManifestSchema>
 

@@ -3,7 +3,10 @@ import * as skillService from './skill.service'
 import * as mcpService from './mcp.service'
 import * as rolesService from './roles.service'
 import { parsePlugin } from '../plugins/manifest'
+import { flattenHookGroups } from '../agent/hooks/config'
+import { hookRegistry, type MatchedHook } from '../agent/hooks/registry'
 import type { PluginRow } from '../repos/plugin.repo'
+import type { HookEventName } from '../agent/hooks/events'
 import type { McpServerInput, PluginBundleDto, PluginDto } from '../ipc/contracts'
 
 // A plugin is an aggregate installer: it owns no capability of its own, it registers a plugin's
@@ -24,6 +27,48 @@ function toDto(row: PluginRow): PluginDto {
 
 export function list(): PluginDto[] {
   return pluginRepo.list().map(toDto)
+}
+
+// ── Plugin hooks: the hook registry's 'plugin' source ──────────────────────────────────────────────────────
+// Enabled plugins' manifest `hooks` (settings.json shape) are merged into the hook registry. Parsing a manifest
+// hits disk and the registry calls this on hot paths (hasAny/getMatching), so the flattened result is cached and
+// re-parsed only when the set of enabled plugins changes (id+dirPath signature) — self-invalidating across
+// install / uninstall / enable-toggle without any explicit cache-busting.
+let hooksCacheSig: string | null = null
+let hooksCacheByEvent = new Map<string, MatchedHook[]>()
+
+function rebuildPluginHooksIfChanged(): void {
+  const enabled = pluginRepo.list().filter((r) => r.enabled)
+  const sig = enabled.map((r) => `${r.id}@${r.dirPath}`).join('|')
+  if (sig === hooksCacheSig) return
+  const byEvent = new Map<string, MatchedHook[]>()
+  for (const row of enabled) {
+    let hooks: unknown
+    try {
+      hooks = parsePlugin(row.dirPath).manifest.hooks
+    } catch {
+      continue // a plugin whose dir/manifest is gone or invalid contributes no hooks (never break resolution)
+    }
+    if (!hooks || typeof hooks !== 'object') continue
+    for (const [event, groups] of Object.entries(hooks as Record<string, unknown>)) {
+      const flat = flattenHookGroups(groups, 'plugin')
+      if (flat.length) byEvent.set(event, [...(byEvent.get(event) ?? []), ...flat])
+    }
+  }
+  hooksCacheSig = sig
+  hooksCacheByEvent = byEvent
+}
+
+// The hook registry's 'plugin' source (registered at startup via hookRegistry.registerHookSource): the flattened
+// hooks declared by enabled plugins for `event`.
+export function pluginHooksFor(event: HookEventName): MatchedHook[] {
+  rebuildPluginHooksIfChanged()
+  return hooksCacheByEvent.get(event) ?? []
+}
+
+// Wire the plugin hook source into the hook registry — call once at startup.
+export function registerPluginHooks(): void {
+  hookRegistry.registerHookSource(pluginHooksFor)
 }
 
 // Install from a directory: parse the manifest, then register each skill/mcp/role as an owned resource

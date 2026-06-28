@@ -15,12 +15,11 @@ import type { MatchedHook } from './registry'
 
 const HOOK_TYPES: ReadonlySet<string> = new Set(['command', 'prompt', 'agent', 'http', 'mcp_tool', 'callback', 'function'])
 
-// Read the settings.json hook groups for one event and flatten them to MatchedHook[] (each tagged with its
-// matcher + source 'settings'). Tolerant of a malformed config — a bad entry is skipped, never thrown.
-export function loadSettingsHooks(event: HookEventName): MatchedHook[] {
-  const all = settingsService.get<Record<string, unknown>>('hooks')
-  if (!all || typeof all !== 'object') return []
-  const groups = (all as Record<string, unknown>)[event]
+// Flatten one event's matcher-groups (the settings.json / plugin shape: `[{ matcher?, hooks: [config...] }]`)
+// into MatchedHook[], tagging each with `source`. Tolerant of a malformed config — a bad entry is skipped,
+// never thrown. Shared by the settings loader and the plugin hook source (registry.ts) so every source applies
+// the same validation.
+export function flattenHookGroups(groups: unknown, source: MatchedHook['source']): MatchedHook[] {
   if (!Array.isArray(groups)) return []
   const out: MatchedHook[] = []
   for (const g of groups) {
@@ -31,18 +30,25 @@ export function loadSettingsHooks(event: HookEventName): MatchedHook[] {
     for (const h of hooks) {
       if (!h || typeof h !== 'object') continue
       if (!HOOK_TYPES.has((h as { type?: string }).type ?? '')) continue
-      // settings can't carry a JS function — callback/function from settings are inert, drop them.
+      // config-sourced hooks can't carry a JS function — callback/function from config are inert, drop them.
       const type = (h as { type: string }).type
       if (type === 'callback' || type === 'function') continue
       // `if` (the permission-rule prefilter) must be a string when present. A truthy non-string would make
       // matchesIf throw on `.trim()` for every matching tool event — so skip the malformed entry here instead,
-      // honoring this loader's contract ("a bad entry is skipped, never thrown").
+      // honoring the contract ("a bad entry is skipped, never thrown").
       const ifRule = (h as { if?: unknown }).if
       if (ifRule !== undefined && typeof ifRule !== 'string') continue
-      out.push({ config: h as HookConfig, source: 'settings', matcher })
+      out.push({ config: h as HookConfig, source, matcher })
     }
   }
   return out
+}
+
+// Read the settings.json hook groups for one event and flatten them to MatchedHook[] (source 'settings').
+export function loadSettingsHooks(event: HookEventName): MatchedHook[] {
+  const all = settingsService.get<Record<string, unknown>>('hooks')
+  if (!all || typeof all !== 'object') return []
+  return flattenHookGroups((all as Record<string, unknown>)[event], 'settings')
 }
 
 // The field a matcher selects against is event-specific (mirrors the reference per-event query selection `kOo`):

@@ -1,11 +1,11 @@
 // hooks/registry.ts — the source of truth for WHICH hooks fire on an event, and the per-type EXECUTOR table.
 //
-// getMatching merges hooks from the WIRED sources (Studio-internal registrations + user settings.json), applies
-// the matcher + the `if` permission-rule prefilter, drops once-hooks that already fired this session, and
-// de-dupes by content key. 'plugin' / 'skill' are RESERVED source slots — the MatchedHook.source union keeps the
-// seam — but are NOT sourced yet: the plugin subsystem currently scopes hooks out (see plugins/types.ts), so
-// wiring a plugin/skill loader into the merge below is a follow-up. The executor table is filled by the batch-4
-// executors (registerExecutor); the engine runs callback/function directly.
+// getMatching merges hooks from every source: Studio-internal registrations + user settings.json + any source
+// registered via registerHookSource (the plugin hook source registers there — enabled plugins' manifest hooks,
+// source 'plugin'). It then applies the matcher + the `if` permission-rule prefilter, drops once-hooks that
+// already fired this session, and de-dupes by content key. ('skill' stays a reserved source slot — Studio's
+// minimal SKILL.md frontmatter can't yet carry a structured hooks block; a skill source would register the same
+// way.) The executor table is filled by the batch-4 executors (registerExecutor); the engine runs callback/function directly.
 
 import type { HookConfig, HookExecContext, HookOutcome, HookType } from './types'
 import type { HookEventName, HookPayload } from './events'
@@ -32,6 +32,7 @@ class HookRegistry {
   private executors = new Map<HookType, HookExecutor>()
   private firedOnce = new Set<string>() // `${convId}:${contentKey}` for once-hooks that already ran this session
   private internalSeq = 0
+  private hookSources = new Set<(event: HookEventName) => MatchedHook[]>()
 
   // Register an internal hook (Studio's own code). Returns an unregister fn. Internal hooks always match (no
   // matcher) — they're built-ins, not user config — and get a stable key for once/dedup.
@@ -50,6 +51,28 @@ class HookRegistry {
 
   registerExecutor(type: HookType, executor: HookExecutor): void {
     this.executors.set(type, executor)
+  }
+
+  // Register an external hook SOURCE — a function returning the config-driven hooks for an event from another
+  // subsystem (the plugin hook source registers enabled plugins' manifest hooks here, source 'plugin'). Returns
+  // an unregister fn. This is the supported seam for plugin/skill hooks to merge alongside settings WITHOUT the
+  // registry depending on those subsystems — they register INTO it at startup (dependency points inward).
+  registerHookSource(fn: (event: HookEventName) => MatchedHook[]): () => void {
+    this.hookSources.add(fn)
+    return () => this.hookSources.delete(fn)
+  }
+
+  // Collect hooks from every registered source for an event. A throwing source never breaks hook resolution.
+  private collectSources(event: HookEventName): MatchedHook[] {
+    const out: MatchedHook[] = []
+    for (const fn of this.hookSources) {
+      try {
+        out.push(...fn(event))
+      } catch {
+        /* a source must never break hook resolution */
+      }
+    }
+    return out
   }
 
   getExecutor(type: HookType): HookExecutor | undefined {
@@ -76,7 +99,7 @@ class HookRegistry {
   // then de-duped by content key.
   getMatching(event: HookEventName, payload: HookPayload): MatchedHook[] {
     const internal: MatchedHook[] = (this.internal.get(event) ?? []).map((e) => ({ config: e.config, source: 'internal', key: e.key }))
-    const merged: MatchedHook[] = [...internal, ...loadSettingsHooks(event)]
+    const merged: MatchedHook[] = [...internal, ...loadSettingsHooks(event), ...this.collectSources(event)]
 
     const seen = new Set<string>()
     const out: MatchedHook[] = []
@@ -96,7 +119,8 @@ class HookRegistry {
   // toward true when user settings declare the event (the precise matcher/if check happens in getMatching).
   hasAny(event: HookEventName): boolean {
     if ((this.internal.get(event)?.length ?? 0) > 0) return true
-    return loadSettingsHooks(event).length > 0
+    if (loadSettingsHooks(event).length > 0) return true
+    return this.collectSources(event).length > 0
   }
 
   // Conv deleted: forget its once-firing marks so the ids don't accumulate across the app's lifetime.

@@ -18,6 +18,7 @@ import { monitorService } from './services/monitor.service'
 import { selfRhythmService } from './services/self-rhythm.service'
 import { registerHookExecutors } from './agent/hooks/executors'
 import { fileWatchManager } from './agent/hooks/file-watch'
+import { registerPluginHooks } from './services/plugin.service'
 import { initUpdateService, checkSilently } from './services/update.service'
 import { PREVIEW_PARTITION, markPreviewGuestAllowed } from './services/active-preview'
 
@@ -270,6 +271,7 @@ app.whenReady().then(() => {
   registerMediaProtocol() // nsai-media:// → local image files, before the window loads any attachment
   registerIpc()
   registerHookExecutors() // fill the hook engine's executor table (command/prompt/agent/http/mcp_tool)
+  registerPluginHooks() // surface enabled plugins' manifest hooks to the registry (source 'plugin')
   initUpdateService() // wire autoUpdater (channel from the build's own version) before any check can run
   // Connect every enabled MCP server (best effort) so their tools are ready when an agent role runs.
   void connectMcpServers().catch(() => {})

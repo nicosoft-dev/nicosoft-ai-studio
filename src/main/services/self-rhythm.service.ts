@@ -15,25 +15,49 @@ const MAX_DELAY_S = 3600
 interface Wakeup {
   id: string
   convId: string
+  prompt: string
+  delayMs: number
+  recurring: boolean
+  roleId?: string
   timer: ReturnType<typeof nodeSetTimeout>
 }
 
 class SelfRhythmService {
   private wakeups = new Map<string, Wakeup>()
 
-  // Arm a self-wakeup: fire `prompt` back into `convId` after the (clamped) delay. Returns the id + actual delay.
-  schedule(convId: string, prompt: string, delaySeconds: number, roleId?: string): { id: string; delaySeconds: number } {
+  // Arm a self-wakeup: fire `prompt` back into `convId` after the (clamped) delay. recurring=true RE-ARMS with the
+  // same prompt+delay after each fire — a sustained, fixed-interval self-paced loop that runs until cancel() or
+  // conv-dispose (the autonomous-loop capability). For a DYNAMIC loop the model instead re-calls schedule with a
+  // fresh delay each wake. Returns the id + actual (clamped) delay.
+  schedule(convId: string, prompt: string, delaySeconds: number, opts?: { roleId?: string; recurring?: boolean }): { id: string; delaySeconds: number } {
     const clamped = Math.min(MAX_DELAY_S, Math.max(MIN_DELAY_S, Math.round(delaySeconds)))
     const id = ulid()
-    sessionBus.addKeepalive(convId, `wakeup:${id}`) // hold the session open until the wake fires
-    const timer = nodeSetTimeout(() => {
-      this.wakeups.delete(id)
-      sessionBus.inject(convId, { text: prompt, source: `self-rhythm:${id}`, priority: 'later', roleId })
-      sessionBus.removeKeepalive(convId, `wakeup:${id}`)
-    }, clamped * 1000)
-    this.wakeups.set(id, { id, convId, timer })
-    console.log(`[self-rhythm] scheduled wakeup id=${id} conv=${convId} in=${clamped}s`)
+    sessionBus.addKeepalive(convId, `wakeup:${id}`) // hold the session open until the wake fires (held across re-arms when recurring)
+    const w: Wakeup = {
+      id,
+      convId,
+      prompt,
+      delayMs: clamped * 1000,
+      recurring: opts?.recurring === true,
+      roleId: opts?.roleId,
+      timer: nodeSetTimeout(() => this.fire(id), clamped * 1000),
+    }
+    this.wakeups.set(id, w)
+    console.log(`[self-rhythm] scheduled wakeup id=${id} conv=${convId} in=${clamped}s recurring=${w.recurring}`)
     return { id, delaySeconds: clamped }
+  }
+
+  // Fire a wakeup: inject the prompt; a recurring wakeup then re-arms (keepalive stays held), a one-shot cleans up.
+  private fire(id: string): void {
+    const w = this.wakeups.get(id)
+    if (!w) return
+    sessionBus.inject(w.convId, { text: w.prompt, source: `self-rhythm:${id}`, priority: 'later', roleId: w.roleId })
+    if (w.recurring) {
+      w.timer = nodeSetTimeout(() => this.fire(id), w.delayMs) // next tick; keepalive held until cancel/dispose
+    } else {
+      this.wakeups.delete(id)
+      sessionBus.removeKeepalive(w.convId, `wakeup:${id}`)
+    }
   }
 
   cancel(id: string): boolean {
