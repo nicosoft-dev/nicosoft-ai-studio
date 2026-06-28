@@ -806,6 +806,10 @@ export async function* runAgent(
     // await_async AGAIN (the loop continues whenever ANY tool was used). Without this the model spams
     // await_async within one turn (observed ×19 on a single never-completing handle ≈ 18 wasted LLM rounds).
     if (ctx.collab?.parkRequested()) return { reason: 'completed', messages, turns, compactions, compact: carryOut() }
+    // A PostToolUse hook returned continue:false → end the turn now that all tool results are recorded (the
+    // reference's hook_stopped_continuation). The tool_results message is already in `messages`, so the
+    // conversation stays valid — same guarantee as the collab-park return above.
+    if (streamExec.continuationPrevented) return { reason: 'completed', messages, turns, compactions, compact: carryOut() }
     if (thrashStopAtTurn !== undefined && turns >= thrashStopAtTurn) {
       console.warn(`[agent] thrash stop run=${ctx.runId} turn=${turns} — same failure ${THRASH_STOP_AT}×, wrap-up window spent`)
       return { reason: 'thrash_stop', messages, turns, compactions, compact: carryOut() }

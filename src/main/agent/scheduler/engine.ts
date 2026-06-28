@@ -135,8 +135,15 @@ class SchedulerEngine {
   private async fire(task: ScheduledTask, now: number): Promise<void> {
     this.running.add(task.id)
     // Advance the schedule BEFORE running so the next tick can't re-fire a recurring task; a one-shot keeps its
-    // slot and is removed below once it has run (success or failure).
-    scheduledTaskStore.reschedule(task.id, now)
+    // slot and is removed below once it has run (success or failure). reschedule() also enforces the
+    // recurring-task auto-expiry (reference `recurringMaxAgeMs`): if the task is older than the max age it is
+    // removed and returns true — in that case we must NOT run it, just free the slot and re-arm.
+    if (scheduledTaskStore.reschedule(task.id, now)) {
+      console.warn(`[scheduler] expired recurring task ${task.id} ("${task.name}") — older than 7 days, removed`)
+      this.running.delete(task.id)
+      this.requestArm()
+      return
+    }
     let convId: string | undefined
     let ok = false
     try {

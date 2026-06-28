@@ -489,6 +489,8 @@
   "monitors.heading": "実行中のモニター",
   "monitors.stop": "停止",
   "monitors.meta": "{interval}ごと · {count}回の変化",
+  "monitors.persistent": "常駐",
+  "monitors.timeLimit": "{timeout}後に停止",
   "monitors.stopped": "モニターを停止しました",
   "monitors.stopFailed": "モニターを停止できませんでした"
 }

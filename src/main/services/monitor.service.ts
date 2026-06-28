@@ -11,6 +11,11 @@
 //   • http    — GET a URL (SSRF-guarded, http/https only, no link-local/metadata) and watch the response body.
 //   • file    — read a file confined under the run's cwd and watch its content.
 //
+// Lifetime: a watcher carries a deadline (timeoutMs, default 5min, clamp [1000, 1h]) — when it elapses and the
+// watcher is NOT persistent, the watcher auto-stops and injects one notice (same path as the overload stop). A
+// persistent watcher arms no deadline and runs until manual/conv-dispose stop. Both mirror the reference Monitor's
+// timeout_ms / persistent fields.
+//
 // Throttle + self-stop (the ONLY limits — matched to a mature runtime's Monitor, NOT invented): a token bucket
 // (capacity 10, refilling 1 token / 2s) caps wakeups so a jittery source can't flood the model; if changes keep
 // arriving while the bucket is empty for ~30s straight, the watcher auto-stops and injects one notice. Keepalive
@@ -33,6 +38,11 @@ export interface MonitorStartInput {
   roleId?: string // collab routing target: the expert that armed it is woken on change (solo ignores it)
   kind: MonitorProbeKind
   intervalMs: number
+  // Monitor deadline in ms (clamped [1000, 3_600_000], default 300_000). When it elapses and the watcher is not
+  // persistent, the watcher auto-stops with a "time limit" notice. Ignored when persistent is true.
+  timeoutMs?: number
+  // When true the watcher runs session-length: no deadline timer is armed (stop manually / on conv dispose).
+  persistent?: boolean
   // What to tell the model when the watched value changes — its own standing instruction ("the viewer count
   // changed, decide whether to greet them"). Delivered (wrapped as a system notification) alongside the diff.
   prompt: string
@@ -60,7 +70,10 @@ interface Watcher {
   filePath?: string
   changeThreshold?: number
   cwd: string
+  timeoutMs: number // resolved deadline (0 when persistent)
+  persistent: boolean
   timer: ReturnType<typeof nodeSetInterval>
+  deadlineTimer?: ReturnType<typeof setTimeout> // fires once at timeoutMs (absent when persistent); cleared on stop
   last?: string // previous sample (stringified) for diffing; undefined until the baseline probe
   ticking: boolean // re-entrancy guard: skip a tick if the previous probe is still running (slow source)
   startedAt: number
@@ -74,13 +87,24 @@ interface Watcher {
 }
 
 // The ONLY throttle constants — a token bucket sized to absorb a short burst (10) then admit 1 wakeup / 2s,
-// auto-stopping after ~30s of sustained churn. Probe-frequency sanity bounds keep a pathological interval from
-// hammering the source (these bound the PROBE, not the LLM — the bucket bounds the LLM).
+// auto-stopping after ~30s of sustained churn.
 const BUCKET_CAPACITY = 10
 const BUCKET_REFILL_MS = 2000 // +1 token every 2s
 const OVERLOAD_KILL_MS = 30_000
+// MIN_INTERVAL_MS is a real busy-spin guard: a sub-1s probe interval would hammer the source (and the event loop)
+// to no benefit, since the token bucket admits at most 1 wakeup / 2s anyway. It bounds the PROBE, not the model.
 const MIN_INTERVAL_MS = 1000
-const MAX_INTERVAL_MS = 60 * 60 * 1000
+// NOT a behavioral cap — only a Node setInterval overflow guard. setInterval's delay is a 32-bit signed int, so a
+// value above 2_147_483_647 ms silently overflows to ~1ms (turning a "once a week" probe into a tight loop). We
+// clamp the interval to that ceiling purely to prevent that footgun; the reference Monitor imposes no upper bound
+// on the model's chosen sleep, and neither do we below this overflow line.
+const INTERVAL_OVERFLOW_GUARD_MS = 2_147_483_647
+// Monitor deadline (timeout_ms), mirroring the reference Monitor: default 5min, min 1s, max 1h. When it elapses
+// and the watcher is not persistent, the watcher auto-stops. This is the reference's documented lifetime control,
+// not a self-invented throttle.
+const DEFAULT_TIMEOUT_MS = 300_000
+const MIN_TIMEOUT_MS = 1000
+const MAX_TIMEOUT_MS = 3_600_000
 const MAX_SAMPLE_CHARS = 200_000 // cap a probe sample so a huge response/file can't balloon memory across ticks
 const MAX_PROBE_MS = 30_000 // hard ceiling on a single probe so a hung source can't wedge the watcher (M1)
 
@@ -107,13 +131,19 @@ class MonitorService {
     }
   }
 
-  start(input: MonitorStartInput): { id: string; label: string } {
+  start(input: MonitorStartInput): { id: string; label: string; timeoutMs: number; persistent: boolean } {
     // Fail fast on a precondition that would otherwise register a watcher that can never fire: a preview probe
     // with no Preview attached to this conversation. (The tool surfaces this throw as an error result.)
     if (input.kind === 'preview' && !currentPreviewWebContents(input.convId)) {
       throw new Error('Cannot start a preview monitor: no Preview is attached to this conversation. Open one with preview_navigate first, or use kind=http / kind=file.')
     }
-    const intervalMs = Math.min(MAX_INTERVAL_MS, Math.max(MIN_INTERVAL_MS, Math.round(input.intervalMs)))
+    // Interval: floor at the busy-spin guard, ceil only at the setInterval overflow line (no behavioral cap).
+    const intervalMs = Math.min(INTERVAL_OVERFLOW_GUARD_MS, Math.max(MIN_INTERVAL_MS, Math.round(input.intervalMs)))
+    const persistent = input.persistent === true
+    // Deadline: persistent → 0 (none armed); otherwise the model's value clamped to [1s, 1h], default 5min.
+    const timeoutMs = persistent
+      ? 0
+      : Math.min(MAX_TIMEOUT_MS, Math.max(MIN_TIMEOUT_MS, Math.round(input.timeoutMs ?? DEFAULT_TIMEOUT_MS)))
     const id = ulid()
     const label = input.label?.trim() || this.defaultLabel(input)
     const now = Date.now()
@@ -124,6 +154,8 @@ class MonitorService {
       kind: input.kind,
       label,
       intervalMs,
+      timeoutMs,
+      persistent,
       prompt: input.prompt,
       previewExpression: input.previewExpression,
       url: input.url,
@@ -138,12 +170,35 @@ class MonitorService {
       // .catch so a probe/inject rejection can never surface as an unhandledRejection in the main process.
       timer: nodeSetInterval(() => void this.tick(id).catch((e) => console.warn(`[monitor] tick ${id} failed:`, e)), intervalMs),
     }
+    // Arm the deadline only for a non-persistent watcher. The timer is one-shot and is cleared in stop() (so it
+    // never leaks past a manual / overload / conv-dispose stop). On fire it auto-stops via the shared notice path.
+    if (!persistent) {
+      w.deadlineTimer = setTimeout(() => this.onDeadline(id), timeoutMs)
+    }
     this.watchers.set(id, w)
     // Hold the session open while this watcher is armed (collab won't quiesce; solo stays resumable).
     sessionBus.addKeepalive(input.convId, `monitor:${id}`)
-    console.log(`[monitor] start id=${id} conv=${input.convId} kind=${input.kind} interval=${intervalMs}ms label="${label}"`)
+    console.log(
+      `[monitor] start id=${id} conv=${input.convId} kind=${input.kind} interval=${intervalMs}ms ` +
+        `${persistent ? 'persistent' : `timeout=${timeoutMs}ms`} label="${label}"`,
+    )
     this.notify()
-    return { id, label }
+    return { id, label, timeoutMs, persistent }
+  }
+
+  // Deadline elapsed for a non-persistent watcher → auto-stop with a clear "time limit" notice, reusing the same
+  // inject-then-release path as the overload auto-stop. A no-op if the watcher is already gone (it was stopped
+  // before the timer fired — stop() clears the timer, so this should not normally run after removal).
+  private onDeadline(id: string): void {
+    const w = this.watchers.get(id)
+    if (!w) return
+    this.stop(id, {
+      reason: 'auto-stop',
+      noticeText:
+        `Monitor "${w.label}" reached its time limit (${Math.round(w.timeoutMs / 1000)}s) and was automatically ` +
+        'stopped. If you still need to watch this, start a new monitor — pass a larger timeoutMs, or persistent: ' +
+        'true for a session-length watch.',
+    })
   }
 
   // Stop a watcher. reason='auto-stop' injects a notice into the session (the model asked to be woken on change
@@ -152,6 +207,7 @@ class MonitorService {
     const w = this.watchers.get(id)
     if (!w) return false
     nodeClearInterval(w.timer)
+    if (w.deadlineTimer) clearTimeout(w.deadlineTimer) // clear the one-shot deadline so it can't fire on a stopped watcher
     this.watchers.delete(id)
     try {
       if (opts?.reason === 'auto-stop' && opts.noticeText) {
@@ -182,6 +238,8 @@ class MonitorService {
       startedAt: w.startedAt,
       lastChangeAt: w.lastChangeAt,
       changeCount: w.changeCount,
+      timeoutMs: w.timeoutMs,
+      persistent: w.persistent,
     }))
   }
 

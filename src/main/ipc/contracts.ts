@@ -1139,6 +1139,8 @@ export interface MonitorInfoDto {
   startedAt: number
   lastChangeAt?: number
   changeCount: number
+  timeoutMs: number // monitor deadline in ms (0 when persistent — no deadline)
+  persistent: boolean // true → runs session-length, no deadline timer armed
 }
 
 // App self-update (doc 56). The single state object the main-process update service (services/update.service.ts)

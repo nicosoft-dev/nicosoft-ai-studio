@@ -14,6 +14,26 @@ import type { ScheduledTask, CreateTaskInput, TaskRun } from '../../ipc/contract
 
 const MAX_RUNS = 10 // recent fire results kept per task (newest first)
 
+// Abuse guards mirroring the reference (Claude Code) scheduled-task model — see
+// docs/studio-self-wakeup-cc-binary-extract.md §F.2. The model can self-create durable recurring tasks via
+// schedule_create, so the count + age bounds below are what keep a runaway agent from filling the store with
+// tasks that fire forever.
+//   • MAX_ACTIVE_TASKS — reference `hXa = 50`: hard cap on active (enabled-or-disabled, non-expired) tasks;
+//     creating beyond it is rejected, never silently dropped.
+//   • RECURRING_MAX_AGE_MS — reference `recurringMaxAgeMs = 7*24*60*60*1000` (604800000 ms): a recurring task
+//     older than this stops rescheduling and is removed instead of firing forever.
+const MAX_ACTIVE_TASKS = 50
+const RECURRING_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000 // 604800000
+
+// A recurring task is expired once it is older than RECURRING_MAX_AGE_MS — UNLESS it is flagged `permanent`
+// (explicit exemption from auto-expiry) or it has no `createdAt` (legacy persisted task whose age is unknown:
+// the safe choice is to NEVER auto-delete it rather than guess an age and silently kill a user's durable task).
+function isRecurringExpired(t: ScheduledTask, nowMs: number): boolean {
+  if (!t.recurring || t.permanent) return false
+  if (typeof t.createdAt !== 'number') return false // legacy task without createdAt → don't expire
+  return nowMs - t.createdAt > RECURRING_MAX_AGE_MS
+}
+
 const FILE = join(dataDir(), 'scheduled_tasks.json')
 
 // Session-only tasks (durable:false) — one array per main-process run.
@@ -58,6 +78,15 @@ export class ScheduledTaskStore {
       )
     }
     if (!input.steps?.length) throw new Error('A scheduled task needs at least one step.')
+    // Reject creation past the active-task cap (reference `hXa = 50`). Count tasks that still occupy a slot —
+    // i.e. not already past auto-expiry — so a forgotten stale recurring task can't permanently wedge creation.
+    const active = this.list().filter((t) => !isRecurringExpired(t, nowMs)).length
+    if (active >= MAX_ACTIVE_TASKS) {
+      console.warn(`[scheduler] rejected schedule_create "${input.name}" — active-task cap reached (${active}/${MAX_ACTIVE_TASKS})`)
+      throw new Error(
+        `Too many scheduled tasks (${active}/${MAX_ACTIVE_TASKS}). Delete an existing task before creating a new one.`
+      )
+    }
     const task: ScheduledTask = {
       id: randomUUID().slice(0, 8),
       name: input.name,
@@ -160,10 +189,23 @@ export class ScheduledTaskStore {
 
   // Advance the schedule BEFORE a run so the next tick can't re-fire a recurring task: recurring → recompute
   // nextRunAt from its cron. A one-shot keeps its nextRunAt and is deleted after the run by the engine.
-  reschedule(id: string, nowMs: number): void {
+  //
+  // Auto-expiry (reference `recurringMaxAgeMs`): a recurring task older than RECURRING_MAX_AGE_MS must stop
+  // rescheduling and be removed instead of firing forever. We do it here — the single point where a recurring
+  // task would otherwise get its next nextRunAt — so an expired task is dropped before it can fire again.
+  // Returns true if the task was expired (removed) so the engine can skip running it this tick.
+  reschedule(id: string, nowMs: number): boolean {
+    let expired = false
     const apply = (tasks: ScheduledTask[], persist: () => void): boolean => {
-      const t = tasks.find((x) => x.id === id)
-      if (!t) return false
+      const idx = tasks.findIndex((x) => x.id === id)
+      if (idx < 0) return false
+      const t = tasks[idx]
+      if (isRecurringExpired(t, nowMs)) {
+        tasks.splice(idx, 1) // older than the max age → remove instead of rescheduling
+        persist()
+        expired = true
+        return true
+      }
       const next = t.recurring && t.cron ? nextCronRun(t.cron, nowMs) : null
       if (next) {
         t.nextRunAt = next
@@ -172,8 +214,13 @@ export class ScheduledTaskStore {
       return true
     }
     const durable = readDurable()
-    if (apply(durable, () => writeDurable(durable))) return
+    if (apply(durable, () => writeDurable(durable))) {
+      if (expired) this.emitChange() // task removed → re-arm the engine + refresh the page
+      return expired
+    }
     apply(sessionTasks, () => {})
+    if (expired) this.emitChange()
+    return expired
   }
 
   // Record one execution AFTER the run: bump lastFiredAt + prepend the result to runs[] (capped). Makes a

@@ -16,6 +16,7 @@ import { HOOK_AGENT_PREFIX } from '../engine'
 import type { AgentHookConfig, HookExecContext, HookOutcome } from '../types'
 import type { HookPayload } from '../events'
 import { eventMeta } from '../events'
+import { parseJudgement, judgementToOutcome } from '../judgement'
 
 // Read-only investigation kit — no write/exec-mutation, no network, no spawn tools (the structural recursion
 // guard). Bash is intentionally absent: under permissionMode 'bypass' it is auto-allowed (execution.ts) and is
@@ -23,12 +24,29 @@ import { eventMeta } from '../events'
 // vector. Read/Grep/Glob fully cover "read the transcript + inspect the repo" with no exec/exfiltration surface.
 const HOOK_AGENT_TOOLS = ['Read', 'Grep', 'Glob'] as const
 
-const SYSTEM =
-  'You are a hook verifier sub-agent inside an autonomous agent runtime. Investigate the CONDITION below using ' +
-  'your read-only tools (read the transcript at the given path, grep/inspect the repository) and decide whether ' +
-  'it is satisfied. Do real verification — do not guess. When done, reply with ONLY a single JSON object: ' +
-  '{"ok": boolean, "reason": string}. ok=true = the condition holds; ok=false = it does not, with a brief reason. ' +
-  'Output nothing but that JSON as your final message.'
+// Event-aware system prompt (mirrors the reference's Stop-class "verify the plan is complete" variant): a
+// STOP-class event verifies "may the agent stop?" from transcript + repo evidence and may declare the condition
+// unsatisfiable (impossible) so the runtime stops retrying; other events are a plain investigated yes/no gate.
+function systemFor(isStopClass: boolean): string {
+  const base =
+    'You are a hook verifier sub-agent inside an autonomous agent runtime. Investigate the CONDITION below using ' +
+    'your read-only tools (read the transcript at the given path, grep/inspect the repository) and decide whether ' +
+    'it is satisfied. Do real verification — do not guess. '
+  if (isStopClass) {
+    return (
+      base +
+      'The CONDITION describes when the agent may STOP (e.g. "the plan is complete"); verify it against transcript + ' +
+      'repo evidence. When done, reply with ONLY a single JSON object: {"ok": boolean, "reason": string, "impossible": boolean}. ' +
+      'ok=true = satisfied (the agent may stop); ok=false = not yet, with a brief reason; impossible=true ONLY if the ' +
+      'condition can NEVER be satisfied no matter what the agent does. Output nothing but that JSON as your final message.'
+    )
+  }
+  return (
+    base +
+    'When done, reply with ONLY a single JSON object: {"ok": boolean, "reason": string}. ok=true = the condition holds; ' +
+    'ok=false = it does not, with a brief reason. Output nothing but that JSON as your final message.'
+  )
+}
 
 // Headless callbacks: the sub-agent runs unattended (bypass + a read-only kit confined to cwd), so a permission
 // prompt (shouldn't occur) denies rather than hangs; no streaming/question surface.
@@ -39,27 +57,12 @@ const HEADLESS_CB: AgentCallbacks = {
   askUser: undefined,
 }
 
-function parseOkReason(text: string): { ok: boolean; reason: string } {
-  const m = /\{[\s\S]*\}/.exec(text)
-  if (m) {
-    try {
-      const j = JSON.parse(m[0]) as { ok?: unknown; reason?: unknown }
-      return { ok: j.ok === true, reason: typeof j.reason === 'string' ? j.reason : '' }
-    } catch {
-      /* fall through */
-    }
-  }
-  // No parseable JSON object → FAIL CLOSED (block / deny). The reply is model-generated over an
-  // attacker-influenceable payload, so prose is never read as an allow signal: a bare "ok"/"yes" appearing in a
-  // negation ("not ok") or in slightly-malformed JSON ({ ok: false }) must not pass a deny gate.
-  return { ok: false, reason: text.trim().slice(0, 500) || 'Agent hook reply was not valid JSON' }
-}
-
 export async function executeAgentHook(config: AgentHookConfig, payload: HookPayload, opts: HookExecContext): Promise<HookOutcome> {
   if (!opts.llm) return { outcome: 'success' } // no LLM/endpoint access → silently pass (fail-open skip)
   // A nested agent hook (we're already inside a hook-spawned agent) is suppressed by the engine before reaching
   // here; guard anyway so a direct call can't recurse.
   if (opts.selfAgentId?.startsWith(HOOK_AGENT_PREFIX)) return { outcome: 'success' }
+  const meta = eventMeta(payload.hook_event_name)
 
   const prompt =
     `CONDITION:\n${config.prompt}\n\n` +
@@ -84,7 +87,7 @@ export async function executeAgentHook(config: AgentHookConfig, payload: HookPay
         memories: [],
         summary: null,
         toolNames: HOOK_AGENT_TOOLS,
-        systemPromptOverride: SYSTEM,
+        systemPromptOverride: systemFor(meta.isStopClass),
         permissionMode: 'bypass', // read-only kit confined to cwd → safe to run unattended
         maxTurns: 50, // bound the investigation (matches the reference forked-agent cap)
         hookAgentId: `${HOOK_AGENT_PREFIX}${ulid()}`,
@@ -98,9 +101,6 @@ export async function executeAgentHook(config: AgentHookConfig, payload: HookPay
     return { outcome: 'non_blocking_error', systemMessage: `Agent hook failed: ${err instanceof Error ? err.message : String(err)}` }
   }
 
-  const { ok, reason } = parseOkReason(text)
-  if (ok) return { outcome: 'success' }
-  const meta = eventMeta(payload.hook_event_name)
-  if (meta.isToolEvent) return { outcome: 'blocking', permissionBehavior: 'deny', hookPermissionDecisionReason: reason || 'Agent hook condition not met', blockingError: reason || 'Agent hook condition not met' }
-  return { outcome: 'blocking', blockingError: reason || 'Agent hook condition not met' }
+  // impossible (stop-class) → let the agent stop; ok=false → deny (tool event) / continuation (stop-class).
+  return judgementToOutcome(parseJudgement(text, 'Agent hook'), payload, { label: 'Agent hook' })
 }

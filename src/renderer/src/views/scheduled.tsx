@@ -149,6 +149,9 @@ function MonitorsSection({ monitors, onStop }: { monitors: MonitorDto[]; onStop:
             </div>
             <div className="sched-meta">
               <span className="sched-next">{t('monitors.meta', { interval: fmtInterval(m.intervalMs), count: m.changeCount })}</span>
+              <span className="sched-next" style={{ opacity: 0.7 }}>
+                {m.persistent ? t('monitors.persistent') : t('monitors.timeLimit', { timeout: fmtInterval(m.timeoutMs) })}
+              </span>
             </div>
             <button className="btn secondary sm" onClick={() => onStop(m.id)}>
               {t('monitors.stop')}

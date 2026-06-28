@@ -5,6 +5,7 @@
 // from a named env var without that secret being hard-coded, and cannot read arbitrary env.
 
 import { safeFetch } from '../../../services/ssrf-guard'
+import * as settingsService from '../../../services/settings.service'
 import type { HttpHookConfig, HookExecContext, HookOutcome } from '../types'
 import type { HookPayload } from '../events'
 import { parseHookResult } from '../parse'
@@ -53,7 +54,20 @@ function buildHeaders(config: HttpHookConfig): Record<string, string> {
   return headers
 }
 
+// Optional settings allow-list (the reference's allowedHttpHookUrls): when `settings.allowedHttpHookUrls` is a
+// non-empty array the hook URL must start with one of its prefixes, else the request is refused — defense in
+// depth ON TOP of the SSRF guard, bounding WHICH public endpoints a hook may reach. Absent/empty → allowed
+// (the SSRF guard is the floor).
+function allowedByConfig(url: string): boolean {
+  const list = settingsService.get<unknown>('allowedHttpHookUrls')
+  if (!Array.isArray(list) || list.length === 0) return true
+  return list.some((p) => typeof p === 'string' && p.length > 0 && url.startsWith(p))
+}
+
 export async function executeHttpHook(config: HttpHookConfig, payload: HookPayload, opts: HookExecContext): Promise<HookOutcome> {
+  if (!allowedByConfig(config.url)) {
+    return { outcome: 'non_blocking_error', systemMessage: `HTTP hook URL is not allowed by settings.allowedHttpHookUrls: ${config.url}` }
+  }
   let res: Response
   let body: string
   try {
@@ -71,7 +85,14 @@ export async function executeHttpHook(config: HttpHookConfig, payload: HookPaylo
     if (opts.signal.aborted) return { outcome: 'cancelled' }
     return { outcome: 'non_blocking_error', systemMessage: `HTTP hook request failed: ${err instanceof Error ? err.message : String(err)}` }
   }
-  // A 2xx response body is parsed as the command protocol (it may carry a decision); a non-2xx is a non-blocking
+  // JSON-strict (matches the reference g4l): a 2xx hook body must be a JSON object decision or empty — a non-JSON
+  // 2xx body is a misconfiguration (non-blocking error), NOT advisory context, so a plain web page can't be
+  // injected into the model as "additional context".
+  const trimmed = body.trim()
+  if (res.ok && trimmed && !trimmed.startsWith('{')) {
+    return { outcome: 'non_blocking_error', systemMessage: `HTTP hook returned a non-JSON body (the http hook protocol requires a JSON object or an empty body): ${trimmed.slice(0, 200)}` }
+  }
+  // A 2xx JSON body is parsed as the command protocol (it may carry a decision); a non-2xx is a non-blocking
   // error. Map onto the exit-code the parser expects: 0 for ok, 1 otherwise.
   return parseHookResult({ stdout: body, stderr: res.ok ? '' : `HTTP ${res.status}`, exitCode: res.ok ? 0 : 1, event: payload.hook_event_name })
 }

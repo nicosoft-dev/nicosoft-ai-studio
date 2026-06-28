@@ -71,7 +71,8 @@ export async function executeMcpToolHook(config: McpToolHookConfig, payload: Hoo
     if (opts.signal.aborted) return { outcome: 'cancelled' }
     return { outcome: 'non_blocking_error', systemMessage: `MCP tool hook failed: ${err instanceof Error ? err.message : String(err)}` }
   }
-  // An MCP tool error maps to exit 2 (blocking) so a "this isn't allowed" tool result can veto; a normal result
-  // is exit 0 and parsed as the command protocol.
-  return parseHookResult({ stdout: resultToText(res.content), stderr: '', exitCode: res.isError ? 2 : 0, event: payload.hook_event_name })
+  // An MCP-tool error is a NON-blocking error (exit 1, matching the reference): a flaky/erroring MCP server must
+  // not veto the user's action. Only an explicit decision in a NORMAL (non-error) result body — parsed as the
+  // command protocol at exit 0 — can block.
+  return parseHookResult({ stdout: resultToText(res.content), stderr: '', exitCode: res.isError ? 1 : 0, event: payload.hook_event_name })
 }

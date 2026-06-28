@@ -97,6 +97,7 @@ async function runOne(
   toolUse: ToolUseBlock,
   tools: readonly Tool[],
   ctx: AgentContext,
+  onPreventContinuation?: () => void,
 ): Promise<ToolResultBlock> {
   const tool = findTool(tools, toolUse.name)
   if (!tool) return errorResult(toolUse.id, `No such tool available: ${toolUse.name}`)
@@ -165,6 +166,10 @@ async function runOne(
       const rewrite = post.updatedToolOutputs.at(-1)
       if (rewrite !== undefined) block = { ...block, content: typeof rewrite === 'string' ? rewrite : JSON.stringify(rewrite) }
       hookContexts.push(...post.additionalContexts)
+      // continue:false from a PostToolUse hook ends the turn after this tool (the reference's
+      // hook_stopped_continuation). Signalled up to the executor → loop, which stops the turn once all of this
+      // turn's tool results are recorded — so the conversation stays valid (no dangling tool_use).
+      if (post.preventContinuation) onPreventContinuation?.()
     }
 
     // Fold any hook-attached context onto the tool result so the model sees it. String content is appended;
@@ -202,6 +207,9 @@ export class StreamingToolExecutor {
   private readonly results = new Map<string, ToolResultBlock>()
   private readonly executing = new Map<string, { safe: boolean; promise: Promise<void> }>()
   private readonly queue: ToolUseBlock[] = []
+  // Set when a PostToolUse hook returns continue:false (preventContinuation): the loop ends the turn after this
+  // turn's tool results are recorded (the reference's hook_stopped_continuation). Read by loop.ts after drain().
+  continuationPrevented = false
 
   constructor(
     private readonly tools: readonly Tool[],
@@ -224,7 +232,9 @@ export class StreamingToolExecutor {
         this.executing.size === 0 || (safe && allExecutingSafe && this.executing.size < MAX_CONCURRENCY)
       if (!canRun) break
       this.queue.shift()
-      const promise = runOne(block, this.tools, this.ctx).then((r) => {
+      const promise = runOne(block, this.tools, this.ctx, () => {
+        this.continuationPrevented = true
+      }).then((r) => {
         this.results.set(block.id, r)
         this.executing.delete(block.id)
         this.pump() // a slot freed — schedule whatever was waiting

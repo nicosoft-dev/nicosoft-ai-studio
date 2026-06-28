@@ -489,6 +489,8 @@
   "monitors.heading": "运行中的监视器",
   "monitors.stop": "停止",
   "monitors.meta": "每 {interval} · {count} 次变化",
+  "monitors.persistent": "常驻",
+  "monitors.timeLimit": "{timeout}后停止",
   "monitors.stopped": "监视器已停止",
   "monitors.stopFailed": "无法停止监视器"
 }

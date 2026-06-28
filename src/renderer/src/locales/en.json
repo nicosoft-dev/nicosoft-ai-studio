@@ -489,6 +489,8 @@
   "monitors.heading": "Running monitors",
   "monitors.stop": "Stop",
   "monitors.meta": "every {interval} · {count} changes",
+  "monitors.persistent": "persistent",
+  "monitors.timeLimit": "stops in {timeout}",
   "monitors.stopped": "Monitor stopped",
   "monitors.stopFailed": "Couldn’t stop monitor"
 }

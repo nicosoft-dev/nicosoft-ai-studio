@@ -489,6 +489,8 @@
   "monitors.heading": "실행 중인 모니터",
   "monitors.stop": "중지",
   "monitors.meta": "{interval}마다 · {count}회 변경",
+  "monitors.persistent": "상시 실행",
+  "monitors.timeLimit": "{timeout} 후 중지",
   "monitors.stopped": "모니터를 중지했습니다",
   "monitors.stopFailed": "모니터를 중지하지 못했습니다"
 }
