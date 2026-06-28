@@ -15,6 +15,12 @@ type PreviewWebviewElement = HTMLElement & {
 
 const PREVIEW_PARTITION = 'persist:preview'
 
+// A STABLE empty array for the services selector below. A zustand / useSyncExternalStore selector that returns a
+// fresh `[]` on every call makes React see a new snapshot reference each render → it treats that as a state change
+// and re-renders forever ("Maximum update depth exceeded" → WorkspacePreview throws → black screen). One frozen
+// constant keeps the snapshot stable when a conversation has no services yet.
+const EMPTY_SERVICES: ServiceInfo[] = []
+
 export function WorkspacePreview({
   activeConv,
   openRequest,
@@ -25,7 +31,7 @@ export function WorkspacePreview({
   onCollapse: () => void
 }): ReactElement {
   const t = useT()
-  const services = useConvServices((s) => (activeConv ? s.byConv[activeConv] ?? [] : []))
+  const services = useConvServices((s) => (activeConv ? s.byConv[activeConv] ?? EMPTY_SERVICES : EMPTY_SERVICES))
   const readyService = useMemo(() => pickReadyService(services), [services])
   const autoUrl = readyService?.port ? `http://localhost:${readyService.port}` : ''
   const webviewRef = useRef<PreviewWebviewElement | null>(null)
