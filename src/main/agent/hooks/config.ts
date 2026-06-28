@@ -148,13 +148,28 @@ export function matchesIf(ifRule: string | undefined, payload: HookPayload): boo
   }
 }
 
-// A stable content key for dedup + once-tracking. Functions (callback/function) aren't serializable, so those
-// fall back to an injected stable id (registry assigns one). For config-driven hooks the JSON is stable.
+// Deterministic JSON: object keys sorted so two semantically-identical hooks that differ only in field order
+// produce the SAME key (the reference dedups by a fixed per-type field tuple — order-independent).
+function stableStringify(v: unknown): string {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v)
+  if (Array.isArray(v)) return `[${v.map(stableStringify).join(',')}]`
+  const o = v as Record<string, unknown>
+  return `{${Object.keys(o)
+    .sort()
+    .map((k) => `${JSON.stringify(k)}:${stableStringify(o[k])}`)
+    .join(',')}}`
+}
+
+// A stable content key for dedup + once-tracking. Functions (callback/function) aren't serializable → the registry
+// assigns them a stable id (m.key, returned first). For config-driven hooks the key is SOURCE-INDEPENDENT (and
+// field-order-independent): an identical hook declared in BOTH settings.json and a plugin manifest must de-dupe to
+// one, so the key excludes `source` (which stays on MatchedHook for telemetry only, never identity) — matching the
+// reference's per-type content key.
 export function contentKey(m: MatchedHook): string {
   if (m.key) return m.key
   try {
-    return `${m.source}:${JSON.stringify(m.config)}`
+    return `cfg:${stableStringify(m.config)}`
   } catch {
-    return `${m.source}:${m.config.type}`
+    return `cfg:${m.config.type}`
   }
 }

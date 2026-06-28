@@ -94,9 +94,9 @@ class HookRegistry {
     if (m.config.once) this.firedOnce.delete(`${payload.session_id}:${contentKey(m)}`)
   }
 
-  // The hooks that fire for this event: internal + settings (plugin/skill are a reserved, not-yet-wired source —
-  // see the file header), filtered by the matcher and the `if` prefilter, with already-fired once-hooks removed,
-  // then de-duped by content key.
+  // The hooks that fire for this event: internal + settings + registered sources (plugin hooks; skill stays
+  // reserved — see the file header), filtered by the matcher and the `if` prefilter, with already-fired once-hooks
+  // removed, then de-duped by a source-independent content key.
   getMatching(event: HookEventName, payload: HookPayload): MatchedHook[] {
     const internal: MatchedHook[] = (this.internal.get(event) ?? []).map((e) => ({ config: e.config, source: 'internal', key: e.key }))
     const merged: MatchedHook[] = [...internal, ...loadSettingsHooks(event), ...this.collectSources(event)]
