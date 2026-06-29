@@ -4,7 +4,7 @@
 // ReviewResult into the contracts the rest of the app reads:
 //   • runLensReview        → Gate-B's RAW SubjectFinding[] (closure + gate_outcomes + token sum read it directly).
 //   • runConsolidatedReview → collab + the agent tool's ConsolidatedReviewOutcome (ok/message/reviewer/…).
-//   • runLensUnderstand    → the understand map (a direct parallel-readers pass).
+//   • runLensUnderstand    → the understand map (parallel content-pinned, tool-less summaries; CC away_summary parity).
 //   • createLensHandle     → the agent-tool PanelHandle (review | understand).
 //
 // The reviewer is picked HERE (chooseVerifierRole) and the sub-agents run over makeLensDeps(opts) (step.ts /
@@ -18,7 +18,8 @@ import * as workspaceTasks from '../workspace-tasks.service'
 import * as convService from '../conversation.service'
 import { chooseVerifierRole } from './verifier'
 import { shapeFor, tierFromDepth } from './tiers'
-import { makeLensDeps, READER_SYSTEM } from './step'
+import { makeLensDeps } from './step'
+import { readOne } from './understand'
 import { runScript, parseScript } from './script-executor'
 import { displayName } from '../../agent/roles/prompts'
 import { canAuthorScript, CODE_REVIEW_TEMPLATE, codeReviewArgs, buildAuthorPrompt } from './code-review'
@@ -430,27 +431,9 @@ export async function runConsolidatedReview(
   return { ok: true, message: message + disposition, reviewer, confirmed, refuted: refutedCands, produced, report }
 }
 
-// --- Understand (parallel readers → map) ---------------------------------------------------------------------
-async function readOne(deps: LensDeps, roleId: string, panelId: string, stepId: string, path: string, i: number): Promise<{ path: string; summary: string } | null> {
-  const toolId = readerCardId(i, stepId)
-  deps.cb.onToolEvent?.(roleId, { type: 'sub_tool_start', toolUseId: toolId, parentToolId: panelId, name: 'Subject', input: { subject: path, phase: 'read', mode: 'understand' } })
-  try {
-    const out = await deps.runAgent({
-      roleId,
-      prompt: `Read ${path} (and any closely related code it references) and produce your summary of it.`,
-      system: READER_SYSTEM,
-      toolNames: READ_ONLY_KIT,
-      stallTimeoutMs: LENS_STALL_MS,
-      progressCard: { toolUseId: toolId, parentToolId: panelId },
-    })
-    const summary = out.text.trim()
-    deps.cb.onToolEvent?.(roleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: panelId, name: 'Subject', isError: false, input: { subject: path, phase: 'read', mode: 'understand', verdict: 'read', tokens: out.outputTokens }, result: summary || '(no summary)' })
-    return { path, summary }
-  } catch (e) {
-    deps.cb.onToolEvent?.(roleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: panelId, name: 'Subject', isError: true, result: e instanceof Error ? e.message : String(e) })
-    return null
-  }
-}
+// --- Understand (content-pinned, tool-less summaries → map) --------------------------------------------------
+// The reader itself (readOne / pinFileContent / READER_SYSTEM) is the CC away_summary shape and lives in
+// understand.ts (carved out so it unit-tests off-Electron — e2e/lens-understand.mts). This module just fans it out.
 
 export async function runLensUnderstand(callerRoleId: string, opts: RunStepOptions, paths: string[], stepId: string): Promise<{ map: string; parts: Array<{ path: string; summary: string }> }> {
   if (!lensEnabled() || paths.length === 0) return { map: '', parts: [] }
@@ -460,7 +443,7 @@ export async function runLensUnderstand(callerRoleId: string, opts: RunStepOptio
     deps.cb.onToolEvent?.(callerRoleId, { type: 'sub_tool_start', toolUseId: panelId, parentToolId: 'coordinator-gate-b', name: 'StudioLens', input: { mode: 'understand', subjects: paths } })
     const parts: Array<{ path: string; summary: string }> = []
     try {
-      const results = await parallelExamineLimited(paths.map((path, i) => () => readOne(deps, callerRoleId, panelId, stepId, path, i)))
+      const results = await parallelExamineLimited(paths.map((path, i) => () => readOne(deps, callerRoleId, panelId, stepId, path, i, opts.cwd)))
       for (const r of results) if (r) parts.push(r)
     } finally {
       deps.cb.onToolEvent?.(callerRoleId, { type: 'sub_tool_done', toolUseId: panelId, parentToolId: 'coordinator-gate-b', name: 'StudioLens', isError: false, result: `read ${parts.length} file(s)` })

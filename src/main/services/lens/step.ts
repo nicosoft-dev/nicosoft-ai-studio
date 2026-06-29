@@ -7,7 +7,8 @@
 //                 read-only kit + the persona as systemPromptOverride + the P4 stall watchdog; returns the
 //                 normalized result (inputTokens = runRoleStep's contextTokens, §3②).
 //   • runChat   → the tool-less single-llmChat seam (chatOnce) for select / escalate / synth (L-4); best-effort.
-//   • persona   → the name→builder table (subjectExaminePrompt / refutePrompt / reverifyPrompt / READER_SYSTEM).
+//   • persona   → the name→builder table (subjectExaminePrompt / refutePrompt / reverifyPrompt / verifier).
+//                 (understand-mode READER_SYSTEM moved to understand.ts — it's a tool-less pinned summary, not a persona.)
 
 import * as rolesService from '../roles.service'
 import { runRoleStep, LensStallError, type RunStepOptions } from '../coordinator-step'
@@ -17,20 +18,12 @@ import { subjectExaminePrompt, refutePrompt, refutePromptPrecision, reverifyProm
 import { lensRunStepOptions } from './runstep'
 import type { LensDeps } from './contracts'
 
-// READER persona for understand mode (carved verbatim from examine/understand.ts — lens-owned now).
-export const READER_SYSTEM =
-  'You are an expert reader building a SHARED UNDERSTANDING of a codebase / document set. You are given ONE file. ' +
-  'Read it (Read / Grep / Glob) and produce a CONCISE, factual summary: what this file is, its key responsibilities ' +
-  'and exported structures, any notable logic or invariants, and how it fits the larger system. This is for ' +
-  'understanding only — NO judgment, NO pass/fail, NO recommendations. Keep it tight (a few short paragraphs at most).'
-
 function buildPersona(name: string, focus: string): string {
   switch (name) {
     case 'subjectExaminePrompt': return subjectExaminePrompt(focus)
     case 'refutePrompt': return refutePrompt(focus)
     case 'refutePromptPrecision': return refutePromptPrecision(focus)
     case 'reverifyPrompt': return reverifyPrompt(focus)
-    case 'READER_SYSTEM': return READER_SYSTEM
     case 'COORDINATOR_VERIFIER_PROMPT': return COORDINATOR_VERIFIER_PROMPT
     default: return name // a literal system prompt passed straight through
   }
