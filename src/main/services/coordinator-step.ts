@@ -182,7 +182,7 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
   // quiet (closure-loop): a card-only step opens NO segment — the caller renders it via an explicit sub_tool card.
   if (!quiet) cb.onStepStart(roleId, dispatch, binding.model, segmentKind)
 
-  // Agent-dispatched experts (engineer/shuri/generalist/analyst/scheduler) run a FULL tool-using agent
+  // Agent-dispatched experts (engineer/frontend/generalist/analyst/scheduler) run a FULL tool-using agent
   // loop — the dispatch upgrade (doc 19 §11 phase 2), not a single llmChat turn. runDispatchedAgent owns
   // the loop + transcript but NOT persistence: we persist the step here (tagged with the dispatch chain)
   // so the renderer draws one badge spanning the run, exactly like the llmChat path below.

@@ -170,7 +170,7 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
   if (signal.aborted) throw new LlmError('network', 'aborted before dispatch')
 
   // Gate C (Block 2): the e2e signal is INDEPENDENT — it depends only on what the user explicitly asked
-  // for, never on the routed roles (no decision.roles.includes('shuri')) and never on gateEnabled (Gate B).
+  // for, never on the routed roles (no decision.roles.includes('frontend')) and never on gateEnabled (Gate B).
   decision.needsE2E = detectE2EIntent(input.prompt)
 
   const gateEnabled = routeNeedsPlan(input.prompt, decision)

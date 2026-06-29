@@ -35,7 +35,7 @@ const PLAN_FIRST =
 // fetched an online math API for arithmetic instead of computing it). This is a NEUTRAL capability note
 // that names NO specific tool — the roles' toolsets differ (generalist/analyst have code_execution,
 // scheduler has none), so it points at the tool schema rather than promising a tool the role lacks. NOT a
-// mandate to stay local. Dev roles (engineer / shuri) already carry detailed tool guidance, so skip this.
+// mandate to stay local. Dev roles (engineer / frontend) already carry detailed tool guidance, so skip this.
 const TOOL_AWARENESS =
   '# You can act, not just answer — use the tools you have by your own judgment\n' +
   "You're not limited to replying: the tools available to you this turn are in your tool schema — reach " +
@@ -47,7 +47,7 @@ const TOOL_AWARENESS =
   '# Iron rule: you are not a software engineer — do NOT write code\n' +
   'Use your tools for YOUR job, but you must NOT write or edit the project source code (application logic, ' +
   'components, types, build or config files) — that work belongs to the engineers. If your task needs a code ' +
-  `change, do NOT attempt it yourself: state plainly in your result that it needs ${displayName('shuri')} (frontend) or ${displayName('engineer')} ` +
+  `change, do NOT attempt it yourself: state plainly in your result that it needs ${displayName('frontend')} (frontend) or ${displayName('engineer')} ` +
   '(backend), and exactly what is required, so the coordinator routes it to them. Producing your own ' +
   'deliverable file when that file IS your output (a translation file, a report, notes) is fine; reaching ' +
   'into the existing source code is not.'
@@ -111,7 +111,7 @@ export function buildAgentSystem(
 ): string {
   // toolless:false — this is the agent-loop path (the role really has a tool kit), so buildRolePrompt must
   // NOT prepend the "no tools to call" chat-mode note. TOOL_AWARENESS below tells non-dev roles they can act.
-  // DEV roles (engineer/shuri) use ENGINEER/SHURI_SYSTEM_PROMPT which — unlike buildRolePrompt — does NOT
+  // DEV roles (engineer/frontend) use ENGINEER/FRONTEND_SYSTEM_PROMPT which — unlike buildRolePrompt — does NOT
   // carry COMMON_PREAMBLE, so they were missing the "reply in the user's language / no filler / own mistakes"
   // baseline on the agent + collab paths (the dogfood Flynn-in-English-filler bug). Prepend it for DEV roles;
   // the buildRolePrompt branch already includes it.

@@ -29,7 +29,7 @@ export function chooseVerifierRole(implementer: string | string[]): string {
   // (else Flynn+Turing would pick Turing to "independently" review its own work). A single string → set of one,
   // byte-identical to the prior single-implementer behavior (floor/panel callers unchanged).
   const exclude = new Set(Array.isArray(implementer) ? implementer : [implementer])
-  const order = ['analyst', 'engineer', 'shuri', 'generalist', 'scheduler', 'translator', 'editor', 'designer']
+  const order = ['analyst', 'engineer', 'frontend', 'generalist', 'scheduler', 'translator', 'editor', 'designer']
   return (
     order.find((r) => !exclude.has(r) && agentService.AGENT_ROLE_IDS.has(r) && Boolean(rolesService.getBinding(r)?.endpointId)) ??
     'generalist'

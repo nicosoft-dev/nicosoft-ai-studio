@@ -7,7 +7,7 @@ export const ROLE_DISPLAY_NAMES: Record<string, string> = {
   coordinator: 'Danny',
   generalist: 'Amélie',
   engineer: 'Flynn',
-  shuri: 'Shuri',
+  frontend: 'Shuri',
   designer: 'Georgia',
   translator: 'Louise',
   editor: 'Miranda',

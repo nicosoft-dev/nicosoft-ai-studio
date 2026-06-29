@@ -4,7 +4,7 @@
 // point (run / dispatched / collab / system building) imports it from here.
 
 import { CORE_TOOLS } from '../agent/registry'
-import { ENGINEER_SYSTEM_PROMPT, SHURI_SYSTEM_PROMPT } from '../agent/system-prompt'
+import { ENGINEER_SYSTEM_PROMPT, FRONTEND_SYSTEM_PROMPT } from '../agent/system-prompt'
 import { enterPlanModeTool } from '../agent/tools/enter-plan-mode'
 import { exitPlanModeTool } from '../agent/tools/exit-plan-mode'
 import { askUserQuestionTool } from '../agent/tools/ask-user-question'
@@ -24,8 +24,8 @@ import { manager as skillManager } from './skill.service'
 export const ENGINEER_ROLE_ID = 'engineer'
 // Full-stack dev roles: Flynn (backend) + Shuri (frontend). Both get the complete tool set, a
 // coding-agent system prompt, and a required cwd (doc 19 phase 1).
-export const DEV_ROLES = new Set([ENGINEER_ROLE_ID, 'shuri'])
-export const DEV_PROMPT: Record<string, string> = { engineer: ENGINEER_SYSTEM_PROMPT, shuri: SHURI_SYSTEM_PROMPT }
+export const DEV_ROLES = new Set([ENGINEER_ROLE_ID, 'frontend'])
+export const DEV_PROMPT: Record<string, string> = { engineer: ENGINEER_SYSTEM_PROMPT, frontend: FRONTEND_SYSTEM_PROMPT }
 
 // Roles that run a full agent loop (tools + multi-turn transcript) when dispatched by the coordinator,
 // rather than a single llmChat turn. Same set the renderer's chat store keys agent:run vs chat:send on —
@@ -34,7 +34,7 @@ export const DEV_PROMPT: Record<string, string> = { engineer: ENGINEER_SYSTEM_PR
 // Louise localizes whole files, Miranda reads/distills documents, Georgia generates images + reads briefs —
 // so a dispatched Louise/Miranda/Georgia needs tools (Georgia's ns_generate_image included). Lives here (not
 // agent-dispatch) so the kit builder can reference it without a cycle; agent-dispatch re-exports it.
-export const AGENT_ROLE_IDS = new Set(['engineer', 'shuri', 'generalist', 'analyst', 'scheduler', 'translator', 'editor', 'designer'])
+export const AGENT_ROLE_IDS = new Set(['engineer', 'frontend', 'generalist', 'analyst', 'scheduler', 'translator', 'editor', 'designer'])
 
 // CORE tool subset per agent role (doc 16 §5). Engineer = full set; other roles get a tailored baseline.
 // Writes / exec / orchestration (Edit/MultiEdit/Bash/Task/TodoWrite) stay Engineer-only. WebSearch now works

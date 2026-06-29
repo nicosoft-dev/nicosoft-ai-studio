@@ -18,7 +18,7 @@ import type { CoordinatorCallbacks, CoordinatorRunInput, RouteDecision } from '.
 // Submit this turn's e2e verification onto the background queue. Never awaited by the caller — the queue
 // owns the FAIL→retry loop (it imports nothing from the coordinator modules, so no import cycle).
 export function submitGateC(input: CoordinatorRunInput, decision: RouteDecision, cb: CoordinatorCallbacks): void {
-  const e2eCwd = input.cwdByRole?.['shuri'] ?? input.cwdByRole?.['engineer'] ?? input.cwdByRole?.['coordinator']
+  const e2eCwd = input.cwdByRole?.['frontend'] ?? input.cwdByRole?.['engineer'] ?? input.cwdByRole?.['coordinator']
   const implementerRoleId = decision.roles?.find((r) => r !== 'coordinator') ?? 'engineer'
   // INDEPENDENT lifecycle (spec §7,§23): Gate C runs AFTER the turn returns, so it must NOT share the
   // parent run's abort signal — aborting the turn must not kill an in-flight verification. Give the job
@@ -149,7 +149,7 @@ function makeE2EForwardCb(convId: string, round: number, cb: CoordinatorCallback
 }
 
 async function runE2EVerify(convId: string, prompt: string, cwd: string | undefined, round: number, signal: AbortSignal, cb: CoordinatorCallbacks, shots: string[]): Promise<E2ERoundResult> {
-  const verifierRoleId = chooseVerifierRole('shuri')
+  const verifierRoleId = chooseVerifierRole('frontend')
   const forwardCb = makeE2EForwardCb(convId, round, cb, shots)
   const verifierPrompt = [
     `End-to-end verification, round ${round}. Actually run the product and verify the task below — do not trust any written summary.`,

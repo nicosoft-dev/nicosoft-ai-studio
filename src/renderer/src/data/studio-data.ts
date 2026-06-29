@@ -16,7 +16,7 @@ const EXPERTS: Expert[] = [
   { id: 'coordinator', name: N.coordinator, color: 'var(--exp-coordinator)', specialty: 'Coordinator — routes & merges', personality: 'Calm air-traffic-controller', model: 'nicosoft/claude-opus-4-8', family: 'anthropic', coordinator: true },
   { id: 'generalist', name: N.generalist, color: 'var(--exp-generalist)', specialty: 'Generalist — chat & brainstorming', personality: 'Warm, curious front door', model: 'nicosoft/gpt-5.5', family: 'openai' },
   { id: 'engineer', name: N.engineer, color: 'var(--exp-engineer)', specialty: 'Backend engineer — APIs, server, data', personality: 'Precise, direct, no pleasantries', model: 'nicosoft/claude-opus-4-8', family: 'anthropic' },
-  { id: 'shuri', name: N.shuri, color: 'var(--exp-shuri)', specialty: 'Frontend engineer — UI, React, CSS', personality: 'Inventive, detail-driven, craft-proud', model: 'nicosoft/claude-opus-4-8', family: 'anthropic' },
+  { id: 'frontend', name: N.frontend, color: 'var(--exp-frontend)', specialty: 'Frontend engineer — UI, React, CSS', personality: 'Inventive, detail-driven, craft-proud', model: 'nicosoft/claude-opus-4-8', family: 'anthropic' },
   { id: 'designer', name: N.designer, color: 'var(--exp-designer)', specialty: 'Designer — images & posters', personality: 'Creative, opinionated', model: 'gemini-pro-latest', family: 'gemini' },
   { id: 'translator', name: N.translator, color: 'var(--exp-translator)', specialty: 'Translator — any language pair', personality: 'Precise, culturally aware', model: 'nicosoft/gemini-3-flash-agent', family: 'gemini' },
   { id: 'editor', name: N.editor, color: 'var(--exp-editor)', specialty: 'Editor — summarize & condense', personality: 'Structured, no padding', model: 'gemini-pro-latest', family: 'gemini' },
@@ -61,7 +61,7 @@ const EXTENSIONS: ExtensionsData = {
 const GREETINGS: Record<string, Greeting> = {
   generalist: { greeting: `Hi, I'm ${N.generalist}. I handle the everyday stuff — ask me anything, or I'll point you to the right expert.`, chips: ['Explain this error message', 'Brainstorm names for my app', 'Plan a 3-day trip'] },
   engineer: { greeting: 'I build the backend — APIs, databases, services, business logic. Paste code or describe what the server should do.', chips: ['Design a REST API', 'Why is this query slow?', 'Add auth to this endpoint'] },
-  shuri: { greeting: 'I build the frontend — UI, components, styling, interactions. Tell me what to build, or paste a component.', chips: ['Build a login form', 'Make this responsive', 'Why is this layout broken?'] },
+  frontend: { greeting: 'I build the frontend — UI, components, styling, interactions. Tell me what to build, or paste a component.', chips: ['Build a login form', 'Make this responsive', 'Why is this layout broken?'] },
   coordinator: { greeting: "I coordinate the team. Tell me what you need and I'll route it to the right expert — or convene several and merge their work.", chips: ['Translate and debug this error', 'Research, then summarize', 'Draft and schedule an email'] },
   designer: { greeting: 'I make posters, illustrations, and avatars. Describe the vibe, the text, and the format.', chips: ['Poster for our game night', 'App icon, flat & minimal', 'Hero illustration, isometric'] },
   translator: { greeting: 'I translate any language pair and localize copy — paste text, or point me at files (i18n / md / txt) in a folder.', chips: ['Translate landing page to German', 'Localize a locale file', 'Is this idiomatic?'] },

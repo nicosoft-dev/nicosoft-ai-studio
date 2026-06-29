@@ -9,7 +9,7 @@ import type { ChatMessage, ToolCall } from './chat-types'
 // (generalist/analyst/scheduler) via the OpenAI Responses adapter (doc 16). Gemini roles join later.
 // designer (Georgia) now runs the full Gemini agent loop too — ns_generate_image is one of her tools, so
 // generated images flow through the same tool→attachment path as any agent image (no separate loop).
-const AGENT_ROLES = new Set(['engineer', 'shuri', 'generalist', 'analyst', 'scheduler', 'translator', 'editor', 'designer'])
+const AGENT_ROLES = new Set(['engineer', 'frontend', 'generalist', 'analyst', 'scheduler', 'translator', 'editor', 'designer'])
 // Roles that generate images (the ns_generate_image tool is in their kit). A UI predicate only: it drives
 // the composer's image-model picker + passing imageModel to the run. Execution always goes through the
 // agent loop (these roles are in AGENT_ROLES); the tool itself is gated server-side by the Tools setting.

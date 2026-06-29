@@ -26,9 +26,9 @@ export function listBindings(): RoleBindingDto[] {
   const rows = roleRepo.listBindings().map(toBindingDto)
   // Shuri (frontend) defaults to Flynn's (engineer) binding until configured separately (doc 19 phase 1):
   // same Anthropic endpoint + opus model + thinking depth. A user-set Shuri binding overrides this.
-  if (!rows.some((b) => b.roleId === 'shuri')) {
+  if (!rows.some((b) => b.roleId === 'frontend')) {
     const eng = rows.find((b) => b.roleId === 'engineer')
-    if (eng) rows.push({ ...eng, roleId: 'shuri' })
+    if (eng) rows.push({ ...eng, roleId: 'frontend' })
   }
   return rows
 }
@@ -40,9 +40,9 @@ export function listBindings(): RoleBindingDto[] {
 export function getBinding(roleId: string): RoleBindingDto | null {
   const b = roleRepo.getBinding(roleId)
   if (b) return toBindingDto(b)
-  if (roleId === 'shuri') {
+  if (roleId === 'frontend') {
     const eng = roleRepo.getBinding('engineer')
-    if (eng) return { ...toBindingDto(eng), roleId: 'shuri' }
+    if (eng) return { ...toBindingDto(eng), roleId: 'frontend' }
   }
   return null
 }

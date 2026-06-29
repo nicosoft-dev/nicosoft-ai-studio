@@ -40,6 +40,34 @@ export function runMigrations(db: DatabaseSync): void {
   ensureColumn(db, 'gate_outcomes', 'row_kind', "TEXT NOT NULL DEFAULT 'floor'")
   ensureColumn(db, 'gate_outcomes', 'step_id', 'TEXT')
   ensureColumn(db, 'gate_outcomes', 'subject', 'TEXT')
+  migrateShuriToFrontend(db)
+}
+
+// One-time role_id rename: the frontend engineer's role_id used to be the character name `shuri`; it is now the
+// functional id `frontend` (the DISPLAY name stays "Shuri" via ROLE_DISPLAY_NAMES — only the internal key changed).
+// role_id is NOT a foreign key anywhere (FKs are on endpoint/conversation/project/task/memory ids only), so renaming
+// the value across every role_id-bearing column is a plain UPDATE with no cascade. Idempotent (WHERE = 'shuri' is a
+// no-op once renamed) and gated by user_version so the table scan runs exactly once. Columns are DISCOVERED from the
+// live schema so no role_id-bearing table can be missed by a hardcoded list.
+function migrateShuriToFrontend(db: DatabaseSync): void {
+  const ver = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
+  if (ver >= 1) return
+  const ROLE_COLS = new Set(['role_id', 'primary_role_id', 'assignee_role_id'])
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
+  db.exec('BEGIN')
+  try {
+    for (const { name } of tables) {
+      const cols = db.prepare(`PRAGMA table_info("${name}")`).all() as { name: string }[]
+      for (const c of cols) {
+        if (ROLE_COLS.has(c.name)) db.prepare(`UPDATE "${name}" SET "${c.name}" = 'frontend' WHERE "${c.name}" = 'shuri'`).run()
+      }
+    }
+    db.exec('COMMIT')
+  } catch (e) {
+    db.exec('ROLLBACK')
+    throw e
+  }
+  db.exec('PRAGMA user_version = 1') // idempotent UPDATEs already ran; mark done so the scan is skipped next boot
 }
 
 // Add a column only if the table doesn't already have it (SQLite lacks ADD COLUMN IF NOT EXISTS).
