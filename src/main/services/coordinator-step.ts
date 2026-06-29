@@ -20,7 +20,7 @@ import { pickSmallModel } from './model-select'
 import { LlmError, type ChatAttachment, type ChatMessage } from '../llm/types'
 import { resolveImageForLlm, MAX_REPLAY_IMAGES } from '../media/storage'
 import type { AgentContext, PermissionMode, WrittenFile } from '../agent/context'
-import { WORKER_MAX_TURNS, type AgentResult } from '../agent/loop'
+import type { AgentResult } from '../agent/loop'
 import type { MemoryRow } from '../repos/memory.repo'
 import {
   COORDINATOR_COUNCIL_SYNTHESIS_PROMPT,
@@ -135,8 +135,9 @@ export interface RunStepOptions {
   stallTimeoutMs?: number
   // Hard cap on this run's agent-loop turns. Lens sub-agents (finder/skeptic/reader) pass 50 — Workflow's
   // FORKED_AGENT_DEFAULT_MAX_TURNS — so a single agent can't run away into hundreds of self-read turns (the
-  // dogfood finder hit ~300 turns × 92k-token context = the channel-killer). Unset → runRoleStep defaults to
-  // WORKER_MAX_TURNS (200 = CC's `worker` archetype cap), so a coordinator-dispatched step is bounded too.
+  // dogfood finder hit ~300 turns × 92k-token context = the channel-killer). Unset → unbounded (normal steps):
+  // a coordinator-dispatched expert is bounded by autocompact + microcompact (loop.ts), like CC/codex — never a
+  // fixed turn cap that would kill a big multi-step task mid-build.
   maxTurns?: number
 }
 
@@ -282,9 +283,7 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
         permissionMode: opts.permissionMode,
         toolNames: opts.toolNames,
         expectsFileChanges: opts.expectsFileChanges,
-        // Default a coordinator-dispatched step to CC's worker cap (200) when the caller doesn't set one. Lens
-        // sub-agents pass an explicit 50 (kept); only an unset normal step changes — from unbounded to 200.
-        maxTurns: opts.maxTurns ?? WORKER_MAX_TURNS,
+        maxTurns: opts.maxTurns,
         stallTimeoutMs: opts.stallTimeoutMs,
         imageModel: binding.imageModel ?? undefined,
         // DIRECT: run the loop with Danny's front-door persona + his recalled context, not the

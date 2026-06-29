@@ -41,16 +41,6 @@ import type {
 // model-visible content/tool deltas, never on provider keepalive pings (which are not AgentLlmEvent values).
 export const MAIN_DISPATCH_STALL_TIMEOUT_MS = 900_000
 
-// Turn cap for a coordinator-DISPATCHED expert (collab participant or solo pipeline step). Mirrors Claude Code's
-// `worker` agent archetype — the autonomous Task agent whose own description is "executing tasks autonomously —
-// research, implementation, or verification" — which CC ships with maxTurns:200 (binary 2.1.186: the Task
-// dispatch path runs `Vq({...,maxTurns:d??e.maxTurns})` and the worker/fork agent defs declare maxTurns:200; the
-// loop only enforces when set, `if(c&&turn>c)→max_turns_reached`). NOT a self-invented throttle: it adopts CC's
-// worker value so a dispatched expert can't run away into hundreds of self-read turns (run-1 analyst hit ~600).
-// Lens fan-out sub-agents keep the finer LENS_MAX_TURNS=50; a DIRECT user↔expert chat stays unbounded (= CC's
-// interactive main loop, also uncapped) — only coordinator-dispatched work takes this cap.
-export const WORKER_MAX_TURNS = 200
-
 export interface RunAgentParams {
   protocol: 'anthropic' | 'openai' | 'gemini'
   baseUrl: string

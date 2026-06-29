@@ -9,7 +9,7 @@ import { ulid } from '../db/id'
 import { join } from 'node:path'
 import type { AgentContext, PermissionRequest, PermissionDecision, StudioLensResult } from '../agent/context'
 import type { AgentLlmEvent } from '../agent/llm'
-import { MAIN_DISPATCH_STALL_TIMEOUT_MS, WORKER_MAX_TURNS, runAgent, type AgentEvent, type AgentResult, type CompactCarry } from '../agent/loop'
+import { MAIN_DISPATCH_STALL_TIMEOUT_MS, runAgent, type AgentEvent, type AgentResult, type CompactCarry } from '../agent/loop'
 import { promptTokensFromUsage } from '../agent/compact'
 import { isContentBlock } from '../agent/types'
 import type { AgentMessage, ServerToolSchema } from '../agent/types'
@@ -355,10 +355,9 @@ export async function runCollabSession(
           thinking: x.thinking,
           seedCompact: compactCarry, // §4a — carry the anchor in from the prior wake
           stallTimeoutMs: MAIN_DISPATCH_STALL_TIMEOUT_MS,
-          // A collab expert is a coordinator-DISPATCHED worker → bound it at CC's worker cap (200) so one
-          // participant can't run away into hundreds of self-read turns (run-1: analyst hit ~600 → context
-          // ballooned → autocompact → renderer crash). Not a self-invented throttle — it's CC's worker value.
-          maxTurns: WORKER_MAX_TURNS,
+          // No turn cap: a collab expert is bounded by autocompact + microcompact (loop.ts), like CC/codex —
+          // never a fixed turn limit that would kill a big task mid-build. A genuine runaway is contained by the
+          // renderer error boundary + autocompact keeping context bounded, not by aborting the work.
           onStream: (ev) => hooks.onExpertStream(x.roleId, ev),
         })
         let result!: AgentResult
