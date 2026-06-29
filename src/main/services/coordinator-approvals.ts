@@ -40,10 +40,10 @@ async function reviewExitPlanMode(convId: string, planAuthorRoleId: string, req:
   void convId
   const reviewerRoleId = 'coordinator'
   const toolId = `gate-a-plan-review-${Date.now()}`
-  cb.onToolEvent?.(planAuthorRoleId, { type: 'sub_tool_start', toolUseId: toolId, parentToolId: 'coordinator-gate-a', name: 'DannyPlanReview', input: req.input as Record<string, unknown> })
+  cb.onToolEvent?.(planAuthorRoleId, { type: 'sub_tool_start', toolUseId: toolId, parentToolId: 'coordinator-gate-a', name: 'PlanReview', input: req.input as Record<string, unknown> })
   if (planAuthorRoleId === reviewerRoleId) {
     const feedback = 'Gate A rejected self-review: reviewer must be independent from the plan author.'
-    cb.onToolEvent?.(planAuthorRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: 'coordinator-gate-a', name: 'DannyPlanReview', isError: true, result: feedback })
+    cb.onToolEvent?.(planAuthorRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: 'coordinator-gate-a', name: 'PlanReview', isError: true, result: feedback })
     return { allow: false, message: feedback }
   }
   // Gate A is CONFIRMATORY, not a hard safety gate (the red-zone classifier still guards dangerous actions
@@ -54,7 +54,7 @@ async function reviewExitPlanMode(convId: string, planAuthorRoleId: string, req:
   const ep = binding?.endpointId ? endpointRepo.getById(binding.endpointId) : null
   const apiKey = binding?.endpointId ? keychain.getApiKey(binding.endpointId) : null
   if (!binding?.endpointId || !binding.model || !ep?.enabled || !apiKey) {
-    cb.onToolEvent?.(planAuthorRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: 'coordinator-gate-a', name: 'DannyPlanReview', isError: false, result: 'APPROVE (reviewer unavailable — fail-open)' })
+    cb.onToolEvent?.(planAuthorRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: 'coordinator-gate-a', name: 'PlanReview', isError: false, result: 'APPROVE (reviewer unavailable — fail-open)' })
     return { allow: true }
   }
 
@@ -81,11 +81,11 @@ async function reviewExitPlanMode(convId: string, planAuthorRoleId: string, req:
     // tolerate non-JSON model output; default to APPROVE unless it cleanly says REVISE (confirmatory, not adversarial).
   }
   if (verdict === 'APPROVE') {
-    cb.onToolEvent?.(planAuthorRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: 'coordinator-gate-a', name: 'DannyPlanReview', isError: false, result: `APPROVE: ${feedback}` })
+    cb.onToolEvent?.(planAuthorRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: 'coordinator-gate-a', name: 'PlanReview', isError: false, result: `APPROVE: ${feedback}` })
     return { allow: true }
   }
   // REVISE — Danny's call. Send the author back to revise and resubmit; no coordinator round cap, the
   // confirmatory default keeps it from stalling and the author's agent-loop maxTurns bounds the worst case.
-  cb.onToolEvent?.(planAuthorRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: 'coordinator-gate-a', name: 'DannyPlanReview', isError: true, result: `REVISE: ${feedback}` })
-  return { allow: false, message: `Danny plan review requested revision: ${feedback}` }
+  cb.onToolEvent?.(planAuthorRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId: 'coordinator-gate-a', name: 'PlanReview', isError: true, result: `REVISE: ${feedback}` })
+  return { allow: false, message: `Plan review requested revision: ${feedback}` }
 }

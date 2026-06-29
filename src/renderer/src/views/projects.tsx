@@ -474,7 +474,7 @@ function ProjectDetail({
   }
   const [pending, setPending] = useState<PendingDto[]>([])
   const [convId, setConvId] = useState<string | null>(null)
-  const [dannyReply, setDannyReply] = useState('')
+  const [coordinatorReply, setCoordinatorReply] = useState('')
   const [dockExpanded, setDockExpanded] = useState(false)
   const [goalExpanded, setGoalExpanded] = useState(false)
   const [eventDetail, setEventDetail] = useState<LaneEvent | null>(null)
@@ -502,7 +502,7 @@ function ProjectDetail({
       if (!conv) return
       const [msgs, ps] = await Promise.all([window.api.conversations.messages(conv.id), window.api.approval.list(conv.id)])
       if (!live) return
-      setDannyReply([...msgs].reverse().find((m) => m.author !== 'user')?.content ?? '')
+      setCoordinatorReply([...msgs].reverse().find((m) => m.author !== 'user')?.content ?? '')
       setPending(ps)
     })()
     const off = window.api.coordinator.onApproval(async () => {
@@ -547,12 +547,12 @@ function ProjectDetail({
       if (d.streamId !== streamId) return
       settle()
       const msgs = await window.api.conversations.messages(convId)
-      setDannyReply([...msgs].reverse().find((m) => m.author !== 'user')?.content ?? '')
+      setCoordinatorReply([...msgs].reverse().find((m) => m.author !== 'user')?.content ?? '')
     })
     const offErr = window.api.coordinator.onError((d) => {
       if (d.streamId !== streamId) return
       settle()
-      setDannyReply(`⚠ ${d.message}`)
+      setCoordinatorReply(`⚠ ${d.message}`)
     })
   }
 
@@ -672,7 +672,7 @@ function ProjectDetail({
 
       {/* Dock — Danny's latest report + send the team a new instruction from inside the project (5c-C2) */}
       <div className="wb-dock">
-        {dannyReply ? (
+        {coordinatorReply ? (
           <div className="wb-dock-msg">
             <Avatar expert={STUDIO_DATA.EXPERT_BY_ID.coordinator} size={22} />
             <div className="wb-dock-body">
@@ -684,7 +684,7 @@ function ProjectDetail({
                   </button>
                 ) : null}
               </div>
-              <div className={'wb-dock-text' + (dockExpanded ? '' : ' collapsed')}>{running ? 'Working on it…' : dannyReply}</div>
+              <div className={'wb-dock-text' + (dockExpanded ? '' : ' collapsed')}>{running ? 'Working on it…' : coordinatorReply}</div>
             </div>
           </div>
         ) : null}

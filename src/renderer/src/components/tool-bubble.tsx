@@ -14,7 +14,7 @@ import type { ToolCall, ServerNote } from '@/stores/chat'
 const DIFF_TOOLS = new Set(['Edit', 'Write', 'MultiEdit'])
 // Tools whose result is Markdown written by an agent (FAIL/PASS verdicts, lists, `code`, **bold**,
 // headings) — render it through <Markdown> instead of a plain <pre> so the formatting survives.
-const MARKDOWN_TOOLS = new Set(['IndependentVerifier', 'DannyPlanReview', 'Task', 'WebFetch'])
+const MARKDOWN_TOOLS = new Set(['IndependentVerifier', 'PlanReview', 'Task', 'WebFetch'])
 
 // A Bash result that is a git diff — detected by the unified-diff file header or a hunk header. Such a
 // result renders through CodeBlock lang="diff" for added-green / removed-red syntax highlighting.
@@ -72,8 +72,8 @@ export function toolSummary(name: string, input: Record<string, unknown>): strin
       return String(input.query ?? '')
     case 'Task':
       return String(input.description ?? '')
-    case 'DannyPlanReview':
-      return 'Danny independent plan review'
+    case 'PlanReview':
+      return 'Independent plan review'
     case 'IndependentVerifier':
       return `verifier ${String(input.verifierRoleId ?? '')}${input.attempt ? ` · attempt ${String(input.attempt)}` : ''}`
     case 'GateBFailHandler':
