@@ -106,8 +106,10 @@ export const EVENT_META: Record<HookEventName, HookEventMeta> = {
   PostToolBatch: CONTEXT_ONLY,
   Notification: NO_OUTPUT_NOTIFY,
   UserPromptSubmit: { ...CONTEXT_BLOCKING, outputs: ['additionalContext', 'blocking', 'updatedInput', 'suppressOriginalPrompt', 'sessionTitle'] },
-  // No emit surface yet: Studio has no user-prompt-level slash-command/MCP-prompt expansion; skill expansion is a tool call covered by Pre/PostToolUse.
-  UserPromptExpansion: CONTEXT_BLOCKING,
+  // No emit surface: Studio has no user-prompt-level slash-command/MCP-prompt expansion (skill expansion is a tool
+  // call covered by Pre/PostToolUse). Registered but unwired → NO output keys (no inert switches; re-add CC's
+  // additionalContext/blocking here only when a real expansion surface lands + its parse/engine path exists).
+  UserPromptExpansion: NO_OUTPUT_NOTIFY,
   SessionStart: { ...CONTEXT_BLOCKING, outputs: ['additionalContext', 'blocking', 'initialUserMessage', 'sessionTitle', 'watchPaths', 'reloadSkills'] },
   SessionEnd: NO_OUTPUT_NOTIFY,
   Stop: STOP,
@@ -122,10 +124,11 @@ export const EVENT_META: Record<HookEventName, HookEventMeta> = {
   TeammateIdle: NO_OUTPUT_NOTIFY,
   TaskCreated: NO_OUTPUT_NOTIFY,
   TaskCompleted: NO_OUTPUT_NOTIFY,
-  // No emit surface yet (Studio MCP has no elicitation lifecycle) — kept registered as extension points; when the
-  // surface lands, re-add the elicitationResponse/elicitationResultResponse output keys (parse + engine + types).
-  Elicitation: { isToolEvent: false, isStopClass: false, canBlock: true, canInjectContext: false, outputs: ['blocking'] },
-  ElicitationResult: { isToolEvent: false, isStopClass: false, canBlock: true, canInjectContext: false, outputs: ['blocking'] },
+  // No emit surface (Studio MCP has no elicitation lifecycle) — registered but unwired → NO output keys (no inert
+  // switches). When the surface lands, re-add CC's elicitationResponse/elicitationResultResponse keys + their parse/
+  // engine/types path.
+  Elicitation: NO_OUTPUT_NOTIFY,
+  ElicitationResult: NO_OUTPUT_NOTIFY,
   ConfigChange: NO_OUTPUT_NOTIFY,
   WorktreeCreate: { isToolEvent: false, isStopClass: false, canBlock: false, canInjectContext: false, outputs: ['worktreePath'] },
   WorktreeRemove: NO_OUTPUT_NOTIFY,

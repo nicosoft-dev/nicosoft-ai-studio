@@ -24,6 +24,7 @@
     "test:preview": "node --experimental-transform-types --import ./e2e/_register.mjs e2e/preview-tools.mts",
     "test:preview-ssrf": "node --experimental-transform-types --import ./e2e/_register.mjs e2e/preview-url-guard.mts",
     "test:self-wakeup": "node --experimental-transform-types --import ./e2e/_register.mjs --import ./e2e/_stub-electron.mjs e2e/self-wakeup.mts",
+    "test:worktree": "node --experimental-transform-types --import ./e2e/_register.mjs --import ./e2e/_stub-electron.mjs e2e/worktree-cwd.mts",
     "rebuild:native": "electron-rebuild --only node-pty --force",
     "postinstall": "node scripts/ensure-electron.mjs && node scripts/rebuild-native.mjs"
   },

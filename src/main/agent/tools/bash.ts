@@ -5,13 +5,12 @@
 
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { semanticNumber, semanticBoolean } from './semantic'
 import type { AgentContext } from '../context'
-import { confineReal } from '../confine'
 import { buildTool } from '../tool'
 import type { ToolResultBlock } from '../types'
 import { baseHookPayload, hookContextFromAgent } from '../hooks/adapter'
@@ -54,20 +53,25 @@ function shellQuote(s: string): string {
 }
 
 async function fireCwdChanged(ctx: AgentContext, oldCwd: string, newCwd: string): Promise<string | null> {
-  const root = ctx.cwdRoot ?? oldCwd
-  const confined = await confineReal(root, newCwd).catch(() => null)
-  if (!confined) return `Bash changed directory to ${newCwd}, which is outside the allowed root ${root}; Studio kept cwd at ${oldCwd}.`
-  ctx.cwd = confined
-  ctx.setCwd?.(confined)
+  // CC §B.1.1: cwd follows wherever the shell's surviving `pwd` lands — there is NO allowed-root gate (Studio used
+  // to confine cd to cwdRoot; that deviated from CC and is removed for fidelity). realpath it (the marker's pwd
+  // resolves symlinks) and move BOTH cwd and the confinement root to it so subsequent file ops work at the new cwd;
+  // an unresolvable path keeps the old cwd. setCwd persists cwd across turns (collab) / up the chain (solo); cwdRoot
+  // is synced back by the loop's syncMutableContextState (solo) / the collab turn's finally.
+  const resolved = await realpath(newCwd).catch(() => null)
+  if (!resolved) return `Bash changed directory to ${newCwd}, which could not be resolved; Studio kept cwd at ${oldCwd}.`
+  ctx.cwd = resolved
+  ctx.cwdRoot = resolved
+  ctx.setCwd?.(resolved)
   if (ctx.isSubAgent) return null
   await clearHookEnvFiles(ctx.sessionDir, ['cwdchanged', 'filechanged'])
   let watchPaths: string[] = []
   if (hookRegistry.hasAny('CwdChanged')) {
-    const merged = await runHooks('CwdChanged', { ...baseHookPayload('CwdChanged', ctx), old_cwd: oldCwd, new_cwd: confined }, hookContextFromAgent(ctx))
+    const merged = await runHooks('CwdChanged', { ...baseHookPayload('CwdChanged', ctx), old_cwd: oldCwd, new_cwd: resolved }, hookContextFromAgent(ctx))
     for (const msg of merged.systemMessages) console.log(`[hooks:CwdChanged] ${msg}`)
     watchPaths = merged.watchPaths
   }
-  if (ctx.convId) await fileWatchManager.rearmForCwdChange(ctx.convId, watchPaths, { cwd: confined, sessionDir: ctx.sessionDir, roleId: ctx.roleId })
+  if (ctx.convId) await fileWatchManager.rearmForCwdChange(ctx.convId, watchPaths, { cwd: resolved, sessionDir: ctx.sessionDir, roleId: ctx.roleId })
   return null
 }
 
