@@ -194,7 +194,7 @@ function mergeResults(event: HookEventName, results: HookOutcome[]): MergedHookR
     }
     if (r.updatedToolOutput !== undefined && eventAllowsOutput(event, 'updatedToolOutput')) merged.updatedToolOutputs.push(r.updatedToolOutput)
     if (r.additionalContext && meta.canInjectContext && eventAllowsOutput(event, 'additionalContext')) merged.additionalContexts.push(r.additionalContext)
-    if (r.systemMessage && eventAllowsOutput(event, 'additionalContext')) merged.systemMessages.push(r.systemMessage)
+    if (r.systemMessage) merged.systemMessages.push(r.systemMessage)
     if (r.preventContinuation && eventAllowsOutput(event, 'preventContinuation')) {
       merged.preventContinuation = true
       if (r.stopReason) merged.stopReason = r.stopReason
@@ -209,6 +209,7 @@ function mergeResults(event: HookEventName, results: HookOutcome[]): MergedHookR
     if (r.reloadSkills && eventAllowsOutput(event, 'reloadSkills')) merged.reloadSkills = true
     if (r.userDisplayMessage && eventAllowsOutput(event, 'userDisplayMessage')) merged.userDisplayMessages.push(r.userDisplayMessage)
     if (r.blockedBy && eventAllowsOutput(event, 'blockedBy')) merged.blockedBy = r.blockedBy
+    if (r.worktreePath && eventAllowsOutput(event, 'worktreePath')) merged.worktreePath = r.worktreePath
     if (r.decision && eventAllowsOutput(event, 'decision')) {
       const next = upgrade(perm, r.decision.behavior)
       if (next !== perm || next === r.decision.behavior) {

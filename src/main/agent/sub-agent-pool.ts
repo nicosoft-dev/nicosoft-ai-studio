@@ -53,7 +53,8 @@ class AsyncSubAgent {
     private runChild: RunChild,
     parentSignal: AbortSignal,
     private parentToolId?: string,
-    private subAgentId?: string
+    private subAgentId?: string,
+    private onDone?: () => void
   ) {
     this.messages = [userTurn(prompt)]
     parentSignal.addEventListener('abort', () => this.close(), { once: true })
@@ -78,11 +79,12 @@ class AsyncSubAgent {
           this.wakeResolve = undefined
         }
       }
-    } catch {
-      /* a child failure must not crash the parent; it just ends as done */
+    } catch (err) {
+      this.emit(`Sub-agent failed: ${err instanceof Error ? err.message : String(err)}`)
     }
     this.status = 'done'
     this.emit(null)
+    this.onDone?.()
   }
 
   private emit(v: string | null): void {
@@ -120,6 +122,7 @@ export class AsyncSubAgentPool {
   private agents = new Map<string, AsyncSubAgent>()
   private counter = 0
   private runChild?: RunChild
+  private onClose?: (id: string) => void
 
   // The pool is created by runAgentLoop (so it can dispose it in the same finally as the service
   // registry), but runChild needs runAgent's internal child tool set + config — runAgent injects it once,
@@ -130,10 +133,14 @@ export class AsyncSubAgentPool {
     this.runChild = fn
   }
 
+  setOnClose(fn: (id: string) => void): void {
+    this.onClose = fn
+  }
+
   spawn(prompt: string, parentToolId?: string): string {
     if (!this.runChild) throw new Error('Background sub-agents are not available in this context.')
     const id = `sub-${++this.counter}`
-    this.agents.set(id, new AsyncSubAgent(prompt, this.runChild, this.parentSignal, parentToolId, id))
+    this.agents.set(id, new AsyncSubAgent(prompt, this.runChild, this.parentSignal, parentToolId, id, () => this.onClose?.(id)))
     return id
   }
 
@@ -172,7 +179,9 @@ export class AsyncSubAgentPool {
 
   // Tree-kill every child — called when the parent run ends so no child outlives it.
   disposeAll(): void {
-    for (const a of this.agents.values()) a.close()
+    for (const [, a] of this.agents) {
+      a.close()
+    }
     this.agents.clear()
   }
 }

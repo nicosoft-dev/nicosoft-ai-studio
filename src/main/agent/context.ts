@@ -93,6 +93,20 @@ export interface TodoItem {
   status: 'pending' | 'in_progress' | 'completed'
 }
 
+export interface ActiveWorktreeSession {
+  name: string
+  slug: string
+  root: string
+  path: string
+  branch?: string
+  baseCommit?: string
+  baseFile?: string
+  previousCwd: string
+  previousCwdRoot?: string
+  createdByStudio: boolean
+  hookManaged?: boolean
+}
+
 // For the Task tool: run an isolated sub-agent loop and return its final text. runAgent injects this
 // into the context tools see; the sub-agent gets a fresh readFileState/todos and no Task tool, so
 // recursion is bounded to one level.
@@ -109,7 +123,7 @@ export interface SubAgentToolEvent {
 
 export type SubAgentToolEventHandler = (event: SubAgentToolEvent) => void
 
-export type SpawnSubAgent = (input: { description: string; prompt: string; parentToolId?: string }) => Promise<string>
+export type SpawnSubAgent = (input: { description: string; prompt: string; parentToolId?: string; isolation?: 'worktree' }) => Promise<string>
 
 // Async sub-agent pool (batch 3 / doc 25). Where Task is synchronous (spawn → run → summary, blocking the
 // parent's turn), this lets the parent spawn PERSISTENT children that keep running in the background:
@@ -124,7 +138,13 @@ export interface SubAgentPool {
 }
 
 export interface AgentContext {
-  cwd: string // confined project root; every tool path must resolve under this
+  cwd: string // current working directory; every tool path must resolve under cwdRoot when set, else cwd
+  cwdRoot?: string // immutable confinement root for Bash cd; EnterWorktree switches it to the active worktree
+  setCwd?: (cwd: string) => void // top-level Bash cd / EnterWorktree update hook; sub-agents keep this local
+  isSubAgent?: boolean // true inside a Task / background child loop; CwdChanged is top-level only
+  isBackgroundSubAgent?: boolean // true inside agent_spawn / agent_batch children for bgIsolation enforcement
+  isWorktreeIsolated?: boolean // true when this run is already inside a Studio-managed worktree
+  activeWorktree?: ActiveWorktreeSession // EnterWorktree session state for ExitWorktree
   signal: AbortSignal // cancellation — threaded into bash spawns and sub-agents
   // Owning run id for run-scoped resource ownership: tools holding live resources across calls
   // (playwright_browser sessions) tag them with this, and runAgentLoop's finally reclaims by it — a run that

@@ -21,7 +21,7 @@ export interface CollabMessage {
   text: string
 }
 
-export type CollabEventKind = 'send' | 'assign' | 'wait' | 'wake' | 'turn' | 'done'
+export type CollabEventKind = 'send' | 'assign' | 'wait' | 'wake' | 'turn' | 'idle' | 'done'
 
 export interface CollabEvent {
   kind: CollabEventKind
@@ -204,6 +204,10 @@ export class CollabSession {
         if (!id) {
           const names = [...this.experts.values()].map((e) => e.spec.name)
           return `Cannot register "${nameOrId}" as the Studio Lens driver — no such teammate. Choose one of: ${names.join(', ')}.`
+        }
+        if (this.lensDriverId && this.lensDriverId !== id) {
+          const existing = this.experts.get(this.lensDriverId)!.spec.name
+          return `${existing} is already the team's Studio Lens driver; the driver cannot be changed after registration.`
         }
         this.lensDriverId = id
         const name = this.experts.get(id)!.spec.name
@@ -489,7 +493,9 @@ export class CollabSession {
       if (signal.aborted) { resolve('quiescent'); return }
       signal.addEventListener('abort', onAbort, { once: true })
       e.wake = done
+      const wasParked = e.status === 'parked'
       e.status = 'parked'
+      if (!wasParked) this.onEvent({ kind: 'idle', roleId: e.spec.roleId })
 
       // A finite wait times out into a 'woken' (the expert resumes and finds no new mail → likely done).
       const timer = e.waitUntil > 0 ? setTimeout(() => done('woken'), Math.max(0, e.waitUntil - this.clock())) : undefined

@@ -8,6 +8,7 @@ import { confineReal } from '../confine'
 import { buildTool } from '../tool'
 import type { ToolResultBlock } from '../types'
 import { applyReplace, ensureFresh } from './edit-util'
+import { assertBgIsolationWriteAllowed, bgIsolationWriteBlock } from './write-guard'
 
 const inputSchema = z.strictObject({
   file_path: z.string().describe('Path to the file to edit'),
@@ -34,11 +35,17 @@ export const multiEditTool = buildTool<typeof inputSchema, MultiEditOutput>({
   prompt: () =>
     'Apply multiple Edit operations to a single file atomically (Read it first). Each edit applies to ' +
     'the result of the previous; all succeed or none are written.',
-  checkPermissions: async (input) => ({
-    behavior: 'ask',
-    message: `MultiEdit ${input.file_path} (${input.edits.length} edits)`,
-  }),
+  checkPermissions: async (input, ctx) => {
+    const block = bgIsolationWriteBlock(ctx)
+    return block
+      ? { behavior: 'deny', message: block }
+      : {
+          behavior: 'ask',
+          message: `MultiEdit ${input.file_path} (${input.edits.length} edits)`,
+        }
+  },
   async call(input, ctx) {
+    assertBgIsolationWriteAllowed(ctx)
     const abs = await confineReal(ctx.cwd, input.file_path)
     let content = await ensureFresh(ctx, abs, input.file_path)
     // Apply all in memory first — a failure on edit N leaves the file untouched (atomic).

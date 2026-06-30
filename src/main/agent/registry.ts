@@ -19,6 +19,7 @@ import { webFetchTool } from './tools/web-fetch'
 import { webSearchTool } from './tools/web-search'
 import { writeTool } from './tools/write'
 import { writePdfTool } from './tools/write-pdf'
+import { enterWorktreeTool, exitWorktreeTool } from './tools/worktree'
 import { scheduleCreateTool, scheduleListTool, scheduleDeleteTool } from './tools/schedule'
 
 export const CORE_TOOLS: readonly Tool[] = [
@@ -38,6 +39,8 @@ export const CORE_TOOLS: readonly Tool[] = [
   webSearchTool,
   todoTool,
   taskTool,
+  enterWorktreeTool,
+  exitWorktreeTool,
   scheduleCreateTool,
   scheduleListTool,
   scheduleDeleteTool,

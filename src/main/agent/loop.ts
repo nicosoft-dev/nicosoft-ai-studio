@@ -2,6 +2,7 @@
 // execute them and feed tool_results back as a user message, then loop; otherwise done. Continuation
 // is decided by "did the assistant request a tool", NOT stop_reason. See §2.1 + §D.
 
+import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
 import { LlmError } from '../llm/types'
 import { CHARS_PER_TOKEN } from '../llm/estimate'
@@ -25,6 +26,7 @@ import type { Tool } from './tool'
 import { runHooks, STOP_HOOK_BLOCK_CAP } from './hooks/engine'
 import { hookRegistry } from './hooks/registry'
 import { hookContextFromAgent, baseHookPayload } from './hooks/adapter'
+import { createAgentWorktree, getWorktreeSettings, removeAgentWorktree, type ManagedWorktree } from '../services/worktree.service'
 import { isContentBlock } from './types'
 import type {
   AgentMessage,
@@ -187,6 +189,15 @@ export function buildToolsParam(
   return [searchTool, ...serverTools, ...tools.map((t) => toToolSchema(t, t.shouldDefer))]
 }
 
+function appendUserText(messages: AgentMessage[], text: string): AgentMessage[] {
+  const block = { type: 'text' as const, text }
+  const last = messages.at(-1)
+  if (last?.role === 'user' && Array.isArray(last.content)) {
+    return [...messages.slice(0, -1), { ...last, content: [...last.content, block] }]
+  }
+  return [...messages, { role: 'user', content: [block] }]
+}
+
 export async function* runAgent(
   params: RunAgentParams,
 ): AsyncGenerator<AgentEvent, AgentResult, void> {
@@ -216,6 +227,22 @@ export async function* runAgent(
     llm: params.ctx.llm ?? { protocol: params.protocol, baseUrl, apiKey, smallModel, searchModel, imageModel: params.imageModel },
     model: params.ctx.model ?? params.model, // for prompt/agent hook executors (their own `model` config overrides)
     setPermissionMode: setPlanMode,
+    cwdRoot: params.ctx.cwdRoot ?? params.ctx.cwd,
+    setCwd: (next) => {
+      ctx.cwd = next
+      params.ctx.cwd = next
+      params.ctx.setCwd?.(next)
+    },
+  }
+  const syncMutableContextState = (source: AgentContext): void => {
+    ctx.cwd = source.cwd
+    ctx.cwdRoot = source.cwdRoot
+    ctx.activeWorktree = source.activeWorktree
+    ctx.isWorktreeIsolated = source.isWorktreeIsolated
+    params.ctx.cwd = source.cwd
+    params.ctx.cwdRoot = source.cwdRoot
+    params.ctx.activeWorktree = source.activeWorktree
+    params.ctx.isWorktreeIsolated = source.isWorktreeIsolated
   }
   const childToolNames = new Map<string, string>()
   const emitChildStream = (parentToolId?: string, subAgentId?: string) => (event: AgentLlmEvent): void => {
@@ -406,67 +433,79 @@ export async function* runAgent(
   const subAgentTools = tools.filter((t) => t.name !== 'Task' && t.name !== 'EnterPlanMode' && t.name !== 'ExitPlanMode' && t.name !== 'studio_lens' && !t.name.startsWith('preview_') && !t.name.startsWith('monitor_') && t.name !== 'schedule_wakeup')
   const makeSpawnSubAgent =
     (signal: AbortSignal): SpawnSubAgent =>
-    async ({ prompt, parentToolId }) => {
-      const childId = parentToolId ?? 'task'
+    async ({ prompt, parentToolId, isolation }) => {
+      const childId = `a${randomBytes(8).toString('hex')}`
+      const agentName = `agent-${childId}`
       let childPrompt = prompt
-      if (hookRegistry.hasAny('SubagentStart')) {
-        const start = await runHooks('SubagentStart', { ...baseHookPayload('SubagentStart', ctx), agent_id: childId, agent_type: 'task' }, hookContextFromAgent(ctx))
-        if (start.permissionBehavior === 'deny') return start.permissionReason ?? (start.blockingErrors.join('; ') || 'Sub-agent start blocked by hook')
-        if (start.additionalContexts.length) childPrompt = `${childPrompt}\n\n${start.additionalContexts.join('\n\n')}`
-      }
-      const sub = runAgent({
-        protocol: params.protocol,
-        baseUrl,
-        apiKey,
-        model,
-        system: SUBAGENT_SYSTEM,
-        messages: [{ role: 'user', content: [{ type: 'text', text: childPrompt }] }],
-        tools: subAgentTools,
-        isSubAgentLoop: true, // fires SubagentStop (below), not the top-level Stop hook
-        // askUser nulled (like the headless scheduler): a sub-agent has no interactive surface — without this
-        // it would inherit the parent's live askUser and could pop a blocking question dialog to the real user,
-        // contradicting SUBAGENT_SYSTEM's "no interactive user to ask". Nulled → AskUserQuestion errors cleanly.
-        // setTodos nulled (alongside panel/spawnSubAgent/askUser): a sub-agent's TodoWrite is a private, run-local
-        // checklist — without this it inherits the parent's setTodos and broadcasts the child's one-shot todos into
-        // the PARENT conversation's live Tasks list (overwriting the real list / prematurely archiving a phase).
-        ctx: { ...ctx, signal, readFileState: new Map(), todos: [], setTodos: undefined, spawnSubAgent: undefined, panel: undefined, preview: undefined, askUser: undefined },
-        maxTokens,
-        maxTurns,
-        onStream: emitChildStream(parentToolId),
-      })
-      let last = ''
-      let result: AgentResult | undefined
-      for (;;) {
-        const step = await sub.next()
-        if (step.done) {
-          result = step.value
-          break
+      let childWorktree: ManagedWorktree | undefined
+      try {
+        if (isolation === 'worktree') {
+          childWorktree = await createAgentWorktree(ctx, agentName)
+          childPrompt =
+            `${childPrompt}\n\n` +
+            `You are running in a separate working copy at ${childWorktree.path}. Your file changes do not affect the parent checkout unless the user explicitly merges or copies them.`
         }
-        emitChildStep(step.value, parentToolId)
-        if (step.value.type === 'assistant') {
-          for (const b of step.value.message.content) if (isContentBlock(b) && b.type === 'text') last = b.text
+        if (hookRegistry.hasAny('SubagentStart')) {
+          const start = await runHooks('SubagentStart', { ...baseHookPayload('SubagentStart', ctx), agent_id: childId, agent_type: 'task' }, hookContextFromAgent(ctx))
+          if (start.permissionBehavior === 'deny') return start.permissionReason ?? (start.blockingErrors.join('; ') || 'Sub-agent start blocked by hook')
+          if (start.additionalContexts.length) childPrompt = `${childPrompt}\n\n${start.additionalContexts.join('\n\n')}`
         }
+        const sub = runAgent({
+          protocol: params.protocol,
+          baseUrl,
+          apiKey,
+          model,
+          system: SUBAGENT_SYSTEM,
+          messages: [{ role: 'user', content: [{ type: 'text', text: childPrompt }] }],
+          tools: subAgentTools,
+          isSubAgentLoop: true, // fires SubagentStop (below), not the top-level Stop hook
+          // askUser nulled (like the headless scheduler): a sub-agent has no interactive surface — without this
+          // it would inherit the parent's live askUser and could pop a blocking question dialog to the real user,
+          // contradicting SUBAGENT_SYSTEM's "no interactive user to ask". Nulled → AskUserQuestion errors cleanly.
+          // setTodos nulled (alongside panel/spawnSubAgent/askUser): a sub-agent's TodoWrite is a private, run-local
+          // checklist — without this it inherits the parent's setTodos and broadcasts the child's one-shot todos into
+          // the PARENT conversation's live Tasks list (overwriting the real list / prematurely archiving a phase).
+          ctx: { ...ctx, cwd: childWorktree?.path ?? ctx.cwd, cwdRoot: childWorktree?.path ?? ctx.cwdRoot, setCwd: undefined, activeWorktree: undefined, signal, readFileState: new Map(), todos: [], setTodos: undefined, spawnSubAgent: undefined, panel: undefined, preview: undefined, askUser: undefined, writtenPaths: childWorktree ? new Set() : ctx.writtenPaths, isSubAgent: true, isWorktreeIsolated: isolation === 'worktree' },
+          maxTokens,
+          maxTurns,
+          onStream: emitChildStream(parentToolId),
+        })
+        let last = ''
+        let result: AgentResult | undefined
+        for (;;) {
+          const step = await sub.next()
+          if (step.done) {
+            result = step.value
+            break
+          }
+          emitChildStep(step.value, parentToolId)
+          if (step.value.type === 'assistant') {
+            for (const b of step.value.message.content) if (isContentBlock(b) && b.type === 'text') last = b.text
+          }
+        }
+        // Annotate a non-complete termination so a truncated child can't masquerade as a full summary.
+        if (result?.reason === 'max_turns') {
+          return `${last ? `${last}\n\n` : ''}(Note: sub-agent stopped at its turn limit; result may be incomplete.)`
+        }
+        if (result?.reason === 'aborted') {
+          return `${last ? `${last}\n\n` : ''}(Note: sub-agent was aborted before completing.)`
+        }
+        if (result?.reason === 'thrash_stop') {
+          return `${last ? `${last}\n\n` : ''}(Note: sub-agent was stopped by the repeated-failure loop guard; result may be incomplete.)`
+        }
+        // NB: 'incomplete' is intentionally NOT annotated here — it is only produced for an expectsFileChanges
+        // run, and sub-agent spawns do not thread that flag, so a child can never return it. If delegated
+        // implementation is ever gated, add the note here (and thread expectsFileChanges into the spawns).
+        // SubagentStop hook: the parent fires it when a sub-agent finishes. A hook can attach context that rides
+        // back on the sub-agent's summary (sub-agent re-entry on block is a later refinement).
+        if (hookRegistry.hasAny('SubagentStop')) {
+          const ss = await runHooks('SubagentStop', { ...baseHookPayload('SubagentStop', ctx), stop_hook_active: false, agent_id: childId, agent_transcript_path: ctx.sessionDir ? `${ctx.sessionDir}/transcript.jsonl` : undefined, agent_type: 'task' }, hookContextFromAgent(ctx))
+          if (ss.additionalContexts.length) last = `${last}\n\n${ss.additionalContexts.join('\n\n')}`
+        }
+        return last
+      } finally {
+        if (childWorktree) await removeAgentWorktree(childWorktree, 'task', false, ctx).catch(() => undefined)
       }
-      // Annotate a non-complete termination so a truncated child can't masquerade as a full summary.
-      if (result?.reason === 'max_turns') {
-        return `${last ? `${last}\n\n` : ''}(Note: sub-agent stopped at its turn limit; result may be incomplete.)`
-      }
-      if (result?.reason === 'aborted') {
-        return `${last ? `${last}\n\n` : ''}(Note: sub-agent was aborted before completing.)`
-      }
-      if (result?.reason === 'thrash_stop') {
-        return `${last ? `${last}\n\n` : ''}(Note: sub-agent was stopped by the repeated-failure loop guard; result may be incomplete.)`
-      }
-      // NB: 'incomplete' is intentionally NOT annotated here — it is only produced for an expectsFileChanges
-      // run, and sub-agent spawns do not thread that flag, so a child can never return it. If delegated
-      // implementation is ever gated, add the note here (and thread expectsFileChanges into the spawns).
-      // SubagentStop hook: the parent fires it when a sub-agent finishes. A hook can attach context that rides
-      // back on the sub-agent's summary (sub-agent re-entry on block is a later refinement).
-      if (hookRegistry.hasAny('SubagentStop')) {
-        const ss = await runHooks('SubagentStop', { ...baseHookPayload('SubagentStop', ctx), stop_hook_active: false, agent_id: childId, agent_transcript_path: ctx.sessionDir ? `${ctx.sessionDir}/transcript.jsonl` : undefined, agent_type: 'task' }, hookContextFromAgent(ctx))
-        if (ss.additionalContexts.length) last = `${last}\n\n${ss.additionalContexts.join('\n\n')}`
-      }
-      return last
     }
 
   // Async sub-agent pool (batch 3): on the top-level run, give the pool (created by runAgentLoop) a
@@ -474,13 +513,56 @@ export async function* runAgent(
   // (depth 1) — threading the child's persisted readFileState/todos. Sub-agents get subAgents: undefined.
   if (ctx.subAgents instanceof AsyncSubAgentPool) {
     const asyncChildTools = tools.filter((t) => t.name !== 'Task' && !t.name.startsWith('agent_') && t.name !== 'EnterPlanMode' && t.name !== 'ExitPlanMode' && t.name !== 'studio_lens' && !t.name.startsWith('preview_') && !t.name.startsWith('monitor_') && t.name !== 'schedule_wakeup')
+    const asyncWorktrees = new Map<string, ManagedWorktree>()
+    const asyncWorktreeNames = new Map<string, string>()
+    const asyncCwds = new Map<string, string>()
+    const asyncCwdRoots = new Map<string, string | undefined>()
+    const asyncActiveWorktrees = new Map<string, AgentContext['activeWorktree']>()
+    const asyncWorktreeIsolated = new Map<string, boolean | undefined>()
+    const asyncWorktreeNotified = new Set<string>()
+    const cleanupAsyncWorktree = (id: string): void => {
+      const wt = asyncWorktrees.get(id)
+      if (!wt) return
+      void removeAgentWorktree(wt, 'task', false, ctx)
+        .catch(() => undefined)
+        .finally(() => {
+          asyncWorktrees.delete(id)
+          asyncWorktreeNames.delete(id)
+          asyncCwds.delete(id)
+          asyncCwdRoots.delete(id)
+          asyncActiveWorktrees.delete(id)
+          asyncWorktreeIsolated.delete(id)
+          asyncWorktreeNotified.delete(id)
+        })
+    }
+    ctx.subAgents.setOnClose(cleanupAsyncWorktree)
     const runChild: RunChild = async (childMessages, signal, readFileState, todos, parentToolId, subAgentId) => {
       let messagesForChild = childMessages
-      if (hookRegistry.hasAny('SubagentStart')) {
-        const start = await runHooks('SubagentStart', { ...baseHookPayload('SubagentStart', ctx), agent_id: subAgentId ?? parentToolId ?? 'async-sub-agent', agent_type: 'async' }, hookContextFromAgent(ctx))
-        if (start.permissionBehavior === 'deny') return [...childMessages, { role: 'assistant', content: [{ type: 'text', text: start.permissionReason ?? (start.blockingErrors.join('; ') || 'Sub-agent start blocked by hook') }] }]
-        if (start.additionalContexts.length) messagesForChild = [...childMessages, { role: 'user', content: [{ type: 'text', text: start.additionalContexts.join('\n\n') }] }]
+      const backgroundId = subAgentId ?? parentToolId ?? `async-a${randomBytes(8).toString('hex')}`
+      const bgIsolation = getWorktreeSettings().bgIsolation
+      let childWorktree = asyncWorktrees.get(backgroundId)
+      if (bgIsolation === 'worktree' && !childWorktree) {
+        const worktreeName = asyncWorktreeNames.get(backgroundId) ?? `agent-a${randomBytes(8).toString('hex')}`
+        asyncWorktreeNames.set(backgroundId, worktreeName)
+        childWorktree = await createAgentWorktree(ctx, worktreeName)
+        asyncWorktrees.set(backgroundId, childWorktree)
       }
+      if (childWorktree && !asyncWorktreeNotified.has(backgroundId)) {
+        asyncWorktreeNotified.add(backgroundId)
+        messagesForChild = appendUserText(
+          messagesForChild,
+          `You are running in a separate working copy at ${childWorktree.path}. Your file changes do not affect the parent checkout unless the user explicitly merges or copies them.`,
+        )
+      }
+      if (hookRegistry.hasAny('SubagentStart')) {
+        const start = await runHooks('SubagentStart', { ...baseHookPayload('SubagentStart', ctx), agent_id: backgroundId, agent_type: 'async' }, hookContextFromAgent(ctx))
+        if (start.permissionBehavior === 'deny') return [...childMessages, { role: 'assistant', content: [{ type: 'text', text: start.permissionReason ?? (start.blockingErrors.join('; ') || 'Sub-agent start blocked by hook') }] }]
+        if (start.additionalContexts.length) messagesForChild = appendUserText(messagesForChild, start.additionalContexts.join('\n\n'))
+      }
+      const childCtxCwd = asyncCwds.get(backgroundId) ?? childWorktree?.path ?? ctx.cwd
+      const childCtxRoot = asyncCwdRoots.has(backgroundId) ? asyncCwdRoots.get(backgroundId) : childWorktree?.path ?? ctx.cwdRoot
+      const childIsWorktreeIsolated = asyncWorktreeIsolated.get(backgroundId) ?? Boolean(childWorktree)
+      const childCtx: AgentContext = { ...ctx, cwd: childCtxCwd, cwdRoot: childCtxRoot, setCwd: undefined, activeWorktree: asyncActiveWorktrees.get(backgroundId), signal, readFileState, todos, setTodos: undefined, spawnSubAgent: undefined, subAgents: undefined, panel: undefined, preview: undefined, askUser: undefined, writtenPaths: childIsWorktreeIsolated ? new Set() : ctx.writtenPaths, isSubAgent: true, isBackgroundSubAgent: true, isWorktreeIsolated: childIsWorktreeIsolated }
       const sub = runAgent({
         protocol: params.protocol,
         baseUrl,
@@ -494,7 +576,7 @@ export async function* runAgent(
         // under agent_batch several run concurrently — nulling prevents a child popping a blocking user dialog.
         // setTodos nulled (see the Task spawn above): a background sub-agent's TodoWrite stays run-local and must
         // never broadcast into the parent conversation's live Tasks list.
-        ctx: { ...ctx, signal, readFileState, todos, setTodos: undefined, spawnSubAgent: undefined, subAgents: undefined, panel: undefined, preview: undefined, askUser: undefined },
+        ctx: childCtx,
         maxTokens,
         maxTurns,
         onStream: emitChildStream(parentToolId, subAgentId),
@@ -508,6 +590,10 @@ export async function* runAgent(
         }
         emitChildStep(step.value, parentToolId, subAgentId)
       }
+      asyncCwds.set(backgroundId, childCtx.cwd)
+      asyncCwdRoots.set(backgroundId, childCtx.cwdRoot)
+      asyncActiveWorktrees.set(backgroundId, childCtx.activeWorktree)
+      asyncWorktreeIsolated.set(backgroundId, childCtx.isWorktreeIsolated)
       return result.messages
     }
     ctx.subAgents.setRunChild(runChild)
@@ -854,6 +940,7 @@ export async function* runAgent(
     // The tools were already executing as they streamed in (StreamingToolExecutor); drain for results
     // in original order. Pairing holds by construction (one result per tool_use, same id, in order).
     const results = await streamExec.drain()
+    syncMutableContextState(turnCtx)
     // Pairing back-fill: Anthropic requires one tool_result per tool_use, and an EMPTY user message
     // poisons the conversation for strict upstreams. If the executor came back short (aborted teardown
     // and similar edge paths), synthesize an error result for each missing id instead of pushing a

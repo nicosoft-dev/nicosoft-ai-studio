@@ -87,7 +87,7 @@ async function checkPermission(
     return { allow: false, message: BYPASS_INSTALL_DENIED }
   }
   if (ctx.permissionMode === 'bypass' && tool.name !== 'ExitPlanMode') return { allow: true }
-  if (ctx.permissionMode === 'plan' && !tool.isReadOnly(input) && tool.name !== 'ExitPlanMode') {
+  if (ctx.permissionMode === 'plan' && !tool.isReadOnly(input, ctx) && tool.name !== 'ExitPlanMode') {
     return { allow: false, message: 'In plan mode — mutations are not allowed. Present a plan instead.' }
   }
 
@@ -125,7 +125,7 @@ async function checkPermission(
   // default/auto mode — even if the tool's own checkPermissions returned 'allow' — so a write never
   // runs unattended outside bypass mode (which already returned above). This is what makes
   // permissionMode 'default' actually gate writes/edits, not just bash-write commands.
-  if (tool.isReadOnly(input)) return { allow: true, updatedInput: allowedInput }
+  if (tool.isReadOnly(input, ctx)) return { allow: true, updatedInput: allowedInput }
   // Pass the turn signal so a turn-level abort (reactive compaction / cancel) unwedges a tool blocked
   // on the user — the permission bridge denies + clears the prompt on abort instead of hanging.
   const decision = await ctx.requestPermission({ toolName: tool.name, input, reason: askReason }, ctx.signal)
@@ -268,6 +268,10 @@ async function runOne(
     const toolCtx: AgentContext = { ...ctx, currentToolUseId: toolUse.id }
     onFinalInput?.(effectiveInput)
     const result = await tool.call(effectiveInput, toolCtx)
+    ctx.cwd = toolCtx.cwd
+    ctx.cwdRoot = toolCtx.cwdRoot
+    ctx.activeWorktree = toolCtx.activeWorktree
+    ctx.isWorktreeIsolated = toolCtx.isWorktreeIsolated
     return await finish(tool.mapResult(result.data, toolUse.id))
   } catch (err) {
     return await finish(errorResult(toolUse.id, err instanceof Error ? err.message : String(err)))

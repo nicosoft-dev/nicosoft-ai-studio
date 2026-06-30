@@ -37,7 +37,17 @@ export function parseHookResult(args: { stdout: string; stderr: string; exitCode
 
   const text = stdout.trim()
   if (!text) return { outcome: 'success' }
-  if (!text.startsWith('{')) return { outcome: 'success', additionalContext: text }
+  if (!text.startsWith('{')) {
+    if (event === 'WorktreeCreate') {
+      const last = stdout
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .at(-1)
+      return last ? { outcome: 'success', worktreePath: last } : { outcome: 'success' }
+    }
+    return { outcome: 'success', additionalContext: text }
+  }
 
   let json: Record<string, unknown>
   try {
@@ -128,6 +138,7 @@ function applyJsonProtocol(json: Record<string, unknown>, event: HookEventName):
       out.blockingError = h.blockedBy
       out.outcome = 'blocking'
     }
+    if (typeof h.worktreePath === 'string') out.worktreePath = h.worktreePath
 
     const decision = parsePermissionDecision(h.decision) ?? parsePermissionDecision(h.permissionRequestResult)
     if (decision) {

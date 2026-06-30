@@ -8,6 +8,7 @@ import { confineReal } from '../confine'
 import { buildTool } from '../tool'
 import type { ToolResultBlock } from '../types'
 import { ensureFresh } from './edit-util'
+import { assertBgIsolationWriteAllowed, bgIsolationWriteBlock } from './write-guard'
 
 const inputSchema = z.strictObject({
   file_path: z.string().describe('Path to write, relative to the project root or absolute'),
@@ -27,8 +28,12 @@ export const writeTool = buildTool<typeof inputSchema, WriteOutput>({
     'Write a file (create or overwrite). For an EXISTING file prefer Edit/MultiEdit for a targeted ' +
     'change — use Write only to create a new file or fully replace one. Overwriting requires having Read ' +
     'it first.',
-  checkPermissions: async (input) => ({ behavior: 'ask', message: `Write ${input.file_path}` }),
+  checkPermissions: async (input, ctx) => {
+    const block = bgIsolationWriteBlock(ctx)
+    return block ? { behavior: 'deny', message: block } : { behavior: 'ask', message: `Write ${input.file_path}` }
+  },
   async call(input, ctx) {
+    assertBgIsolationWriteAllowed(ctx)
     const abs = await confineReal(ctx.cwd, input.file_path)
     const existing = await stat(abs).catch(() => null)
     if (existing) await ensureFresh(ctx, abs, input.file_path) // don't clobber an unseen file

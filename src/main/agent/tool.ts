@@ -30,9 +30,9 @@ export interface ToolDef<In extends z.ZodTypeAny = z.ZodTypeAny, Out = unknown> 
   // MCP tools set this (the server already provides JSON Schema); core tools leave it undefined and a
   // permissive zod inputSchema (z.record(z.unknown())) lets execution.ts:runOne's safeParse pass through.
   inputJSONSchema?: Record<string, unknown>
-  isReadOnly?(input: z.infer<In>): boolean
-  isConcurrencySafe?(input: z.infer<In>): boolean
-  isDestructive?(input: z.infer<In>): boolean
+  isReadOnly?(input: z.infer<In>, ctx?: AgentContext): boolean
+  isConcurrencySafe?(input: z.infer<In>, ctx?: AgentContext): boolean
+  isDestructive?(input: z.infer<In>, ctx?: AgentContext): boolean
   validateInput?(input: z.infer<In>, ctx: AgentContext): Promise<ValidationResult>
   checkPermissions?(input: z.infer<In>, ctx: AgentContext): Promise<PermissionResult>
   call(input: z.infer<In>, ctx: AgentContext, onProgress?: OnToolProgress): Promise<ToolResult<Out>>
@@ -49,9 +49,9 @@ export interface ToolDef<In extends z.ZodTypeAny = z.ZodTypeAny, Out = unknown> 
 // A complete tool after defaults are applied — every gate is guaranteed present.
 export interface Tool<In extends z.ZodTypeAny = z.ZodTypeAny, Out = unknown>
   extends ToolDef<In, Out> {
-  isReadOnly(input: z.infer<In>): boolean
-  isConcurrencySafe(input: z.infer<In>): boolean
-  isDestructive(input: z.infer<In>): boolean
+  isReadOnly(input: z.infer<In>, ctx?: AgentContext): boolean
+  isConcurrencySafe(input: z.infer<In>, ctx?: AgentContext): boolean
+  isDestructive(input: z.infer<In>, ctx?: AgentContext): boolean
   validateInput(input: z.infer<In>, ctx: AgentContext): Promise<ValidationResult>
   checkPermissions(input: z.infer<In>, ctx: AgentContext): Promise<PermissionResult>
   maxResultSizeChars: number

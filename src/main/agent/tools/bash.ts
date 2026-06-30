@@ -4,11 +4,23 @@
 // ./bash-classifier.
 
 import { spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { z } from 'zod'
 import { semanticNumber, semanticBoolean } from './semantic'
+import type { AgentContext } from '../context'
+import { confineReal } from '../confine'
 import { buildTool } from '../tool'
 import type { ToolResultBlock } from '../types'
+import { baseHookPayload, hookContextFromAgent } from '../hooks/adapter'
+import { runHooks } from '../hooks/engine'
+import { clearHookEnvFiles, hasHookEnvSource, shellSourceHookEnvSnippet } from '../hooks/env-file'
+import { fileWatchManager } from '../hooks/file-watch'
+import { hookRegistry } from '../hooks/registry'
 import { isReadOnlyCommand } from './bash-classifier'
+import { assertBgIsolationWriteAllowed, bgIsolationWriteBlock } from './write-guard'
 
 const inputSchema = z.object({
   command: z.string().describe('The shell command to run'),
@@ -37,28 +49,58 @@ interface BashOutput {
   signal: NodeJS.Signals | null
 }
 
+function shellQuote(s: string): string {
+  return `'${s.replaceAll("'", `'\\''`)}'`
+}
+
+async function fireCwdChanged(ctx: AgentContext, oldCwd: string, newCwd: string): Promise<string | null> {
+  const root = ctx.cwdRoot ?? oldCwd
+  const confined = await confineReal(root, newCwd).catch(() => null)
+  if (!confined) return `Bash changed directory to ${newCwd}, which is outside the allowed root ${root}; Studio kept cwd at ${oldCwd}.`
+  ctx.cwd = confined
+  ctx.setCwd?.(confined)
+  if (ctx.isSubAgent) return null
+  await clearHookEnvFiles(ctx.sessionDir, ['cwdchanged', 'filechanged'])
+  let watchPaths: string[] = []
+  if (hookRegistry.hasAny('CwdChanged')) {
+    const merged = await runHooks('CwdChanged', { ...baseHookPayload('CwdChanged', ctx), old_cwd: oldCwd, new_cwd: confined }, hookContextFromAgent(ctx))
+    for (const msg of merged.systemMessages) console.log(`[hooks:CwdChanged] ${msg}`)
+    watchPaths = merged.watchPaths
+  }
+  if (ctx.convId) await fileWatchManager.rearmForCwdChange(ctx.convId, watchPaths, { cwd: confined, sessionDir: ctx.sessionDir, roleId: ctx.roleId })
+  return null
+}
+
 export const bashTool = buildTool<typeof inputSchema, BashOutput>({
   name: 'Bash',
   inputSchema,
   prompt: () =>
     'Run a shell command in the project directory. Returns combined stdout/stderr and the exit code. ' +
     'Prefer the dedicated Read/Grep/Glob tools over cat/grep/find where possible.',
-  isReadOnly: (input) => isReadOnlyCommand(input.command),
-  isConcurrencySafe: (input) => isReadOnlyCommand(input.command),
+  isReadOnly: (input, ctx) => isReadOnlyCommand(input.command) && (!ctx || !hasHookEnvSource(ctx.sessionDir)),
+  isConcurrencySafe: (input, ctx) => isReadOnlyCommand(input.command) && (!ctx || !hasHookEnvSource(ctx.sessionDir)),
   isDestructive: (input) => !isReadOnlyCommand(input.command),
-  checkPermissions: async (input) =>
-    isReadOnlyCommand(input.command)
+  checkPermissions: async (input, ctx) => {
+    const bgBlock = !isReadOnlyCommand(input.command) ? bgIsolationWriteBlock(ctx) : null
+    if (bgBlock) return { behavior: 'deny', message: bgBlock }
+    return isReadOnlyCommand(input.command) && !hasHookEnvSource(ctx.sessionDir)
       ? { behavior: 'allow' }
-      : { behavior: 'ask', message: `Run: ${input.command}` },
+      : { behavior: 'ask', message: `Run: ${input.command}` }
+  },
   maxResultSizeChars: 30_000,
-  call(input, ctx) {
+  async call(input, ctx) {
+    if (!isReadOnlyCommand(input.command)) assertBgIsolationWriteAllowed(ctx)
+    const markerDir = await mkdtemp(join(tmpdir(), `studio-cwd-${process.pid}-`))
+    const markerPath = join(markerDir, `${randomUUID()}.pwd`)
+    const envPrelude = shellSourceHookEnvSnippet(ctx.sessionDir)
+    const wrappedCommand = `STUDIO_CWD_MARKER=${shellQuote(markerPath)}; trap 'pwd > "$STUDIO_CWD_MARKER"' EXIT; ${envPrelude} ${input.command}`
     return new Promise<{ data: BashOutput }>((resolve, reject) => {
       // detached: the child becomes its own process-group leader, so a timeout/abort can kill the WHOLE
       // tree (the shell + every grandchild it forked) via process.kill(-pgid). Plain child.kill() signals
       // only the shell — a command that forks (globs, pipes, a background server) leaves the real worker
       // orphaned and still running. That is exactly how `find /` survived the 120s timeout and hung a
       // build for 17min: the timeout killed the shell while the find kept scanning the whole disk.
-      const child = spawn(input.command, { shell: true, cwd: ctx.cwd, signal: ctx.signal, detached: true })
+      const child = spawn(wrappedCommand, { shell: true, cwd: ctx.cwd, signal: ctx.signal, detached: true })
       let stdout = ''
       let stderr = ''
       let truncated = false
@@ -110,10 +152,21 @@ export const bashTool = buildTool<typeof inputSchema, BashOutput>({
       child.on('error', (err) => {
         cleanup()
         killGroup('SIGKILL')
+        void rm(markerDir, { recursive: true, force: true })
         reject(err)
       })
-      child.on('close', (code, signal) => {
+      child.on('close', async (code, signal) => {
         cleanup()
+        try {
+          const finalCwd = (await readFile(markerPath, 'utf-8').catch(() => '')).trim()
+          const completed = !timedOut && signal == null
+          if (completed && finalCwd && finalCwd !== ctx.cwd) {
+            const warning = await fireCwdChanged(ctx, ctx.cwd, finalCwd).catch((err) => `Studio could not persist Bash cwd: ${err instanceof Error ? err.message : String(err)}`)
+            if (warning) stderr += `${stderr ? '\n' : ''}${warning}`
+          }
+        } finally {
+          await rm(markerDir, { recursive: true, force: true }).catch(() => undefined)
+        }
         if (truncated) stdout += '\n[output truncated at 2MB — re-run narrowed (head/tail/grep) to see more]'
         resolve({ data: { stdout, stderr, code: code ?? -1, timedOut, signal: signal ?? null } })
       })

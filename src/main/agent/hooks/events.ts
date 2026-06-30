@@ -79,6 +79,7 @@ export type HookOutputKey =
   | 'reloadSkills'
   | 'userDisplayMessage'
   | 'blockedBy'
+  | 'worktreePath'
 
 export interface HookEventMeta {
   isToolEvent: boolean
@@ -105,6 +106,7 @@ export const EVENT_META: Record<HookEventName, HookEventMeta> = {
   PostToolBatch: CONTEXT_ONLY,
   Notification: NO_OUTPUT_NOTIFY,
   UserPromptSubmit: { ...CONTEXT_BLOCKING, outputs: ['additionalContext', 'blocking', 'updatedInput', 'suppressOriginalPrompt', 'sessionTitle'] },
+  // No emit surface yet: Studio has no user-prompt-level slash-command/MCP-prompt expansion; skill expansion is a tool call covered by Pre/PostToolUse.
   UserPromptExpansion: CONTEXT_BLOCKING,
   SessionStart: { ...CONTEXT_BLOCKING, outputs: ['additionalContext', 'blocking', 'initialUserMessage', 'sessionTitle', 'watchPaths', 'reloadSkills'] },
   SessionEnd: NO_OUTPUT_NOTIFY,
@@ -114,7 +116,7 @@ export const EVENT_META: Record<HookEventName, HookEventMeta> = {
   SubagentStop: STOP,
   PreCompact: { isToolEvent: false, isStopClass: false, canBlock: true, canInjectContext: false, outputs: ['blocking', 'newCustomInstructions', 'userDisplayMessage', 'blockedBy'] },
   PostCompact: { isToolEvent: false, isStopClass: false, canBlock: false, canInjectContext: false, outputs: ['userDisplayMessage'] },
-  PermissionRequest: { isToolEvent: true, isStopClass: false, canBlock: true, canInjectContext: false, outputs: ['decision', 'updatedInput', 'blocking'] },
+  PermissionRequest: { isToolEvent: true, isStopClass: false, canBlock: true, canInjectContext: false, outputs: ['permission', 'decision', 'updatedInput', 'blocking'] },
   PermissionDenied: { isToolEvent: true, isStopClass: false, canBlock: false, canInjectContext: false, outputs: ['retry'] },
   Setup: CONTEXT_BLOCKING,
   TeammateIdle: NO_OUTPUT_NOTIFY,
@@ -125,11 +127,11 @@ export const EVENT_META: Record<HookEventName, HookEventMeta> = {
   Elicitation: { isToolEvent: false, isStopClass: false, canBlock: true, canInjectContext: false, outputs: ['blocking'] },
   ElicitationResult: { isToolEvent: false, isStopClass: false, canBlock: true, canInjectContext: false, outputs: ['blocking'] },
   ConfigChange: NO_OUTPUT_NOTIFY,
-  WorktreeCreate: NO_OUTPUT_NOTIFY,
+  WorktreeCreate: { isToolEvent: false, isStopClass: false, canBlock: false, canInjectContext: false, outputs: ['worktreePath'] },
   WorktreeRemove: NO_OUTPUT_NOTIFY,
   InstructionsLoaded: NO_OUTPUT_NOTIFY,
-  CwdChanged: NO_OUTPUT_NOTIFY,
-  FileChanged: NO_OUTPUT_NOTIFY,
+  CwdChanged: { isToolEvent: false, isStopClass: false, canBlock: false, canInjectContext: false, outputs: ['watchPaths'] },
+  FileChanged: { isToolEvent: false, isStopClass: false, canBlock: false, canInjectContext: false, outputs: ['watchPaths'] },
   MessageDisplay: { isToolEvent: false, isStopClass: false, canBlock: true, canInjectContext: false, outputs: ['displayContent', 'blocking'] },
 }
 

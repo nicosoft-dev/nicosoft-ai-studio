@@ -428,10 +428,9 @@ export async function runCollabSession(
   // they come up; clear on teardown when the registry is disposed.
   const onEvent = (e: CollabEvent): void => {
     hooks.onEvent(e)
-    // teammate_name is a NAME field → use displayName, never the role_id (task_id stays an internal id).
-    if (e.kind === 'wait') emitCollabHook('TeammateIdle', { teammate_name: displayName(e.roleId), team_name: 'collab' })
-    else if (e.kind === 'assign') emitCollabHook('TaskCreated', { task_id: `${e.roleId}:${e.to}:${Date.now()}`, task_subject: e.text, task_description: e.text, teammate_name: e.to ? displayName(e.to) : '', team_name: 'collab' })
-    else if (e.kind === 'done') emitCollabHook('TaskCompleted', { task_id: e.roleId, task_subject: `${displayName(e.roleId)} completed their part`, teammate_name: displayName(e.roleId), team_name: 'collab' })
+    // teammate_name is a NAME field → use displayName, never the role_id. Emit only on the real park transition;
+    // assign_task/done are messages, not TodoWrite/workspace task lifecycle transitions.
+    if (e.kind === 'idle') emitCollabHook('TeammateIdle', { teammate_name: displayName(e.roleId), team_name: 'collab' })
     hooks.onServices?.(registry.list())
   }
   try {

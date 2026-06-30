@@ -9,6 +9,7 @@
 
 import { spawn } from 'node:child_process'
 import { sessionBus } from '../../session-bus'
+import { createHookEnvFile } from '../env-file'
 import type { CommandHookConfig, HookExecContext, HookOutcome } from '../types'
 import type { HookPayload } from '../events'
 import { parseHookResult } from '../parse'
@@ -36,7 +37,8 @@ class CappedSink {
 }
 
 export async function executeCommandHook(config: CommandHookConfig, payload: HookPayload, opts: HookExecContext): Promise<HookOutcome> {
-  const env = { ...process.env, [PROJECT_DIR_VAR]: opts.cwd }
+  const envFile = await createHookEnvFile(opts.sessionDir, payload.hook_event_name).catch(() => undefined)
+  const env = { ...process.env, [PROJECT_DIR_VAR]: opts.cwd, ...(envFile ? { CLAUDE_ENV_FILE: envFile } : {}) }
   const hasArgs = (config.args?.length ?? 0) > 0
   // shell:true with args is ambiguous (args would be dropped or mis-quoted) — reject it rather than silently
   // ignore the args.
@@ -57,6 +59,19 @@ export async function executeCommandHook(config: CommandHookConfig, payload: Hoo
   return new Promise<HookOutcome>((resolve) => {
     let settled = false
     let killTimer: ReturnType<typeof setTimeout> | undefined
+    let child: ReturnType<typeof spawn> | undefined
+    const killTree = (sig: NodeJS.Signals): void => {
+      if (child?.pid == null) return
+      try {
+        process.kill(-child.pid, sig)
+      } catch {
+        try {
+          child.kill(sig)
+        } catch {
+          /* already gone */
+        }
+      }
+    }
     const cleanup = (): void => {
       opts.signal.removeEventListener('abort', onAbort)
       if (killTimer) clearTimeout(killTimer)
@@ -68,9 +83,8 @@ export async function executeCommandHook(config: CommandHookConfig, payload: Hoo
       resolve(o)
     }
 
-    let child: ReturnType<typeof spawn>
     try {
-      child = useShell ? spawn(command, { cwd: opts.cwd, env, shell: true, windowsHide: true }) : spawn(command, args, { cwd: opts.cwd, env, windowsHide: true })
+      child = useShell ? spawn(command, { cwd: opts.cwd, env, shell: true, windowsHide: true, detached: true }) : spawn(command, args, { cwd: opts.cwd, env, windowsHide: true, detached: true })
     } catch (err) {
       done({ outcome: 'non_blocking_error', systemMessage: `Failed to spawn hook command: ${err instanceof Error ? err.message : String(err)}` })
       return
@@ -81,9 +95,9 @@ export async function executeCommandHook(config: CommandHookConfig, payload: Hoo
     let aborted = false
     const onAbort = (): void => {
       aborted = true
-      child.kill('SIGTERM')
+      killTree('SIGTERM')
       // Escalate to SIGKILL if the script ignores SIGTERM, so an uncooperative hook can't linger.
-      killTimer = setTimeout(() => child.kill('SIGKILL'), SIGKILL_GRACE_MS)
+      killTimer = setTimeout(() => killTree('SIGKILL'), SIGKILL_GRACE_MS)
     }
     if (opts.signal.aborted) onAbort()
     else opts.signal.addEventListener('abort', onAbort, { once: true })

@@ -8,6 +8,7 @@ import { confineReal } from '../confine'
 import { buildTool } from '../tool'
 import type { ToolResultBlock } from '../types'
 import { applyReplace, ensureFresh } from './edit-util'
+import { assertBgIsolationWriteAllowed, bgIsolationWriteBlock } from './write-guard'
 
 const inputSchema = z.strictObject({
   file_path: z.string().describe('Path to the file to edit'),
@@ -30,8 +31,12 @@ export const editTool = buildTool<typeof inputSchema, EditOutput>({
     'include the line-number gutter from Read output (the "   123\\t" prefix) — match the raw file text ' +
     'only. If old_string is reported "not found", re-Read the exact current text and copy it verbatim ' +
     'instead of retrying the same string.',
-  checkPermissions: async (input) => ({ behavior: 'ask', message: `Edit ${input.file_path}` }),
+  checkPermissions: async (input, ctx) => {
+    const block = bgIsolationWriteBlock(ctx)
+    return block ? { behavior: 'deny', message: block } : { behavior: 'ask', message: `Edit ${input.file_path}` }
+  },
   async call(input, ctx) {
+    assertBgIsolationWriteAllowed(ctx)
     const abs = await confineReal(ctx.cwd, input.file_path)
     const content = await ensureFresh(ctx, abs, input.file_path)
     const replaceAll = input.replace_all ?? false

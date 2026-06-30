@@ -2,17 +2,22 @@
 // Where Task is a synchronous one-shot (spawn → run → summary, blocking the turn), these drive PERSISTENT
 // background children: agent_spawn (non-blocking, returns an id), agent_send (message it mid-flight),
 // agent_wait (pull its next reply), agent_close (end it), and agent_batch (fan out many one-shots at once,
-// a background-job pool). All are read-only at this layer — permission is delegated to the child's
-// own tools — and concurrency-safe so several can run in one turn. The pool lives in ctx.subAgents.
+// a background-job pool). Spawning is mutating when bgIsolation allocates a git worktree; otherwise
+// permission is delegated to the child's own tools. The pool lives in ctx.subAgents.
 
 import { z } from 'zod'
 import { buildTool } from '../tool'
 import type { ToolResultBlock } from '../types'
+import { getWorktreeSettings } from '../../services/worktree.service'
 import { withJsonDirective, jsonRetryDirective, parseJsonReply, asStructuredResult } from './subagent-output'
 
 const idSchema = z.strictObject({
   id: z.string().describe('The sub-agent id returned by agent_spawn (e.g. "sub-1")'),
 })
+
+function spawnCreatesWorktree(): boolean {
+  return getWorktreeSettings().bgIsolation === 'worktree'
+}
 
 export const agentSpawnTool = buildTool({
   name: 'agent_spawn',
@@ -25,8 +30,8 @@ export const agentSpawnTool = buildTool({
     'to give it follow-ups, agent_wait to pull its next reply, agent_close to end it. Use it for a ' +
     'helper you interact with over several turns. For a one-shot delegation prefer Task; for many ' +
     'independent one-shots at once use agent_batch.',
-  isReadOnly: () => true, // permission delegated to the child's tools
-  isConcurrencySafe: () => true,
+  isReadOnly: () => !spawnCreatesWorktree(),
+  isConcurrencySafe: () => !spawnCreatesWorktree(),
   async call(input, ctx) {
     if (!ctx.subAgents) throw new Error('Background sub-agents are not available in this context.')
     const id = ctx.subAgents.spawn(input.prompt, ctx.currentToolUseId)
@@ -108,8 +113,8 @@ export const agentBatchTool = buildTool<typeof batchInputSchema, { task: number;
     'becomes its own one-shot sub-agent; this blocks until all finish. Use for parallel fan-out (e.g. ' +
     "summarize 5 files, probe 3 endpoints) where the tasks don't depend on each other. Pass `outputSchema` " +
     'when you need each result machine-readable (each sub-agent then returns ONLY that JSON).',
-  isReadOnly: () => true,
-  isConcurrencySafe: () => true,
+  isReadOnly: () => !spawnCreatesWorktree(),
+  isConcurrencySafe: () => !spawnCreatesWorktree(),
   async call(input, ctx) {
     const pool = ctx.subAgents
     if (!pool) throw new Error('Background sub-agents are not available in this context.')

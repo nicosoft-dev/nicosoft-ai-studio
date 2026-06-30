@@ -142,6 +142,7 @@ export interface HookOutcome {
   reloadSkills?: boolean // SessionStart: request skill reload
   userDisplayMessage?: string // PreCompact/PostCompact: user-visible compaction message
   blockedBy?: string // PreCompact: reason compaction was blocked
+  worktreePath?: string // WorktreeCreate: authoritative path supplied by the hook
 }
 
 // The merged result of running all hooks for one event (engine output). The loops/tool pipeline apply it.
@@ -166,6 +167,7 @@ export interface MergedHookResult {
   reloadSkills: boolean
   userDisplayMessages: string[]
   blockedBy?: string
+  worktreePath?: string
   counts: { success: number; blocking: number; non_blocking_error: number; cancelled: number }
 }
 

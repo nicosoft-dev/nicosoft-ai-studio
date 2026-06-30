@@ -15,6 +15,7 @@ interface ConvWatch {
   sessionDir: string
   roleId?: string
   paths: string[]
+  sourcePaths: string[]
   watchers: FSWatcher[]
   debounce: Map<string, ReturnType<typeof setTimeout>>
   ac: AbortController
@@ -35,32 +36,45 @@ class FileWatchManager {
   // empty set → dispose. Async only for the confinement; the map mutation stays in the synchronous armConfined.
   async arm(convId: string, paths: string[], base: { cwd: string; sessionDir: string; roleId?: string }): Promise<void> {
     const confined: string[] = []
+    const sourcePaths: string[] = []
     for (const p of paths) {
       try {
         confined.push(await confineReal(base.cwd, p))
+        sourcePaths.push(p)
       } catch {
         /* escapes the project dir or is inaccessible — never watch outside cwd */
       }
     }
-    this.armConfined(convId, confined, base)
+    this.armConfined(convId, confined, sourcePaths, base)
+  }
+
+  async rearmForCwdChange(convId: string, watchPaths: string[], base: { cwd: string; sessionDir: string; roleId?: string }): Promise<void> {
+    const existing = this.convs.get(convId)
+    const nextPaths = watchPaths.length > 0 ? watchPaths : existing?.sourcePaths ?? []
+    if (nextPaths.length === 0) return
+    await this.arm(convId, nextPaths, base)
   }
 
   // The synchronous, atomic arm (dispose + create watchers + register) over an ALREADY-confined path set. Split
   // out so the only async work (confinement) completes before any map mutation, keeping the mutation race-free.
-  private armConfined(convId: string, paths: string[], base: { cwd: string; sessionDir: string; roleId?: string }): void {
+  private armConfined(convId: string, paths: string[], sourcePaths: string[], base: { cwd: string; sessionDir: string; roleId?: string }): void {
     const sorted = [...new Set(paths)].sort()
     const existing = this.convs.get(convId)
-    if (existing && sameSet(existing.paths, sorted)) return
+    if (existing && sameSet(existing.paths, sorted) && existing.cwd === base.cwd && existing.sessionDir === base.sessionDir && existing.roleId === base.roleId) {
+      existing.sourcePaths = sourcePaths
+      return
+    }
     this.disposeForConv(convId)
     if (sorted.length === 0) return
-    const cw: ConvWatch = { cwd: base.cwd, sessionDir: base.sessionDir, roleId: base.roleId, paths: sorted, watchers: [], debounce: new Map(), ac: new AbortController() }
+    const cw: ConvWatch = { cwd: base.cwd, sessionDir: base.sessionDir, roleId: base.roleId, paths: [], sourcePaths, watchers: [], debounce: new Map(), ac: new AbortController() }
     for (const p of sorted) {
       try {
         const w = watch(p, (eventType, filename) => this.onFsEvent(convId, p, eventType, filename))
         w.on('error', () => {}) // a watched path removed / perms → swallow rather than crash the main process
+        cw.paths.push(p)
         cw.watchers.push(w)
       } catch {
-        /* path doesn't exist yet — skip it (a later re-arm can pick it up) */
+        /* path doesn't exist yet — keep sourcePaths and retry on the next arm/re-arm */
       }
     }
     this.convs.set(convId, cw)
