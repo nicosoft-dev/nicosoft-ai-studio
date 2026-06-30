@@ -86,6 +86,7 @@ export function DispatchBadge({ chain }: { chain: string[] }): ReactElement {
       </span>
       {chain.map((id) => {
         const e = EXPERT_BY_ID[id]
+        if (!e) return null // skip non-expert ids in the chain (e.g. a tool like 'studio_lens') — a badge must never crash on a stray id
         return (
           <Fragment key={id}>
             <span className="d-arrow">
