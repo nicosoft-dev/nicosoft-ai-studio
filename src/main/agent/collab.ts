@@ -50,6 +50,13 @@ export interface CollabHandle {
   // a 2+ collab the ONE consolidated review must not run while a teammate is still mid-change (a panel over a
   // half-built tree wastes the whole fan-out). Empty ⇒ everyone else is parked/idle, so the elected driver may go.
   othersRunning: () => string[]
+  // collab-review-flow: the team registers ONE Studio Lens driver in the opening handshake (elect_lens_driver),
+  // decided right after they divide modules. The consolidated-review gate then enforces that ONLY this driver runs
+  // it — an IDENTITY check that replaces the timing-only othersRunning gate (which let a non-driver slip through
+  // while the real driver was briefly parked). electLensDriver registers (name or id); lensDriver() reads it (roleId
+  // or null until elected).
+  electLensDriver: (nameOrId: string) => string
+  lensDriver: () => string | null
 }
 
 export interface ExpertSpec {
@@ -130,6 +137,7 @@ function finalAssistantText(messages: AgentMessage[]): string {
 export class CollabSession {
   private experts = new Map<string, ExpertRunner>()
   private clock: () => number
+  private lensDriverId: string | null = null // collab-review-flow: the ONE elected Studio Lens driver (handshake)
 
   // onEvent surfaces every consult interaction for audit + the orchestration tree (doc 19 §5). nowMs is
   // injected (Date.now is banned in some contexts) — pass () => Date.now() from the caller. hasKeepalive (the
@@ -191,6 +199,17 @@ export class CollabSession {
       parkRequested: () => this.experts.get(self)!.waitRequested,
       othersRunning: () =>
         [...this.experts.values()].filter((e) => e.spec.roleId !== self && e.status === 'running').map((e) => e.spec.name),
+      electLensDriver: (nameOrId) => {
+        const id = this.resolveTargetId(nameOrId)
+        if (!id) {
+          const names = [...this.experts.values()].map((e) => e.spec.name)
+          return `Cannot register "${nameOrId}" as the Studio Lens driver — no such teammate. Choose one of: ${names.join(', ')}.`
+        }
+        this.lensDriverId = id
+        const name = this.experts.get(id)!.spec.name
+        return `${name} is the team's Studio Lens driver — only ${name} runs the ONE consolidated review at the end; everyone else self-checks their own part and never runs it.`
+      },
+      lensDriver: () => this.lensDriverId,
     }
   }
 

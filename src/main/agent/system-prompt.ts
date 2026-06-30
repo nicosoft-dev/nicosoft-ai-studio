@@ -58,10 +58,10 @@ End every turn with the minimum proof the user needs to trust the result, matche
 Keep it tight — the evidence the user needs, not a replay of everything you did.`
 
 // Panel self-review + orient discipline — SOLO ONLY (depends on the studio_lens tool). Appended by
-// buildAgentSystem for solo runs (direct chat + coordinator-dispatched single/pipeline experts, which carry
-// studio_lens). NOT for collab implementers (批3 filters studio_lens + nulls ctx.panel): the ONE
-// consolidated review runs post-completion by an independent reviewer in runCollabReview, and buildCollabSystem
-// gives collab its own review note instead. Kept verbatim from the old CODING_DISCIPLINE tail (no wording change).
+// buildAgentSystem for solo runs (direct chat + coordinator-dispatched single/pipeline experts). Collab
+// implementers ALSO carry studio_lens, but buildCollabSystem gives them their OWN review section instead (ONE
+// registered driver runs the consolidated review as a tool; Turing is Danny's separate post-collab final audit —
+// collab-review-flow). Kept verbatim from the old CODING_DISCIPLINE tail (no wording change).
 export const PANEL_REVIEW_DISCIPLINE = `# Independent self-review before you declare done — default to it on substantial work
 When you've built or changed something SUBSTANTIAL, run one independent multi-perspective self-review BEFORE you report done — by default, not as an afterthought. It is a second set of eyes on your OWN work: you have \`studio_lens\` (mode:'review'), which fans the target out to several independent read-only reviewers, each probing ONE risk angle (security, data-integrity, concurrency, error-handling, migration-safety, api-contract, perf, test-quality) with adversarial skeptics dropping false alarms. It catches what a single re-read misses.
 Default to running it when your work is shaped like one of these (match your task — one line each):

@@ -66,3 +66,26 @@ export const waitTool = buildTool<typeof waitSchema, { status: string }>({
     return { type: 'tool_result', tool_use_id: toolUseId, content: out.status }
   },
 })
+
+const electSchema = z.object({
+  driver: z.string().describe("the NAME of the teammate who will drive the team's consolidated Studio Lens review (from your teammates list, or yourself)"),
+})
+
+export const electLensDriverTool = buildTool<typeof electSchema, { status: string }>({
+  name: 'elect_lens_driver',
+  inputSchema: electSchema,
+  prompt: () =>
+    "Register WHO drives the team's ONE consolidated Studio Lens review (collab-review-flow). Decide this in your " +
+    'opening alignment — right AFTER you divide the modules and BEFORE you start building — and call this ONCE with ' +
+    "the agreed driver's name (the owner of the bigger / riskier surface is the natural choice). Only the registered " +
+    'driver may run the consolidated review at the very end; every other teammate self-checks their OWN part and ' +
+    'never runs it. This is the structural backstop behind that rule.',
+  isReadOnly: () => true,
+  isConcurrencySafe: () => true,
+  async call(input, ctx) {
+    return { data: { status: ctx.collab ? ctx.collab.electLensDriver(input.driver) : NO_TEAM } }
+  },
+  mapResult(out, toolUseId): ToolResultBlock {
+    return { type: 'tool_result', tool_use_id: toolUseId, content: out.status }
+  },
+})

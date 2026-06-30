@@ -14,7 +14,7 @@ import { promptTokensFromUsage } from '../agent/compact'
 import { isContentBlock } from '../agent/types'
 import type { AgentMessage, ServerToolSchema } from '../agent/types'
 import { displayName, ROLE_BLURB } from '../agent/roles/prompts'
-import { sendMessageTool, assignTaskTool, waitTool } from '../agent/tools/consult'
+import { sendMessageTool, assignTaskTool, waitTool, electLensDriverTool } from '../agent/tools/consult'
 import { CollabSession, type ExpertSpec, type CollabEvent } from '../agent/collab'
 import { runHooks } from '../agent/hooks/engine'
 import { hookRegistry } from '../agent/hooks/registry'
@@ -85,11 +85,6 @@ export interface CollabHooks {
   // A collab expert entered/left a turn batch (active true/false) — drives the parked-readout toggle so a
   // parked expert (done its turn, waiting) stops showing "Thinking…".
   onExpertActive?: (roleId: string, active: boolean) => void
-  // The studio_lens reviewer (chooseVerifierRole) runs NESTED inside a builder's turn (ctx.panel), so it is not
-  // a top-level expert — these forward its OWN step lifecycle to the coordinator (→ cb.onStepStart/onStepDone)
-  // so it gets a verifier chat bubble the same way Gate-B's reviewer does. Active reuses onExpertActive.
-  onReviewerStepStart?: (roleId: string, dispatch: string[] | null, model: string) => void
-  onReviewerStepDone?: (roleId: string, text: string) => void
   requestPermission: (roleId: string, req: PermissionRequest, signal?: AbortSignal) => Promise<PermissionDecision>
   // phase 5c-C3: snapshot of the live dev services the collaboration started (empty when none / on teardown).
   onServices?: (services: ServiceInfo[]) => void
@@ -136,38 +131,39 @@ function buildCollabSystem(roleId: string, teammates: { id: string; name: string
     '(e.g. backend owns the main process / IPC / services; frontend owns the renderer / UI) and split your todos so ' +
     'they do NOT collide. Be explicit — every area has exactly one owner, no two of you touching the same files.\n' +
     "THEN — now that you know who owns the bigger / riskier surface, DECIDE who will drive the team's ONE final " +
-    'consolidated studio_lens review (see below), and say it out loud so everyone agrees.\n' +
-    'Both are settled BEFORE the work starts — module ownership first, then the review driver; never leave the ' +
-    "driver for the end. Build only within your agreed scope; never edit a teammate's files.\n\n" +
+    'consolidated studio_lens review (see below) — the owner of the bigger / riskier surface is the natural choice — ' +
+    'and REGISTER that choice with elect_lens_driver(name) so it is ENFORCED (only the registered driver can run the ' +
+    'review; everyone else is refused). Saying it out loud is not enough — register it.\n' +
+    'Both are settled BEFORE the work starts — module ownership first, then register the review driver; never leave ' +
+    "the driver for the end. Build only within your agreed scope; never edit a teammate's files.\n\n" +
     // The collab review is TIMED + SINGLE-DRIVER: elect one, run it only AFTER everyone is done, finished-first
     // self-checks + waits (never a premature panel — the dogfood waste), findings distributed to owners.
-    '## Review in a collaboration — ONE driver, ONLY after EVERY teammate is done\n' +
-    'You each have studio_lens, but on a team you do NOT each run it, and you do NOT run it early. The rules:\n' +
-    '1. The ONE driver was already DECIDED in your opening alignment, before any code (above) — that person, and ' +
-    "only that person, runs the team's ONE consolidated review at the END. If you are NOT that driver, you NEVER " +
-    'run the consolidated review — not your own, not ever; your ONLY review duty is to self-check your part and ' +
-    'tell the driver when you are done. So word your review-related todo as "self-check my part + confirm done to ' +
-    '<driver>" — do NOT give yourself a "drive the consolidated review" todo; only the one elected driver carries ' +
-    'that. (If you somehow did not settle the driver up front, settle it NOW via send_message before anyone ' +
-    'reviews — never just start a panel.)\n' +
+    '## Review in a collaboration — ONE registered driver, ONLY after EVERY teammate is done\n' +
+    'studio_lens is a TOOL (review / understand modes) — not a role, not a verifier. On a team you do NOT each run ' +
+    'the consolidated review, and you do NOT run it early. The rules:\n' +
+    '1. The ONE driver was DECIDED and REGISTERED (elect_lens_driver) in your opening alignment, before any code — ' +
+    'only the registered driver may run the consolidated review (the tool ENFORCES it: a non-driver is refused). If ' +
+    'you are NOT the driver, your ONLY review duty is to self-check your part and tell the driver when you are done; ' +
+    'never run a studio_lens review yourself. (If somehow no driver was registered, register one NOW with ' +
+    'elect_lens_driver before anyone reviews.)\n' +
     '2. As you build, SELF-CHECK your own part: your own type-check / build + a careful re-read after each batch, and ' +
-    'FIX your own issues. That self-check IS your review of your own code — it is NOT a studio_lens run.\n' +
-    '3. If you FINISH FIRST while a teammate is still working: do NOT run studio_lens. Self-check and fix your own ' +
-    'part, then send_message that you are done and wait() / keep coordinating until the others finish. Driving a ' +
-    'panel over a half-built tree (a teammate still mid-change) wastes the ENTIRE fan-out — that is exactly the ' +
-    'waste to avoid.\n' +
-    '4. ONLY after EVERY teammate has confirmed their COMPLETE part is done does the ELECTED driver run studio_lens ' +
-    'ONCE over the WHOLE combined change (all files, review mode): launch it as an async handle, report it started ' +
-    '(name the handle + what it covers, like driving a workflow), await_async it to SUSPEND until the verdict, report it.\n' +
-    '5. studio_lens is your TEAM self-check: the driver IS the reviewer of your own combined change, and its finder ' +
-    'fan-out hunts defects from many independent angles — that multi-perspective hunt is its value, not who reviews. ' +
-    'DISTRIBUTE the findings: each confirmed defect goes to the expert who OWNS that file / area; that owner FIXES it ' +
-    '— ONE round. Then you are done. Do NOT re-run the review to "confirm" or loop until spotless: disposition each ' +
-    'finding once (fix a real defect at its ROOT; refute a false alarm in one line and leave correct code AS-IS).\n' +
-    '(This panel is the TEAM reviewing ITSELF — the driver is the reviewer, so it is NOT an independent audit and is ' +
-    'not meant to be. Independence comes LATER and SEPARATELY: once you ALL finish, the coordinator routes the ' +
-    'combined result to ONE reviewer independent of every collaborator for the single final audit, then closes with ' +
-    'that verdict in hand. So your job here is a thorough team self-check + one fix round — never a fix-until-spotless loop.)' +
+    'FIX your own issues. (You MAY use studio_lens on your OWN substantial files as a tool — but the TEAM ' +
+    'consolidated review over the combined change is the driver\'s alone, once, at the end.)\n' +
+    '3. If you FINISH FIRST while a teammate is still working: send_message that you are done and wait() / keep ' +
+    'coordinating until the others finish. Even the driver WAITS — a review over a half-built tree (a teammate still ' +
+    'mid-change) wastes the ENTIRE fan-out, which is exactly the waste to avoid.\n' +
+    '4. ONLY after EVERY teammate has confirmed their COMPLETE part is done does the REGISTERED driver run ' +
+    'studio_lens (review mode) ONCE over the WHOLE combined change: launch it as an async handle, report it started ' +
+    '(name the handle + what it covers, like driving a workflow), await_async it to SUSPEND until the result, report ' +
+    'it. It surfaces as the driver\'s OWN tool call; its finder fan-out hunts defects from many independent angles — ' +
+    'that multi-perspective hunt is its value.\n' +
+    '5. DISTRIBUTE the findings: each confirmed defect goes to the expert who OWNS that file / area (the AUTHOR); ' +
+    'that owner FIXES it — ONE round — then you are done. Disposition each finding once (fix a real defect at its ' +
+    'ROOT; refute a false alarm in one line and leave correct code AS-IS); do NOT loop the review until spotless.\n' +
+    'Then deliver to the coordinator. The INDEPENDENT check is NOT your job and is NOT part of this review: after you ' +
+    'all finish, Danny routes the combined result to ONE independent reviewer (Turing) for the single FINAL audit and ' +
+    'closes with that verdict. So your team review is a tool-driven self-check + one fix round; the independent ' +
+    'verifier is separate, later, and Danny\'s — never spun up inside your build.' +
     // C3 §6.7: tell the collab expert it can launch long ops async and suspend instead of blocking the turn.
     '\n\n## Long ops — launch async and suspend, don\'t block\n' +
     'Any long / event-driven op (a long check / analysis / probe script, a background task) you can run in the ' +
@@ -270,15 +266,15 @@ export async function runCollabSession(
     const lsp = DEV_ROLES.has(x.roleId) ? new LSPManager(x.cwd) : undefined
     if (lsp) lspByExpert.push(lsp)
     const tools = [
-      // 批B (dogfood2 P1): collab implementers carry studio_lens AGAIN — 批3 had filtered it, which inverted the
-      // user's explicit "don't remove studio_lens from collab experts" spec. The election + async-drive of it is
-      // wired in 批C; here we just restore the tool so an ELECTED collaborator CAN drive the consolidated review
-      // from its own turn. Independence still holds: the panel's internal finders/skeptics are independent roles
-      // (driver ≠ reviewers — chooseVerifierRole excludes the implementer set).
+      // collab implementers carry studio_lens — it's a TOOL the registered driver uses (review/understand). The
+      // driver runs the ONE consolidated review over the combined change from its own turn (elect_lens_driver gates
+      // it to that driver; reviewerOverride makes the driver author the finder fan-out, keeping Turing OUT of the
+      // collaboration). It is NOT a verifier — Turing is Danny's separate post-collab final audit (collab-review-flow).
       ...toolsForAgentRole(x.roleId),
       sendMessageTool,
       assignTaskTool,
       waitTool,
+      electLensDriverTool,
       awaitAsyncTool,
       launchAsyncTool,
       startServiceTool,
@@ -341,14 +337,10 @@ export async function runCollabSession(
                 signal: sig,
                 onStream: (ev) => hooks.onExpertStream(x.roleId, ev),
                 requestPermission: (req, s) => hooks.requestPermission(x.roleId, req, s),
-                // Reviewer bubble (③b): forward its step lifecycle out so a ctx.panel-driven review surfaces a
-                // verifier bubble. Presence of onReviewerStepStart also gates persistence (solo leaves it unset).
-                onReviewerStepStart: hooks.onReviewerStepStart,
-                onReviewerStepDone: hooks.onReviewerStepDone,
-                onReviewerActive: hooks.onExpertActive,
-                // Collab team self-check (collab-review-flow §A): the elected driver reviews the team's OWN combined
-                // change → reviewer = the driver itself, not chooseVerifierRole's independent pick. Independence comes
-                // later from Danny's single Turing final audit (runCollabReview), not from this in-team panel.
+                // collab-review-flow: the elected driver runs lens over the team's combined change → the driver
+                // authors the finder script, keeping Turing OUT of the collaboration (Turing is only Danny's single
+                // post-collab final audit). lens is a TOOL here — it surfaces as the driver's tool card, never a
+                // 'verifier' segment (the reviewer step lifecycle is suppressed on the tool path).
                 reviewerOverride: x.roleId
               })
             : undefined,

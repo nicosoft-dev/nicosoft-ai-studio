@@ -58,21 +58,40 @@ export const studioLensTool = buildTool<typeof inputSchema, StudioLensResult>({
       return { data: { ok: false, message: 'studio_lens is not available here — it cannot be run from inside a sub-agent or a panel reviewer.' } }
     }
     const mode = input.mode === 'understand' ? 'understand' : 'review'
-    // Collab REVIEW gate: in a 2+ collab the ONE consolidated review runs only AFTER everyone is done. A review
-    // launched while a teammate is still mid-change wastes the entire fan-out, so refuse it and tell the caller to
-    // self-check + wait. Solo / 1-expert collab → othersRunning is empty → allowed; 'understand' is exploratory →
-    // always allowed. This is the structural backstop behind the prompt rule (a soft instruction was jumped once).
-    if (mode === 'review') {
-      const busy = ctx.collab?.othersRunning() ?? []
+    // Collab REVIEW gate (collab-review-flow): in a 2+ collab the team registers ONE driver at the handshake
+    // (elect_lens_driver), and ONLY that driver runs the ONE consolidated review, ONCE, AFTER everyone is done.
+    // Solo / 1-expert collab → no ctx.collab or empty othersRunning → allowed; 'understand' is exploratory → always
+    // allowed. This is the structural backstop behind the prompt rule.
+    if (mode === 'review' && ctx.collab) {
+      const self = ctx.collab.self
+      const driver = ctx.collab.lensDriver()
+      // IDENTITY check (not a timing race): a non-driver is refused outright — this is what stops a second teammate
+      // from also driving the review (the dogfood bug: a non-driver slipped through the old othersRunning-only gate
+      // while the real driver was briefly parked).
+      if (driver && driver !== self) {
+        const driverName = ctx.collab.roster.find((r) => r.id === driver)?.name ?? 'the elected driver'
+        return {
+          data: {
+            ok: false,
+            message:
+              `${driverName} is the team's elected Studio Lens driver — only ${driverName} runs the ONE consolidated ` +
+              `review. Self-check your OWN part, send ${driverName} your status when you're done, and let them drive it.`,
+          },
+        }
+      }
+      // No driver registered (the team skipped elect_lens_driver) → the first reviewer claims it, so the review still
+      // runs ONCE by ONE role rather than being blocked. The prompt directs the team to elect explicitly up front.
+      if (!driver) ctx.collab.electLensDriver(self)
+      // The driver runs it only AFTER everyone is done — a panel over a half-built tree wastes the whole fan-out.
+      const busy = ctx.collab.othersRunning()
       if (busy.length > 0) {
         return {
           data: {
             ok: false,
             message:
-              `Hold the consolidated review — ${busy.join(', ')} ${busy.length > 1 ? 'are' : 'is'} still working. In a ` +
-              `team, studio_lens review runs ONCE, AFTER everyone is done. Self-check + fix your OWN part now, ` +
-              `send_message that you are done, and wait for the others; then the elected driver runs the review over ` +
-              `the whole combined change.`,
+              `Hold the consolidated review — ${busy.join(', ')} ${busy.length > 1 ? 'are' : 'is'} still working. The ` +
+              `review runs ONCE, AFTER everyone is done: self-check your own part, send_message that you're done, ` +
+              `wait for the others, then drive the review over the whole combined change.`,
           },
         }
       }

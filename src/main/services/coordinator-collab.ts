@@ -74,11 +74,6 @@ export async function runCollaboration(
     // coordinator.handler broadcastConvTodos(convId, roleId, todos) + recordTodos.
     onTodos: (roleId, todos) => cb.onTodos?.(roleId, todos),
     onExpertActive: (roleId, active) => cb.onExpertActive?.(roleId, active),
-    // The studio_lens reviewer (Turing) runs nested in a builder's turn but gets its OWN verifier bubble — forward
-    // its step lifecycle to the coordinator the SAME way a top-level expert's does, tagged segmentKind 'verifier'.
-    // (onExpertActive already drives its live "Thinking…" readout via the hook above.)
-    onReviewerStepStart: (roleId, dispatch, model) => cb.onStepStart(roleId, dispatch, model, 'verifier'),
-    onReviewerStepDone: (roleId, text) => cb.onStepDone(roleId, text, 0),
     // Forward the expert's fine-grained stream to the coordinator UI. EXHAUSTIVE over AgentLlmEvent
     // (agent/llm.ts) on purpose: the tool/sub_tool lifecycle must reach the renderer the SAME way the
     // solo path forwards it (agent.handler onStream), so a collab expert's studio_lens fan-out and its
