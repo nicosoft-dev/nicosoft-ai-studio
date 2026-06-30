@@ -563,7 +563,6 @@ export function MemoryLive({ onClose }: { onClose: () => void }): ReactElement {
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
   const [memories, setMemories] = useState<MemoryDto[] | null>(null)
-  const [stats, setStats] = useState<{ nodes: number; links: number } | null>(null)
   const [tip, setTip] = useState<TipState | null>(null)
   const [glFailed, setGlFailed] = useState(false)
 
@@ -593,7 +592,7 @@ export function MemoryLive({ onClose }: { onClose: () => void }): ReactElement {
     const container = mountRef.current
     if (!container || memories === null) return
     // Empty pool → feed the very same pipeline a small synthetic cloud so the view still feels
-    // alive. Hover/click are disabled in demo mode; stats stay hidden (the counts would be fake).
+    // alive. Hover/click are disabled in demo mode.
     const isDemo = memories.length === 0
     const data = isDemo ? buildDemoMemories() : memories
     const S = isDemo ? DEMO_SCALE : stageScaleForCount(memories.length) // uniform stage scale: layout, node size, breathing, pulses — grows with the pool
@@ -984,7 +983,6 @@ export function MemoryLive({ onClose }: { onClose: () => void }): ReactElement {
     })
     const idToIdx = new Map<string, number>(data.map((m, i) => [m.id, i]))
     const glowSprites = nodes.map((n) => n.glow) // stable hover-raycast target list
-    if (!isDemo) setStats({ nodes: nodes.length, links: edges.length }) // demo counts would be fake
 
     // — synapse lines (one LineSegments; per-vertex color carries intensity for additive blending) —
     const ePos = new Float32Array(edges.length * 6)
@@ -1403,10 +1401,6 @@ export function MemoryLive({ onClose }: { onClose: () => void }): ReactElement {
     <div className="mlv-overlay">
       <div ref={mountRef} className="mlv-canvas" />
       <div className="mlv-head">
-        {/* Empty span still occupies the left slot so space-between keeps the close button right. */}
-        <span className="mlv-stats">
-          {stats ? `${stats.nodes} memories · ${stats.links} links` : null}
-        </span>
         <button className="icon-btn mlv-close" onClick={onClose} title="Close (Esc)">
           <Icons.x size={16} />
         </button>

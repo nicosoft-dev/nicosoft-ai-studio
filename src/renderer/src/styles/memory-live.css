@@ -15,14 +15,13 @@
 /* — header — */
 .mlv-head {
   position: absolute; top: 0; left: 0; right: 0; z-index: 2;
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; justify-content: flex-end;
   /* 78px left inset = the same strip .sidebar-header reserves for the window controls: the overlay
      is full-screen, so the macOS traffic lights (and the custom Win/Linux buttons, fixed at z 500)
      float right over this corner — the title must clear them. */
   padding: 14px 18px 14px 78px;
   pointer-events: none; /* let orbit-drag start anywhere; only the close button is interactive */
 }
-.mlv-stats { font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 /* Visuals come from the shared .icon-btn; the header swallows pointer events, so re-enable here. */
 .mlv-close { pointer-events: auto; }
 /* Breathing pulse for the Live entry button's dot on the Memory settings page (.mem-live-dot). */
