@@ -371,7 +371,7 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
 // no FAIL is ever left hanging. Runs the normal agent-loop dispatch (full kit → it can edit code on a real defect)
 // under the implementer's working dir + permission mode, exactly like a regular dispatched step. The verifier is
 // NOT re-run here (single pass, no retry loop — that's Gate C's territory); this is the missing follow-up handler.
-async function runGateBFailFollowUp(
+export async function runGateBFailFollowUp(
   implementerRoleId: string,
   opts: RunStepOptions,
   gate: { originalPrompt: string; approvedPlan?: string; acceptance?: string[] },

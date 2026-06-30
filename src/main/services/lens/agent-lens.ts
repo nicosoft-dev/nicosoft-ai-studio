@@ -15,7 +15,6 @@ import { ulid } from '../../db/id'
 import * as rolesService from '../roles.service'
 import * as settingsService from '../settings.service'
 import * as workspaceTasks from '../workspace-tasks.service'
-import * as convService from '../conversation.service'
 import { chooseVerifierRole } from './verifier'
 import { shapeFor, tierFromDepth } from './tiers'
 import { makeLensDeps } from './step'
@@ -212,11 +211,6 @@ async function runReviewViaScript(
   baseRef: string,
   breadthInput: 'thorough' | 'conservative',
   stepId: string,
-  persist: boolean,
-  // collab-review-flow: emit the reviewer as a 'verifier' chat segment ONLY for the Gate-B FLOOR (an INDEPENDENT
-  // verifier). The studio_lens TOOL path (a role using lens) passes false — lens is a tool, never a verifier; it
-  // surfaces as the calling role's tool CARD, not a verifier bubble.
-  emitVerifierSegment: boolean,
 ): Promise<ScriptReview> {
   // Docs-only target on the conservative (Gate-B floor) path → no code risk → no panel, zero LLM. An EXPLICIT
   // review (thorough) is honored even for a .md (the user asked).
@@ -232,14 +226,9 @@ async function runReviewViaScript(
   // fan-out; everything else runs the fixed CODE_REVIEW_TEMPLATE.
   const slug = rolesService.getBinding(reviewerRoleId)?.model ?? ''
   const willAuthor = canAuthorScript(slug)
-  // The reviewer's OWN chat segment + live "Thinking…" surface ONLY on the Gate-B FLOOR path (emitVerifierSegment) —
-  // an INDEPENDENT verifier, rendered as a 'verifier' segment. The studio_lens TOOL path (a role — solo engineer or
-  // the elected collab driver — USING lens) is NOT a verifier: lens is a tool, never a verifier. There it surfaces
-  // solely as that role's "Running a Studio Lens review" tool CARD (onToolEvent below) — no verifier bubble at all.
-  if (emitVerifierSegment) {
-    deps.cb.onStepStart(reviewerRoleId, opts.dispatch ?? [reviewerRoleId], slug, 'verifier')
-    deps.cb.onExpertActive?.(reviewerRoleId, true)
-  }
+  // lens is a TOOL, NEVER a verifier (and never a role) — so the reviewer NEVER gets its own 'verifier' chat segment.
+  // It surfaces solely as the "Running a Studio Lens review" tool CARD (onToolEvent below), under whoever ran it. The
+  // ONLY independent VERIFIER is the separate runVerifierStep build/typecheck floor, which carries its own segment.
   // Open the panel NOW — before the authoring turn (tens of seconds on a high-effort model), so the review is
   // VISIBLE the moment it starts (else the card only appears after authoring → "lens didn't start"). NO pre-baked
   // roster: rows derive from the agents the script ACTUALLY spawns (the old hardcoded `shape.angles` roster made an
@@ -281,36 +270,11 @@ async function runReviewViaScript(
       review = { subjects: [], confirmed: [], refuted: [], report: null, reviewerRoleId, failed: true }
     }
   } finally {
+    // Close the panel CARD with a one-line summary (the lens's only chat surface — it's a tool, not a verifier, so
+    // there is no reviewer segment to settle). The findings themselves are persisted by the caller (Gate-B folds the
+    // subjects; the agent tool returns them) — not here.
     const summary = `${review.confirmed.length} confirmed, ${review.refuted.length} dropped across ${review.subjects.length} lens(es)`
     deps.cb.onToolEvent?.(reviewerRoleId, { type: 'sub_tool_done', toolUseId: panelId, parentToolId: 'coordinator-gate-b', name: 'StudioLens', isError: false, result: summary })
-    // Settle the reviewer's chat segment — its verdict (report, else the count summary) becomes the bubble text,
-    // clear the live readout, end the turn. Mirrors an implementer's onStepDone.
-    const verdict = review.report ?? summary
-    // PERSIST the verdict as a 'verifier' segment ONLY on the Gate-B floor (emitVerifierSegment) — an independent
-    // verifier whose verdict lands via convService.append (it's in no collab results map + its sub-agents run
-    // `quiet`, so this is the ONE place it can be stored). The TOOL path returns its result to the calling role via
-    // the tool result and surfaces as that role's tool card, so it neither emits nor persists a verifier segment.
-    if (emitVerifierSegment && persist && verdict) {
-      try {
-        convService.append(opts.convId, {
-          author: 'expert',
-          expertId: reviewerRoleId,
-          model: slug,
-          content: verdict,
-          dispatch: opts.dispatch ?? [reviewerRoleId],
-          segmentKind: 'verifier',
-          inputTokens: 0,
-          outputTokens: 0,
-          sentTokens: 0,
-        })
-      } catch (e) {
-        console.warn('[studio-lens] failed to persist reviewer verifier segment (bubble stays runtime-only):', e instanceof Error ? e.message : e)
-      }
-    }
-    if (emitVerifierSegment) {
-      deps.cb.onExpertActive?.(reviewerRoleId, false)
-      deps.cb.onStepDone(reviewerRoleId, verdict, 0)
-    }
   }
   return review
 }
@@ -335,9 +299,10 @@ export async function runLensReview(
     const target = await buildChangedSet(opts.cwd, baseRef, baseChanged, implementerFiles)
     if (target.changed.length === 0) return []
     const reviewOpts: RunStepOptions = { ...opts, signal: signal ?? opts.signal }
-    // Gate-B floor: deps.cb is the REAL coordinator callback (not the shim), so the reviewer bubble already
-    // fires live — persist=true lands it in the conversation store too (③a).
-    const run = await runReviewViaScript(reviewOpts, reviewer, target, baseRef, 'conservative', stepId, true, true /* emitVerifierSegment: the Gate-B floor IS an independent verifier */)
+    // lens is a TOOL, never a verifier — this Gate-B lens AMPLIFICATION (fan-out over the change) surfaces only as its
+    // panel card. The legitimate independent VERIFIER in Gate-B is the separate runVerifierStep build/typecheck floor
+    // (it keeps its own verifier segment); the lens just feeds extra findings into that verdict.
+    const run = await runReviewViaScript(reviewOpts, reviewer, target, baseRef, 'conservative', stepId)
     if (run.failed) console.warn('[studio-lens] gate-b review script failed — floor verdict stands (no lens amplification)')
     return run.subjects
   } catch (e) {
@@ -366,12 +331,11 @@ export async function runConsolidatedReview(
   originalPrompt: string,
   owner: string,
   baseRef = 'HEAD',
-  persist = true,
   // collab-review-flow: when the elected collab DRIVER runs lens over the team's combined change, it authors the
   // finder fan-out itself — so reviewerOverride = the driver, NOT chooseVerifierRole's independent pick. This keeps
   // Turing OUT of the collaboration entirely (Turing is only Danny's separate post-collab final audit). lens is a
-  // TOOL: the driver never surfaces as a 'verifier' segment (the tool path passes emitVerifierSegment=false). Set on
-  // the collab driver's studio_lens; unset on solo (chooseVerifierRole authors invisibly there).
+  // TOOL: the reviewer never surfaces as a 'verifier' segment (runReviewViaScript emits none). Set on the collab
+  // driver's studio_lens; unset on solo (chooseVerifierRole authors invisibly there).
   reviewerOverride?: string,
 ): Promise<ConsolidatedReviewOutcome> {
   const reviewer = reviewerOverride ?? chooseVerifierRole(implementers)
@@ -383,7 +347,7 @@ export async function runConsolidatedReview(
     return { ok: false, message: `studio_lens (review) needs at least one configured expert independent of the implementer(s) to act as the reviewer, but none is bound. Configure another expert (e.g. ${displayName('analyst')}/${displayName('frontend')}/${displayName('engineer')}) and retry.`, confirmed: [], refuted: [], produced: [], report: null }
   }
   const paths = target.changed
-  const run = await runReviewViaScript(opts, reviewer, target, baseRef, 'thorough', ulid(), persist, false /* emitVerifierSegment: the studio_lens tool is never a verifier — surfaces as the caller's tool card */)
+  const run = await runReviewViaScript(opts, reviewer, target, baseRef, 'thorough', ulid())
 
   if (run.failed) {
     return { ok: false, message: 'studio_lens could not complete: the review script failed to execute (likely a reviewer-endpoint or sandbox fault). Retry, or review the target manually — this is NOT an all-clear.', reviewer, confirmed: [], refuted: [], produced: [], report: null }
@@ -482,8 +446,8 @@ export interface LensHandleDeps {
   // collab-review-flow: when set, the lens uses THIS role as the finder-script author (the elected collab driver
   // running lens over the team's combined change) instead of chooseVerifierRole's independent pick — so Turing stays
   // OUT of the collaboration entirely (it appears only as Danny's single post-collab final audit). Set on the collab
-  // path (agent-collab.ts → the driver); unset on solo (agent-dispatch.ts). The reviewer NEVER surfaces as a
-  // 'verifier' segment on the tool path (emitVerifierSegment=false) — lens is a tool, shown as the caller's tool card.
+  // path (agent-collab.ts → the driver); unset on solo (agent-dispatch.ts). Either way the reviewer NEVER surfaces as
+  // a 'verifier' segment — lens is a tool (runReviewViaScript emits no reviewer segment), shown as the caller's tool card.
   reviewerOverride?: string
 }
 
@@ -501,9 +465,8 @@ export function createLensHandle(deps: LensHandleDeps): PanelHandle {
 
       const shim: CoordinatorCallbacks = {
         onDispatch: () => {},
-        // The studio_lens TOOL path never emits a reviewer 'verifier' segment (emitVerifierSegment=false) — lens is a
-        // tool, surfaced as the CALLER's tool card via onToolEvent below. So the reviewer step lifecycle is a no-op
-        // here; the panel card (sub_tool events) is what reaches the user, under the caller's own bubble.
+        // lens is a tool, never a verifier: runReviewViaScript emits no reviewer step lifecycle, so these are no-ops.
+        // The lens surfaces solely as the CALLER's tool card via onToolEvent below (under the caller's own bubble).
         onStepStart: () => {},
         onDelta: () => {},
         onStepDone: () => {},
@@ -546,8 +509,7 @@ export function createLensHandle(deps: LensHandleDeps): PanelHandle {
         `Independent multi-perspective review requested. Review the following ${paths.length} file(s) for defects: ${paths.join(', ')}.`,
         deps.callerRoleId,
         base || 'HEAD',
-        true, // persist
-        deps.reviewerOverride, // collab self-check → the driver reviews; undefined on solo → independent reviewer
+        deps.reviewerOverride, // collab driver → the driver authors the fan-out; undefined on solo → independent author
       )
       return {
         ok: outcome.ok,

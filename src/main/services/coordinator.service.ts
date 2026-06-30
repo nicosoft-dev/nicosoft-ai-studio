@@ -27,7 +27,7 @@ import { LlmError, type ChatMessage } from '../llm/types'
 import { COORDINATOR_FACILITATOR_PROMPT, DISPATCHABLE_ROLE_IDS, displayName, roleIdFromName } from '../agent/roles/prompts'
 import { detectE2EIntent, disabledRoleIds, route, routeNeedsPlan } from './coordinator-route'
 import { emitCoordinatorIntro, resetPipelineTodos, runRoleStep, type RunStepOptions } from './coordinator-step'
-import { runGatedRoleStep } from './coordinator-gate-b'
+import { runGatedRoleStep, runGateBFailFollowUp } from './coordinator-gate-b'
 import { chooseVerifierRole, runVerifierStep } from './lens/verifier'
 import { AGENT_ROLE_IDS } from './agent-dispatch'
 import { submitGateC } from './coordinator-gate-c'
@@ -48,13 +48,13 @@ import type { AgentResult } from '../agent/loop'
 export type { CoordinatorCallbacks, CoordinatorRunInput, RouteDecision } from './coordinator-types'
 export { route, parseRouteDecision } from './coordinator-route'
 
-// Collaborate's ONE independent final audit (collab-review-flow — the original 8c7a984 "independent Verifier
-// segment"). The team already SELF-CHECKED during the build: the elected driver drove studio_lens with the team
-// itself as reviewer (reviewerOverride) and owners fixed their findings one round. Here a reviewer INDEPENDENT of
-// EVERY collaborator (chooseVerifierRole → analyst/Turing) adversarially runs the project's own build/checks on the
-// combined diff, ONCE, surfaced as a "<verifier> · Verifier" segment. Danny then closes WITH the verdict in hand —
-// a FAIL is reported honestly, never silently reworked (no auto-fix loop; the team's one fix round already ran).
-// Returns a verdict note for Danny's closeout (UNVERIFIED when it can't run) — never throws into the turn.
+// Collaborate's independent final audit (collab-review-flow — the original 8c7a984 "independent Verifier segment").
+// The team already SELF-CHECKED during the build: the elected driver ran studio_lens (a tool) over the combined
+// change and owners fixed those findings one round. Here a reviewer INDEPENDENT of EVERY collaborator
+// (chooseVerifierRole → analyst/Turing) runs the project's own build/checks — surfaced as a "<verifier> · Verifier"
+// segment. If it FAILS, its findings route back to an implementer for ONE fix round and a single RE-AUDIT, then
+// Danny closes with that verdict (two bounded fix rounds total — the build self-check + this one; NO fix-until-clean
+// loop, a residue is reported honestly). Returns the verdict note (UNVERIFIED when it can't run) — never throws.
 async function runCollabReview(
   input: CoordinatorRunInput,
   roles: string[],
@@ -80,15 +80,40 @@ async function runCollabReview(
     cb,
     signal
   }
+  const gate = { originalPrompt: input.prompt, acceptance: [] as string[] }
   try {
-    // The ONE independent final audit: a reviewer INDEPENDENT of every collaborator runs the project's own
+    // The independent final audit: a reviewer INDEPENDENT of every collaborator runs the project's own
     // build/typecheck on the combined delta. Attribution uses the SAME chooseVerifierRole the step picks internally.
     const floorReviewer = chooseVerifierRole(roles)
-    const v = await runVerifierStep(roles, opts, { originalPrompt: input.prompt, acceptance: [] }, implementationText, signal)
-    const note = v.skipped || v.infraFailure
-      ? UNVERIFIED // ran but produced no verdict (no independent verifier / infra fault) → close honestly as unverified
-      : `Independent reviewer ${displayName(floorReviewer)} ran the project's own checks on the combined result — VERDICT: ${v.passed ? 'PASS' : 'FAIL'}.\n${v.feedback.slice(0, 2000)}`
-    return { note, inputTokens: v.inputTokens, outputTokens: v.outputTokens }
+    let v = await runVerifierStep(roles, opts, gate, implementationText, signal)
+    let inTok = v.inputTokens
+    let outTok = v.outputTokens
+    let note: string
+    if (v.skipped || v.infraFailure) {
+      note = UNVERIFIED // ran but produced no verdict (no independent verifier / infra fault) → close honestly as unverified
+    } else if (v.passed) {
+      note = `Independent reviewer ${displayName(floorReviewer)} ran the project's own checks on the combined result — VERDICT: PASS.\n${v.feedback.slice(0, 2000)}`
+    } else {
+      // collab-review-flow: the final audit FAILED → route its findings back to an IMPLEMENTER for ONE fix round
+      // ("谁写谁修", never the independent reviewer), then RE-AUDIT once, then close with that verdict. This is the
+      // SECOND and LAST fix round — the team already self-checked + fixed one round (the driver's lens) during the
+      // build. Exactly one round here; NO fix-until-clean loop (a residue surviving it is reported honestly, not looped).
+      const leadImplementer = roles.find((r) => r !== floorReviewer) ?? roles[0]
+      const fix = await runGateBFailFollowUp(leadImplementer, opts, gate, implementationText, v.feedback, signal)
+      inTok += fix.inputTokens
+      outTok += fix.outputTokens
+      if (signal.aborted) throw new LlmError('network', 'aborted mid-collab-review fix')
+      const reAudit = await runVerifierStep(roles, opts, gate, implementationText, signal)
+      if (!reAudit.skipped && !reAudit.infraFailure) {
+        v = reAudit
+        inTok += reAudit.inputTokens
+        outTok += reAudit.outputTokens
+      }
+      note = v.skipped || v.infraFailure
+        ? UNVERIFIED
+        : `Independent reviewer ${displayName(floorReviewer)} re-audited the combined result after one fix round — VERDICT: ${v.passed ? 'PASS' : 'FAIL'}.\n${v.feedback.slice(0, 2000)}`
+    }
+    return { note, inputTokens: inTok, outputTokens: outTok }
   } catch (e) {
     if (signal.aborted) throw e // a user abort must propagate, don't bury it as a UNVERIFIED done
     console.warn('[coordinator] collab independent final audit failed (synthesis flagged UNVERIFIED):', e instanceof Error ? e.message : e)
