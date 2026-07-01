@@ -12,6 +12,13 @@ interface RouteBase {
   // LLM-routed turns — @mention fast-path and config/error fallbacks have none (no LLM call to make it).
   intro?: string
   needsPlan?: boolean
+  // L1 two-tier gate (coordinator dispatch §3.1): the tier-1 router sets this true when a build/change task's
+  // team choice hinges on the project's real shape — route() then escalates to Danny's delegated investigation
+  // (routeAsAgent). Only meaningful on the tier-1 decision; the investigation's final decision omits it.
+  investigate?: boolean
+  // Project memory (§4): the concise project-shape summary Danny synthesized during the routing investigation.
+  // Present only on a routeAsAgent decision; route() persists it (project-map.service.remember) keyed by cwd.
+  projectMap?: string
   // Gate C (Block 2): set true ONLY when the user explicitly asked for e2e verification. Independent of
   // gateEnabled (Gate B) and of decision.roles — driven solely by detectE2EIntent(). Gates whether run()
   // submits a background e2e verification task on the way out.

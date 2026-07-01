@@ -371,6 +371,30 @@ export class CollabSession {
     // before its pre-park drain), reroute them to a surviving live expert — `exited` is already set so they can't
     // route back here. No live peer → injectExternal drops them (documented terminal loss), never a dead queue.
     if (e.pendingResults.length) for (const note of e.pendingResults.splice(0)) this.injectExternal(note)
+    // L2 (coordinator dispatch §5.2): if the expert that just exited was the elected review driver (e.g. it
+    // handed its minor share to a teammate at alignment and left — the §5.1 collapse), reassign the driver to a
+    // remaining LIVE owner. Never leave the team driverless: the ONE consolidated studio_lens review is refused
+    // for everyone but the registered driver, and elect_lens_driver refuses to CHANGE a driver once set — so a
+    // departed driver would strand the review. This is a system reassign (the driver LEFT), not a competing
+    // election, so it bypasses that "can't change" rule directly. No live heir → null (the session is ending).
+    if (this.lensDriverId === e.spec.roleId) {
+      // Prefer a still-RUNNING peer (it is active and reaches the review naturally); else any live peer
+      // (injectExternal wakes it if parked). Selection is for promptness only — every live peer WOULD drain the note.
+      const live = [...this.experts.values()].filter((x) => x.spec.roleId !== e.spec.roleId && !x.exited)
+      const heir = live.find((x) => x.status === 'running') ?? live[0]
+      this.lensDriverId = heir?.spec.roleId ?? null
+      if (heir) {
+        console.log(`[collab] review driver "${e.spec.roleId}" exited — reassigned to "${heir.spec.roleId}"`)
+        // Flipping lensDriverId is NOT enough: the heir still believes the DEPARTED expert drives the review, so it
+        // would send "done" and park, and the ONE consolidated review would be silently skipped. Worse, if the heir
+        // already finished and parked, the variable change reaches no one. injectExternal NOTIFIES the heir that it
+        // is now the driver AND wakes it if parked, so it actually drives — honouring §5.2 "never leave driverless".
+        this.injectExternal(
+          `${e.spec.name} has left the collaboration and was the team's Studio Lens driver. You are now the driver: once the remaining teammates finish, you run the ONE consolidated Studio Lens review over the team's combined work before wrapping up (everyone else self-checks only their own part).`,
+          heir.spec.roleId
+        )
+      }
+    }
     e.status = 'parked'
     // Mark this expert parked + drained so the quiescence sweep doesn't keep waiting on it. A peer parked in
     // wait() on a reply from this expert resolves via the global quiescence check (all parked → end), so a

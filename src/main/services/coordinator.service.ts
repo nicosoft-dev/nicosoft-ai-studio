@@ -127,7 +127,10 @@ async function runCollabReview(
 export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, signal: AbortSignal): Promise<{ inputTokens: number; outputTokens: number; reason: AgentResult['reason'] }> {
   resetPipelineTodos(input.convId) // a new coordinator turn = a new pipeline → start its shared todo list fresh
   const history = convRepo.listByConversation(input.convId)
-  const decision = await route(input.prompt, history, signal)
+  // L1 (coordinator dispatch §3): hand route() the coordinator's project folder + the conv id so it can
+  // escalate a project-dependent build task to Danny's delegated investigation (routeAsAgent). Same cwd
+  // Danny's DIRECT read-only kit uses below; unset (folder-free chat) → route stays on the tier-1 decision.
+  const decision = await route(input.prompt, history, { cwd: input.cwdByRole?.['coordinator'], convId: input.convId }, signal)
   console.log(`[coordinator] route ${JSON.stringify({ mode: decision.mode, role: (decision as { role?: string }).role, roles: (decision as { roles?: string[] }).roles, reason: decision.reason, needsPlan: decision.needsPlan })}`)
   if (signal.aborted) throw new LlmError('network', 'aborted before dispatch')
 

@@ -9,6 +9,10 @@ import { enterPlanModeTool } from '../agent/tools/enter-plan-mode'
 import { exitPlanModeTool } from '../agent/tools/exit-plan-mode'
 import { askUserQuestionTool } from '../agent/tools/ask-user-question'
 import { studioLensTool } from '../agent/tools/studio-lens'
+import { readTool } from '../agent/tools/read'
+import { globTool } from '../agent/tools/glob'
+import { taskTool } from '../agent/tools/task'
+import { awaitAsyncTool } from '../agent/tools/await-async'
 import { startServiceTool, stopServiceTool, serviceLogsTool, listServicesTool } from '../agent/tools/service'
 import { agentSpawnTool, agentSendTool, agentWaitTool, agentCloseTool, agentBatchTool } from '../agent/tools/async-subagent'
 import { playwrightBrowserTool } from '../agent/tools/playwright-browser'
@@ -87,6 +91,13 @@ export const PREVIEW_AGENT_TOOLS = PREVIEW_TOOLS as unknown as Tool[]
 // runAgentLoop). Sub-agents and collab experts don't get them: their ctx.subAgents is undefined (the loop
 // also strips agent_* from the child tool set), so a child can't spawn children (depth 1).
 export const SUBAGENT_TOOLS = [agentSpawnTool, agentSendTool, agentWaitTool, agentCloseTool, agentBatchTool] as unknown as Tool[]
+// Danny's routing-investigation kit (coordinator dispatch §3.0 — L1). READ-ONLY + DELEGATION only: Read/Glob
+// to peek, Task to spin an isolated sub-agent (its raw reads land in the sub-agent's context, not Danny's),
+// studio_lens (understand mode) to fan a module out into a shared map, await_async to collect a backgrounded
+// lens. Deliberately NO write/exec (Edit/Write/Bash) — Danny investigates + decides + delegates; he NEVER
+// implements. The read-only-by-construction kit IS the anti-runaway guard (delegation keeps his own context
+// lean), so no turn cap is imposed on the routing agent. Used verbatim via runDispatchedAgent's `toolset`.
+export const COORDINATOR_INVESTIGATION_TOOLS = [readTool, globTool, taskTool, studioLensTool, awaitAsyncTool] as unknown as Tool[]
 
 export function toolsForAgentRole(roleId: string): Tool[] {
   let core =

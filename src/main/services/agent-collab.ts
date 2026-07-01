@@ -125,17 +125,27 @@ function buildCollabSystem(roleId: string, teammates: { id: string; name: string
     "genuinely, fully done; only then finish, and the coordinator collects everyone's results and reviews." +
     // C2: open with a non-overlapping-scope handshake so two experts don't touch the same files (P4). The review
     // driver is also decided HERE, up front (user spec) — not left for the end, so no one spins a premature panel.
-    '\n\n## Align before you build — FIRST divide the modules, THEN pick the review driver\n' +
+    '\n\n## Align before you build — divide the modules, RIGHT-SIZE the team, then pick the review driver\n' +
     'Before you write ANY code, sync with your teammates via send_message / assign_task and settle these IN ORDER:\n' +
     'FIRST — divide the work into NON-overlapping modules: agree the exact boundary of who OWNS / IMPLEMENTS what ' +
     '(e.g. backend owns the main process / IPC / services; frontend owns the renderer / UI) and split your todos so ' +
     'they do NOT collide. Be explicit — every area has exactly one owner, no two of you touching the same files.\n' +
-    "THEN — now that you know who owns the bigger / riskier surface, DECIDE who will drive the team's ONE final " +
-    'consolidated studio_lens review (see below) — the owner of the bigger / riskier surface is the natural choice — ' +
-    'and REGISTER that choice with elect_lens_driver(name) so it is ENFORCED (only the registered driver can run the ' +
-    'review; everyone else is refused). Saying it out loud is not enough — register it.\n' +
-    'Both are settled BEFORE the work starts — module ownership first, then register the review driver; never leave ' +
-    "the driver for the end. Build only within your agreed scope; never edit a teammate's files.\n\n" +
+    'SECOND — RIGHT-SIZE the team against the REAL split. Now that the modules are divided you can see each share. If ' +
+    "it's clearly LOPSIDED — one teammate's slice turns out trivial (a tiny tweak, a couple of lines) and another can " +
+    'fully cover it WITHIN their competence — then the minor-share teammate hands that slice over with assign_task, ' +
+    'STATES the reason in one sentence (surfaced to the user, so the team-size change is legible — e.g. "the backend ' +
+    "share is one small change, handing it to you; you solo is right here\"), and EXITS (finishes their loop). The " +
+    'team then proceeds at the RIGHT smaller size and the remaining teammate becomes the SOLE owner of the whole ' +
+    'thing. Be CONSERVATIVE — collapse ONLY when one share is genuinely minor AND the other can truly absorb it; if ' +
+    "you're unsure, KEEP BOTH (never under-staff). This is an alignment decision made BEFORE any code — never a " +
+    'mid-build bail that would strand half-finished work.\n' +
+    "THEN — with the final team settled, DECIDE who will drive the team's ONE final consolidated studio_lens review " +
+    '(see below) — the remaining owner of the bigger / riskier surface is the natural choice (if the team collapsed to ' +
+    'one, that sole owner drives it) — and REGISTER that choice with elect_lens_driver(name) so it is ENFORCED (only ' +
+    'the registered driver can run the review; everyone else is refused). Saying it out loud is not enough — register ' +
+    'it.\n' +
+    'These are settled BEFORE the work starts — module ownership first, right-size the team, then register the review ' +
+    "driver; never leave the driver for the end. Build only within your agreed scope; never edit a teammate's files.\n\n" +
     // The collab review is TIMED + SINGLE-DRIVER: elect one, run it only AFTER everyone is done, finished-first
     // self-checks + waits (never a premature panel — the dogfood waste), findings distributed to owners.
     '## Review in a collaboration — ONE registered driver, ONLY after EVERY teammate is done\n' +

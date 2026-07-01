@@ -116,6 +116,20 @@ CREATE TABLE IF NOT EXISTS projects (
   updated_at TEXT NOT NULL
 );
 
+-- Project memory (coordinator dispatch §4): Danny's synthesized project-shape map, keyed by the NORMALIZED
+-- project cwd (realpath + worktree-to-main + case-fold — NOT project_id, so every conversation/worktree on
+-- the same folder shares it). Recalled before an L1 routing investigation as the starting point; re-scanned
+-- on the DELTA when the fingerprint (a coarse STRUCTURAL digest — top-level layout + surface markers, not
+-- git HEAD) no longer matches the tree. The natural key is the cwd, so PRIMARY KEY is the path, not a ULID.
+CREATE TABLE IF NOT EXISTS project_maps (
+  cwd         TEXT PRIMARY KEY,                    -- normalized project key (§10.1); the recall/upsert key
+  fingerprint TEXT NOT NULL,                       -- structural digest (§10.2); mismatch = shape changed → re-scan delta
+  map         TEXT NOT NULL,                       -- Danny's concise project-shape summary (the reusable memory)
+  project_id  TEXT,                                -- optional link to a projects row when the cwd is a Studio project
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS project_tasks (
   id               TEXT PRIMARY KEY,
   project_id       TEXT NOT NULL,

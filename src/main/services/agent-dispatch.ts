@@ -85,6 +85,11 @@ export interface AgentLoopInput {
   expectsFileChanges?: boolean // implementation-gated run: quiescing with zero file edits triggers one nudge turn (loop.ts)
   maxTurns?: number // hard cap on agent-loop turns (lens sub-agents pass 50 = Workflow FORKED_AGENT_DEFAULT_MAX_TURNS); undefined → unbounded
   stallTimeoutMs?: number // content-level stream stall watchdog; defaults to the main-dispatch budget
+  // roleId stamped on this run's studio_lens conv-broadcast (ipc/lens-broadcast) so the Tasks panel can group
+  // the lens card by its driver. Defaults to '' — the existing solo behavior (the renderer anchors to the
+  // in-flight assistant turn). Danny's routing investigation (routeAsAgent) passes 'coordinator' so its lens
+  // Understand progress surfaces as the coordinator's, not a stray solo card.
+  lensStreamRoleId?: string
   // 批C2b: a CONV-LEVEL async registry (solo-async) for the direct-chat path, so launch_async handles outlive the
   // run and a parked turn can resume across turns. When set, runAgentLoop uses it and does NOT dispose it in the
   // finally (conv-delete / app-exit owns that). Absent (dispatched / collab-sub) → a per-run registry, disposed here.
@@ -230,7 +235,7 @@ export async function runAgentLoop(
           // conv-level broadcast (ipc/lens-broadcast) so reviewers + verdict reach the Tasks panel live across the
           // park. Collab builds ITS handle in agent-collab with onStream = onExpertStream (the persistent
           // coordinator stream a park never finishes) — a different call site, deliberately untouched.
-          onStream: (ev) => broadcastConvLens(loop.convId, '', ev),
+          onStream: (ev) => broadcastConvLens(loop.convId, loop.lensStreamRoleId ?? '', ev),
           onToolImage: cb.onToolImage,
           requestPermission: cb.requestPermission
         })
@@ -463,6 +468,14 @@ export interface DispatchedAgentInput {
   // a read-only Read/Grep/Glob/Bash kit regardless of role — most non-dev roles lack Bash, so they can't run
   // the project checks under their default kit.
   toolNames?: readonly string[]
+  // Explicit, VERBATIM tool kit — used as-is, bypassing the role's default kit AND the cwd/monitor filtering
+  // (the caller already built the exact set). Danny's routing investigation (routeAsAgent) passes his
+  // read-only delegation kit (COORDINATOR_INVESTIGATION_TOOLS) here — a set no role's default kit produces,
+  // and one that includes studio_lens so ctx.panel gets wired (handle-presence ⟺ tool-presence). Takes
+  // precedence over toolNames.
+  toolset?: readonly Tool[]
+  // Threaded to AgentLoopInput.lensStreamRoleId — see there. routeAsAgent passes 'coordinator'.
+  lensStreamRoleId?: string
   initialTodos?: AgentContext['todos'] // shared conv-level todos seeded into the dispatched run (pipeline continuity)
   onTodosChange?: (roleId: string, todos: AgentContext['todos']) => void // TodoWrite writes back → shared conv-level list + per-role live push (roleId injected at ctx.setTodos)
   hookAgentId?: string // agent-hook sub-query id (anti-recursion); threaded into ctx.hookAgentId
@@ -474,7 +487,12 @@ export async function runDispatchedAgent(
   signal: AbortSignal,
 ): Promise<{ text: string; inTokens: number; contextTokens: number; cacheReadTokens: number; outTokens: number; reason: AgentResult['reason']; attachments: MessageAttachmentDto[]; writtenFiles: WrittenFile[] }> {
   let tools: Tool[]
-  if (d.toolNames) {
+  if (d.toolset) {
+    // Verbatim kit (Danny's routing investigation): used exactly as handed in, with NO DEV augmentation and
+    // NO cwd/monitor filtering — the caller built the precise read-only delegation set (Read/Glob + Task +
+    // studio_lens + await_async). studio_lens being present wires ctx.panel below (the recursion-guard invariant).
+    tools = [...d.toolset]
+  } else if (d.toolNames) {
     // Fixed-kit dispatch (Gate B verifier): an explicit whitelist instead of the role's default kit — a
     // read-only Read/Grep/Glob/Bash verifier that runs the project checks without the implementer's write
     // tools or a non-dev role's Bash-less kit. No DEV augmentation; cwd is required for these.
@@ -544,6 +562,7 @@ export async function runDispatchedAgent(
       expectsFileChanges: d.expectsFileChanges,
       maxTurns: d.maxTurns,
       stallTimeoutMs: d.stallTimeoutMs,
+      lensStreamRoleId: d.lensStreamRoleId,
       imageModel: d.imageModel,
       initialTodos: d.initialTodos,
       onTodosChange: d.onTodosChange,

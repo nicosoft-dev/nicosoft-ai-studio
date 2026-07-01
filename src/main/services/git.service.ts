@@ -80,6 +80,20 @@ export async function gitHead(cwd: string): Promise<string> {
   return (await git(cwd, ['rev-parse', 'HEAD'], SHORT_TIMEOUT)).trim()
 }
 
+// Absolute path of the repo's COMMON git dir (`--git-common-dir`): the SHARED `.git` of the main worktree AND
+// every linked worktree, so it identifies the one canonical repo regardless of which worktree cwd sits in.
+// Compared against gitDir() this tells a linked worktree (git-dir = <main>/.git/worktrees/<slug>) apart from
+// the main worktree / a plain checkout (git-dir === common-dir). null when it's not a repo or git fails.
+export async function gitCommonDir(cwd: string): Promise<string | null> {
+  try {
+    const out = (await git(cwd, ['rev-parse', '--git-common-dir'], SHORT_TIMEOUT)).trim()
+    if (!out) return null
+    return isAbsolute(out) ? out : resolve(cwd, out)
+  } catch {
+    return null
+  }
+}
+
 export async function gitDefaultBranchRef(cwd: string): Promise<string | null> {
   try {
     const out = (await git(cwd, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], SHORT_TIMEOUT)).trim()
