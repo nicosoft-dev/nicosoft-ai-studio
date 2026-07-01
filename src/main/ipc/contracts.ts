@@ -1,5 +1,6 @@
 import type { ModelInfo, Protocol } from '../domain'
 import type { ThinkingParam } from '../../shared/thinking'
+import type { AgentLlmEvent } from '../agent/llm'
 
 // DTOs crossing the IPC boundary (handlers ↔ preload ↔ renderer). The renderer-facing Endpoint
 // view carries `keyState` but never the key itself — secrets stay in the keychain.
@@ -182,6 +183,16 @@ export interface ServiceInfoDto {
 export interface ConvServices {
   convId: string
   services: ServiceInfoDto[]
+}
+// Live studio_lens panel progress for a conversation, broadcast conv-level (all windows, like conv:services) so
+// it survives the caller's turn-stream lifecycle: a SOLO lens runs async and the caller PARKS — its turn stream
+// finishes and any event through it would no-op, freezing the Tasks-panel LensCard at "creating". Lens progress
+// rides this convId-keyed channel instead (see ipc/lens-broadcast.ts). roleId: '' for solo (anchored to the
+// in-flight assistant turn); a driver's roleId for a future coordinator-driven lens.
+export interface ConvLens {
+  convId: string
+  roleId: string
+  event: AgentLlmEvent
 }
 
 export interface PreviewOpenRequest {

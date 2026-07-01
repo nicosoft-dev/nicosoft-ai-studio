@@ -538,6 +538,28 @@ export const useChat = create<ChatState>((set, get) => {
       appendImage(d.convId, { url: d.attachment.url, name: d.attachment.name ?? 'image' })
     })
 
+    // studio_lens panel progress on the conv-level channel (ipc/lens-broadcast). A SOLO async lens parks its
+    // caller, so its turn stream finishes and its sub_tool events can't ride it — they arrive here keyed by convId
+    // instead. Group with the SAME helpers/anchoring as the turn-stream sub-tool path: locateSubToolMsgIndex with
+    // roleId '' takes the solo fallback (the in-flight assistant turn); a future coordinator-driven lens would pass
+    // its driver roleId (then the collab orphan-bubble guard applies). Collab lens is unaffected — it still streams
+    // over coordinator:sub-tool.
+    window.api.onConvLens((d) => {
+      const ev = d.event
+      if (ev.type !== 'sub_tool_start' && ev.type !== 'sub_tool_done' && ev.type !== 'sub_tool_delta' && ev.type !== 'sub_tool_progress') return
+      set((s) => {
+        const msgs = (s.byConversation[d.convId] ?? []).map((m) => ({ ...m }))
+        let i = locateSubToolMsgIndex(msgs, d.roleId, ev.parentToolId, ev.toolUseId)
+        if (i < 0 && d.roleId) { msgs.push({ id: uid(), role: 'assistant', text: '', streaming: true, expertId: d.roleId }); i = msgs.length - 1 }
+        if (i < 0) return s
+        if (ev.type === 'sub_tool_start') msgs[i] = applySubToolStart(msgs[i], ev.parentToolId, ev.toolUseId, ev.name, ev.input)
+        else if (ev.type === 'sub_tool_done') msgs[i] = applySubToolDone(msgs[i], ev.parentToolId, ev.toolUseId, ev.name, ev.result, ev.isError, ev.input)
+        else if (ev.type === 'sub_tool_delta') msgs[i] = applySubToolDelta(msgs[i], ev.parentToolId, ev.toolUseId, ev.delta)
+        else if (ev.type === 'sub_tool_progress') msgs[i] = applySubToolProgress(msgs[i], ev.parentToolId, ev.toolUseId, ev.tool, ev.summary)
+        return { byConversation: { ...s.byConversation, [d.convId]: msgs } }
+      })
+    })
+
     // ---- coordinator (router + multi-expert dispatch) path ----
     // Event lifecycle per turn:
     //   1. step:start arrives BEFORE any delta for that step. We rebind the placeholder assistant

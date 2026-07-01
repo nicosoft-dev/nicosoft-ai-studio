@@ -42,6 +42,7 @@ import { launchAsyncTool } from '../agent/tools/launch-async'
 import { buildAgentSystem } from './agent-system'
 import { setActiveServices, clearActiveServices, broadcastConvServices } from './active-services'
 import { createPreviewHandle } from './active-preview'
+import { broadcastConvLens } from '../ipc/lens-broadcast'
 import * as workspaceTasks from './workspace-tasks.service'
 
 export interface AgentCallbacks {
@@ -224,7 +225,12 @@ export async function runAgentLoop(
           cwd,
           permissionMode: loop.permissionMode,
           signal,
-          onStream: cb.onStream,
+          // SOLO lens runs async — await_async PARKS the turn, so its turn stream finishes and events through
+          // cb.onStream become guarded no-ops (the panel freezes at "creating"). Route lens progress on the
+          // conv-level broadcast (ipc/lens-broadcast) so reviewers + verdict reach the Tasks panel live across the
+          // park. Collab builds ITS handle in agent-collab with onStream = onExpertStream (the persistent
+          // coordinator stream a park never finishes) — a different call site, deliberately untouched.
+          onStream: (ev) => broadcastConvLens(loop.convId, '', ev),
           onToolImage: cb.onToolImage,
           requestPermission: cb.requestPermission
         })

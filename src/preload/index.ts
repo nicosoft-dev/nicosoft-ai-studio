@@ -16,6 +16,7 @@ import type {
   ConvImage,
   ConvTodos,
   ConvServices,
+  ConvLens,
   ServiceInfoDto,
   AnalyticsSummary,
   AppInfo,
@@ -153,6 +154,10 @@ const api = {
   // Live per-conversation background services (start_service), pushed on every start/ready/port/exit — the
   // workspace Tasks panel's Services section. Only active (starting/ready); exited ones go to history.
   onConvServices: (cb: (d: ConvServices) => void): (() => void) => agentListen('conv:services', cb),
+
+  // Live per-conversation studio_lens panel progress (reviewers + verdict), broadcast conv-level so a SOLO async
+  // lens (whose caller parked) still reaches the Tasks panel after its turn stream finished. See ipc/lens-broadcast.
+  onConvLens: (cb: (d: ConvLens) => void): (() => void) => agentListen('conv:lens', cb),
 
   preview: {
     open: (input: PreviewOpenRequest): Promise<PreviewResultDto> => ipcRenderer.invoke('preview:open-request', input),
