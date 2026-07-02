@@ -36,6 +36,9 @@ const PLAN_FIRST =
 // that names NO specific tool — the roles' toolsets differ (generalist/analyst have code_execution,
 // scheduler has none), so it points at the tool schema rather than promising a tool the role lacks. NOT a
 // mandate to stay local. Dev roles (engineer / frontend) already carry detailed tool guidance, so skip this.
+// The own-working-scripts exemption is safe role-wide (analyst-quant-backtest design §3.5b): generalist has
+// code_execution but no Write, scheduler has neither, translator/editor/designer already write deliverable
+// files — the rule's true intent (non-dev roles don't modify the user's APPLICATION) is preserved verbatim.
 const TOOL_AWARENESS =
   '# You can act, not just answer — use the tools you have by your own judgment\n' +
   "You're not limited to replying: the tools available to you this turn are in your tool schema — reach " +
@@ -49,8 +52,10 @@ const TOOL_AWARENESS =
   'components, types, build or config files) — that work belongs to the engineers. If your task needs a code ' +
   `change, do NOT attempt it yourself: state plainly in your result that it needs ${displayName('frontend')} (frontend) or ${displayName('engineer')} ` +
   '(backend), and exactly what is required, so the coordinator routes it to them. Producing your own ' +
-  'deliverable file when that file IS your output (a translation file, a report, notes) is fine; reaching ' +
-  'into the existing source code is not.'
+  'deliverable file when that file IS your output (a translation file, a report, notes) is fine, and so are ' +
+  'WORKING SCRIPTS you write and run yourself to do YOUR OWN job (data processing, analysis, backtests, ' +
+  "batch text work) — those are your deliverables too. The hard line is the user's APPLICATION source code: " +
+  'creating or editing THAT belongs to the engineers.'
 
 // Project-convention files (CLAUDE.md / AGENTS.md) from the agent's working dir — the user's
 // project-specific rules. Injected as REFERENCE BELOW the hardcoded system rules (PLAN_FIRST), which

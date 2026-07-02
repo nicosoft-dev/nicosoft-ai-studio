@@ -1,14 +1,14 @@
 // code_execution tool — run a Python snippet locally (analyst data analysis + Engineer quick scripts).
 // Same local-exec model as Bash (spawn + cwd + timeout + permission gate), Python-specific: writes the
-// snippet to a temp file, runs python3 in the role's cwd, returns stdout/stderr + any PNG the code
-// saved into $NSAI_CODE_OUTPUT (collected as image blocks for the model's vision). isReadOnly:false →
-// permission gate + denied in plan mode. No OS sandbox / network isolation yet (doc 18 §3) — permission
-// + cwd + timeout only. See docs/nicosoft-studio/18-code-execution.md.
+// snippet to a temp file, runs the resolved python in the role's cwd, returns stdout/stderr + any PNG
+// the code saved into $NSAI_CODE_OUTPUT (collected as image blocks for the model's vision).
+// isReadOnly:false → permission gate + denied in plan mode. No OS sandbox / network isolation yet
+// (doc 18 §3) — permission + cwd + timeout only. See docs/nicosoft-studio/18-code-execution.md.
 
 import { spawn } from 'node:child_process'
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { z } from 'zod'
 import { semanticNumber } from './semantic'
 import { buildTool } from '../tool'
@@ -33,6 +33,25 @@ interface CodeOutput {
   spawnError?: string
 }
 
+// Prefer the project's OWN virtualenv over the machine's global python3: when <cwd>/.venv (or venv/)
+// holds an interpreter, run that one and activate it for real (VIRTUAL_ENV + PATH below) so pip-installed
+// libs — and any subprocess the snippet itself spawns — resolve inside the venv. This is what makes the
+// analyst's install guidance ("pip install into the project .venv, never globally") actually work: the
+// library lands in the venv AND imports here (analyst-quant-backtest design).
+function resolvePython(cwd: string | undefined): { bin: string; venvDir?: string } {
+  if (cwd) {
+    for (const name of ['.venv', 'venv']) {
+      const dir = join(cwd, name)
+      const bins =
+        process.platform === 'win32'
+          ? [join(dir, 'Scripts', 'python.exe')]
+          : [join(dir, 'bin', 'python3'), join(dir, 'bin', 'python')]
+      for (const bin of bins) if (existsSync(bin)) return { bin, venvDir: dir }
+    }
+  }
+  return { bin: 'python3' }
+}
+
 export const codeExecutionTool = buildTool<typeof inputSchema, CodeOutput>({
   name: 'code_execution',
   inputSchema,
@@ -40,7 +59,9 @@ export const codeExecutionTool = buildTool<typeof inputSchema, CodeOutput>({
     'Run a Python snippet locally in the current folder for data analysis. Returns stdout/stderr. ' +
     'To return a chart, save it as a PNG into the directory given by the NSAI_CODE_OUTPUT env var, e.g. ' +
     '`import os; plt.savefig(os.path.join(os.environ["NSAI_CODE_OUTPUT"], "fig.png"))` — saved PNGs are ' +
-    'returned to you as images. Needs python3 + libraries (pandas/numpy/matplotlib) installed on the machine.',
+    "returned to you as images. Uses the project's own virtualenv automatically when .venv/ (or venv/) " +
+    "exists in the folder, otherwise the machine's global python3. Only the Python standard library is " +
+    'guaranteed — probe third-party imports before relying on them.',
   isReadOnly: () => false, // executes code → permission gate + denied in plan mode
   isConcurrencySafe: () => false,
   isDestructive: () => true,
@@ -57,10 +78,21 @@ export const codeExecutionTool = buildTool<typeof inputSchema, CodeOutput>({
       const append = (buf: string, chunk: Buffer): string =>
         buf.length >= MAX_OUTPUT ? buf : (buf + chunk.toString()).slice(0, MAX_OUTPUT)
 
-      const child = spawn('python3', [scriptPath], {
+      const { bin: pythonBin, venvDir } = resolvePython(ctx.cwd)
+      const child = spawn(pythonBin, [scriptPath], {
         cwd: ctx.cwd || outDir, // data lives in the role's cwd; fall back to the temp dir if unset
         signal: ctx.signal,
-        env: { ...process.env, NSAI_CODE_OUTPUT: outDir, MPLBACKEND: 'Agg' }, // Agg = headless matplotlib
+        env: {
+          ...process.env,
+          NSAI_CODE_OUTPUT: outDir,
+          MPLBACKEND: 'Agg', // Agg = headless matplotlib
+          ...(venvDir
+            ? {
+                VIRTUAL_ENV: venvDir,
+                PATH: `${join(venvDir, process.platform === 'win32' ? 'Scripts' : 'bin')}${delimiter}${process.env.PATH ?? ''}`,
+              }
+            : {}),
+        },
       })
       const timeout = input.timeout_ms ?? DEFAULT_TIMEOUT
       const termTimer = setTimeout(() => {
@@ -86,7 +118,7 @@ export const codeExecutionTool = buildTool<typeof inputSchema, CodeOutput>({
           /* best effort */
         }
         const msg =
-          (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'python3 not found on this machine' : err.message
+          (err as NodeJS.ErrnoException).code === 'ENOENT' ? `${pythonBin} not found on this machine` : err.message
         resolve({ data: { stdout, stderr, code: -1, timedOut: false, images: [], spawnError: msg } })
       })
       child.on('close', (code) => {

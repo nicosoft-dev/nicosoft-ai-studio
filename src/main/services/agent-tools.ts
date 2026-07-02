@@ -54,7 +54,11 @@ const ROLE_CORE_TOOLS: Record<string, readonly string[]> = {
   // create directly; the orchestrator (Danny) plans the chain and dispatches Joan to land it — quality, since
   // Joan is a small model, so the heavy planning stays with Danny.
   generalist: ['Read', 'WebFetch', 'code_execution', 'schedule_create', 'schedule_list', 'schedule_delete'],
-  analyst: ['Read', 'WebFetch', 'code_execution', 'schedule_create', 'schedule_list', 'schedule_delete'],
+  // Turing runs disk-based analysis workflows (analyst-quant-backtest design §3.1): Write lands datasets /
+  // strategy scripts under the cwd (confineReal is the safety boundary), Glob/Grep explore the user's data
+  // files and logs. Deliberately NO Bash — python runs through code_execution; library installs stay with
+  // the user (the prompt makes him probe imports and hand back the pip line).
+  analyst: ['Read', 'Write', 'Glob', 'Grep', 'WebFetch', 'code_execution', 'schedule_create', 'schedule_list', 'schedule_delete'],
   // doc 29: Louise (Gemini agent loop) — read i18n/md/txt → translate → write back; Grep/Glob to find strings.
   translator: ['Read', 'Write', 'WritePdf', 'Grep', 'Glob', 'WebFetch', 'WebSearch'],
   // Miranda (Gemini agent loop) — read docs/transcripts/posts → distill → write the summary; same tool kit.
