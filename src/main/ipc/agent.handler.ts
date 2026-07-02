@@ -121,7 +121,7 @@ function startAgentRun(input: AgentRunInput, sender: WebContents, opts?: { resum
           onEvent: (ev) => {
             ensureOpen()
             if (ev.type === 'assistant') send('coordinator:assistant', { streamId, roleId, blocks: serializeAssistantBlocks(ev.message.content) })
-            else if (ev.type === 'compaction') send('coordinator:compaction', { streamId, roleId, kind: ev.kind, freedTokens: ev.freedTokens })
+            else if (ev.type === 'compaction') send('coordinator:compaction', { streamId, roleId, kind: ev.kind, freedTokens: ev.freedTokens, phase: ev.phase })
             else send('coordinator:results', { streamId, roleId, results: serializeToolResults(ev.message.content) })
           },
           // The up-front per-turn count is the CURRENT context (count_tokens of what's being sent) → drives

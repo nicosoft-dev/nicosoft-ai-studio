@@ -514,12 +514,15 @@ export interface CoordinatorAssistant {
   roleId: string
   blocks: AgentBlockDto[]
 }
-// Context compaction surfaced per-expert to the UI: 'micro' = old tool-result bodies cleared; 'auto' = transcript summarized.
+// Context compaction surfaced per-expert to the UI: 'micro' = old tool-result bodies cleared; 'auto' = transcript
+// summarized. phase 'start' announces a minutes-long auto summary call BEGINNING (→ live "Compacting…" readout);
+// absent = the settled note with real freedTokens.
 export interface CoordinatorCompaction {
   streamId: string
   roleId: string
   kind: 'micro' | 'auto'
   freedTokens: number
+  phase?: 'start'
 }
 export interface CoordinatorToolResults {
   streamId: string

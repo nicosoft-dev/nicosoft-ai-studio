@@ -399,7 +399,7 @@ export const useChat = create<ChatState>((set, get) => {
         // isn't necessarily this step's. step:done text is authoritative over the delta accumulator.
         for (let i = msgs.length - 1; i >= 0; i--) {
           if (msgs[i].role === 'assistant' && msgs[i].streaming && msgs[i].expertId === d.roleId) {
-            msgs[i] = { ...msgs[i], text: d.text, streaming: false, ...(typeof d.inputTokens === 'number' ? { inputTokens: d.inputTokens } : {}), ...(typeof d.outputTokens === 'number' ? { outputTokens: d.outputTokens } : {}), ...(typeof d.sentTokens === 'number' ? { sentTokens: d.sentTokens } : {}) }
+            msgs[i] = { ...msgs[i], text: d.text, streaming: false, activityHint: undefined, ...(typeof d.inputTokens === 'number' ? { inputTokens: d.inputTokens } : {}), ...(typeof d.outputTokens === 'number' ? { outputTokens: d.outputTokens } : {}), ...(typeof d.sentTokens === 'number' ? { sentTokens: d.sentTokens } : {}) }
             break
           }
         }
@@ -645,7 +645,12 @@ export const useChat = create<ChatState>((set, get) => {
         let i = -1
         for (let k = msgs.length - 1; k >= 0; k--) if (msgs[k].expertId === d.roleId) { i = k; break }
         if (i < 0) return s
-        msgs[i] = { ...msgs[i], blocks: [...(msgs[i].blocks ?? []), { kind: 'compaction', tokens: d.freedTokens, auto: d.kind === 'auto' }] }
+        // phase 'start' = the minutes-long auto-summary call just began (no other events until it lands) —
+        // surface a live 'Compacting' readout instead of a dead 'Thinking'. The completed event (no phase)
+        // clears the hint and appends the settled note.
+        msgs[i] = d.phase === 'start'
+          ? { ...msgs[i], activityHint: 'Compacting' }
+          : { ...msgs[i], activityHint: undefined, blocks: [...(msgs[i].blocks ?? []), { kind: 'compaction', tokens: d.freedTokens, auto: d.kind === 'auto' }] }
         return { byConversation: { ...s.byConversation, [meta.convId]: msgs } }
       })
     })

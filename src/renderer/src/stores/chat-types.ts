@@ -36,6 +36,10 @@ export interface ChatMessage {
   citations?: { url: string; title?: string }[] // web_search sources for the answer — shown as a Sources list
   streaming?: boolean
   parked?: boolean // collab: expert is between turns (parked) — hide its live readout though the bubble stays streaming
+  // A live PHASE word for the readout while a long tool-less stretch runs inside the segment (e.g. 'Compacting'
+  // during the minutes-long auto-summary call, which emits no other events). Set by phase-start events, cleared
+  // by the matching settle (compaction done / step:done). Overrides the tool-derived activity while present.
+  activityHint?: string
   // Coordinator-dispatched message: the contributing expert (engineer/translator/...) and (pipeline only) the dispatch
   // chain shared by every step of that turn. The renderer reads both to switch avatar/name per message
   // and draw a single dispatch badge spanning consecutive same-chain messages.

@@ -127,7 +127,7 @@ export function registerCoordinatorHandlers(): void {
               const ev: CoordinatorToolResults = { streamId, roleId, results: serializeToolResults(evt.message.content) }
               send('coordinator:results', ev)
             } else if (evt.type === 'compaction') {
-              send('coordinator:compaction', { streamId, roleId, kind: evt.kind, freedTokens: evt.freedTokens })
+              send('coordinator:compaction', { streamId, roleId, kind: evt.kind, freedTokens: evt.freedTokens, phase: evt.phase })
             }
           },
           requestPermission: (roleId, req, signal) =>

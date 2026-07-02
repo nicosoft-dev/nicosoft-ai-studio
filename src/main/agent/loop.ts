@@ -89,7 +89,10 @@ export type AgentEvent =
   | { type: 'tool_results'; message: AgentMessage }
   // Surfaced to the UI so context compaction is VISIBLE (it was silent — only console). 'micro' = old tool-result
   // bodies cleared this turn; 'auto' = the transcript was LLM-summarized. freedTokens ≈ context reclaimed.
-  | { type: 'compaction'; kind: 'micro' | 'auto'; freedTokens: number; message?: string }
+  // phase 'start' announces a LONG auto-compaction beginning (the full-transcript LLM summary call runs
+  // 1-3 minutes with no other events — announced so the UI can show "Compacting…" instead of a dead readout);
+  // absent phase = the completed compaction (the settled note with real freedTokens).
+  | { type: 'compaction'; kind: 'micro' | 'auto'; freedTokens: number; message?: string; phase?: 'start' }
 
 // Cross-invocation compaction anchor. The autocompact estimate is normally seeded only by the running
 // loop's own API usage. In collab an expert runs as MANY short runAgent calls (one per mailbox wake), so
@@ -664,6 +667,7 @@ export async function* runAgent(
           yield { type: 'compaction', kind: 'auto', freedTokens: 0, message: compactMessage }
         } else {
           console.log(`[agent] proactive autocompact run=${ctx.runId} turn=${turns} estimate=${estimate} threshold=${threshold} msgs=${messages.length}`)
+          yield { type: 'compaction', kind: 'auto', freedTokens: 0, phase: 'start' } // minutes-long summary call ahead — give the UI a live phase
           const compacted = await autocompact(messages, { ...compactConfig, customInstructions })
           if (compacted !== messages) {
             messages = compacted
@@ -793,6 +797,7 @@ export async function* runAgent(
           (err.status === 400 && (nearWindow || /context|too.?long|token|length|exceed/i.test(err.message))))
       if (overflow && !reactiveCompacted) {
         console.warn(`[agent] reactive autocompact run=${ctx.runId} turn=${turns} status=${err.status} estimate=${estimate} threshold=${threshold}`)
+        yield { type: 'compaction', kind: 'auto', freedTokens: 0, phase: 'start' } // same live phase as the proactive path
         const compacted = await autocompact(messages, compactConfig)
         if (compacted !== messages) {
           messages = compacted

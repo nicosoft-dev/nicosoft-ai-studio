@@ -370,7 +370,7 @@ export function ChatSegment({
         {segStreaming ? (
           // Coordinator segments carry their own live ↑/↓ (per-message) so concurrent segments don't all show
           // the conv-level total; single chat/agent turns have no per-message live → fall back to the conv prop.
-          <ThinkingReadout chars={last.text.length} inputTokens={last.liveInputTokens ?? inputTokens} outputTokens={last.liveOutputTokens ?? outputTokens} cachedTokens={last.liveInputTokens !== undefined ? (last.liveCachedTokens ?? 0) : cachedTokens} activity={segmentActivity(last.tools)} />
+          <ThinkingReadout chars={last.text.length} inputTokens={last.liveInputTokens ?? inputTokens} outputTokens={last.liveOutputTokens ?? outputTokens} cachedTokens={last.liveInputTokens !== undefined ? (last.liveCachedTokens ?? 0) : cachedTokens} activity={last.activityHint ?? segmentActivity(last.tools)} />
         ) : null}
       </div>
     </div>
