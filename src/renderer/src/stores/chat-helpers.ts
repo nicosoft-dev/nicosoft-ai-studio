@@ -240,13 +240,14 @@ export function groupRuns(messages: ChatMessage[]): ChatMessage[][] {
   return runs
 }
 
-// PRODUCT RULE (long-standing; re-broken once by treating it as a special-case to delete — dogfood
-// 2026-07-02): in a coordinator conversation, the HOST's own segments (Danny's voice — intro, direct
-// answers, his pre-routing investigation, his synthesis) always render FULL-HEIGHT; ONLY dispatched
-// expert steps (a non-empty dispatch chain) fold into the fixed-height scroll window. Danny's
-// investigation is Danny speaking — segmentKind 'investigate' gives it its own merge boundary
-// (canMerge above) but must never make it foldable. Synthesis carries a chain but is excluded by the
-// caller's !isSynthesis gate (it renders full-height with the accent treatment instead).
-export function segmentFolds(first: ChatMessage): boolean {
-  return first.role === 'assistant' && !isSynthesis(first) && first.expertId != null && !!first.dispatch?.length
+// PRODUCT RULE (long-standing; re-broken once by treating it as a special-case to delete, then refined
+// by dogfood 2026-07-02): the conversation HOST's own segments always render FULL-HEIGHT; EVERY other
+// role's segment folds into the fixed-height scroll window (expandable via "View full"). The host is the
+// conversation's primary role — Danny in a coordinator conversation (his intro/direct, his pre-routing
+// investigation, his synthesis all stay full-height), the role itself in a solo chat (its segments never
+// fold). Identity — not the dispatch chain — is the judge: a single-mode dispatch stores NO chain yet its
+// expert step must still fold (the chain-based predicate left those permanently expanded), and a Verifier
+// step (analyst ≠ host) folds like any other guest segment.
+export function segmentFolds(first: ChatMessage, hostId: string): boolean {
+  return first.role === 'assistant' && first.expertId != null && first.expertId !== hostId
 }

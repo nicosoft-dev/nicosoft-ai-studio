@@ -307,12 +307,12 @@ export function ChatSegment({
   // closure-loop §3.2/§3.3: an independent Gate B reviewer step renders with its own "· Verifier" identity.
   const verifier = !isUser && first.segmentKind === 'verifier'
   const segColor = isUser ? 'var(--border-2)' : synthesis ? 'var(--accent)' : renderExpert.color
-  // Foldable: ONLY a dispatched expert STEP (non-empty chain) renders in the fixed-height scroll window —
-  // parallel/council stack many, so a finished step collapses to a summary, leaving the host's voice prominent.
-  // The HOST's own segments (Danny's intro / direct / investigation / synthesis) always render FULL-HEIGHT —
-  // a long-standing product rule (see segmentFolds in chat-helpers, where the predicate + rationale live;
-  // it is pure so the display-unification tests pin it).
-  const foldable = !isUser && segmentFolds(first)
+  // Foldable: every GUEST segment (expertId ≠ the conversation's primary role) renders in the fixed-height
+  // scroll window; the HOST's own segments (Danny's intro / direct / investigation / synthesis in a
+  // coordinator conversation, the role itself in a solo chat) always render FULL-HEIGHT — a long-standing
+  // product rule (see segmentFolds in chat-helpers, where the predicate + rationale live; it is pure so the
+  // display-unification tests pin it). `expert` is the conversation's primary role, passed by the view.
+  const foldable = !isUser && segmentFolds(first, expert.id)
   const [expanded, setExpanded] = useState(false)
   const bodyRef = useRef<HTMLDivElement>(null)
   // Folded expert steps render in a fixed-height scroll WINDOW from the start (not collapsed to a line):
