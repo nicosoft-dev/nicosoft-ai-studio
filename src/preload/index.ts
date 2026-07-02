@@ -175,6 +175,9 @@ const api = {
   // Workspace Files panel — confined file access (design §3). The renderer resolves the root cwd for the
   // active expert (cwdByExpert[role]) and passes (cwd, relPath); the main process confines relPath under cwd.
   fs: {
+    // Does this picked folder still exist on disk? The composer probes it (cwd change + window focus)
+    // and falls back to the folder-free state when it's gone.
+    dirExists: (path: string): Promise<boolean> => ipcRenderer.invoke('fs:dirExists', path),
     listDir: (cwd: string, relPath: string): Promise<FsListDirResult> =>
       ipcRenderer.invoke('fs:listDir', cwd, relPath),
     readForView: (cwd: string, relPath: string): Promise<FsReadForViewResult> =>

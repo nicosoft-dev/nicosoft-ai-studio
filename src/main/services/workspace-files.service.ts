@@ -56,6 +56,18 @@ function requireCwd(cwd: string): string {
   return cwd
 }
 
+// Existence probe for a picked cwd (it can be deleted / unmounted after being chosen): false → the
+// composer treats the conversation as folder-free (PathBar empty state, no cwd sent to the agent, git
+// chip hidden). Plain stat, no confine — the cwd IS the root being checked, the user's own pick.
+export async function dirExists(path: string): Promise<boolean> {
+  if (!path) return false
+  try {
+    return (await stat(path)).isDirectory()
+  } catch {
+    return false
+  }
+}
+
 // List one directory level (design §3): name + type only — NO per-entry stat (avoids the syscall storm
 // on node_modules-sized dirs, design §3 P18). Folders first, then case-insensitive name order.
 export async function listDir(cwd: string, relPath: string): Promise<FsListDirResult> {

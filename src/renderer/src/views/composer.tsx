@@ -68,6 +68,30 @@ export function Composer({
   const cwd = useWorkspace((s) => s.cwdByExpert[expert.id] ?? '')
   const cwdByExpert = useWorkspace((s) => s.cwdByExpert)
   const setCwd = useWorkspace((s) => s.setCwd)
+  // A picked folder can vanish from disk afterwards (deleted, volume unmounted). Probe on cwd change +
+  // window focus; while missing, the WHOLE chain treats the chat as folder-free — PathBar shows its
+  // "choose a folder" state, send() omits the cwd (agent falls back to its scratch workspace), the git
+  // chip hides. The store keeps the path on purpose: a re-mounted volume restores everything unprompted.
+  const [cwdMissing, setCwdMissing] = useState(false)
+  useEffect(() => {
+    let alive = true
+    if (!cwd) {
+      setCwdMissing(false)
+      return
+    }
+    const probe = (): void => {
+      void window.api.fs.dirExists(cwd).then((ok) => {
+        if (alive) setCwdMissing(!ok)
+      })
+    }
+    probe()
+    window.addEventListener('focus', probe)
+    return () => {
+      alive = false
+      window.removeEventListener('focus', probe)
+    }
+  }, [cwd])
+  const effectiveCwd = cwdMissing ? '' : cwd
   const mode = useWorkspace((s) => s.modeByExpert[expert.id] ?? 'default')
   const setMode = useWorkspace((s) => s.setMode)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -171,7 +195,7 @@ export function Composer({
       thinking,
       text,
       images: images?.length ? images : undefined,
-      cwd: agent ? cwd : undefined,
+      cwd: agent ? effectiveCwd : undefined,
       contextWindow: agent ? b.contextLength || undefined : undefined,
       permissionMode: agent ? mode : undefined,
       imageModel: roleHasImageGen(expert.id) ? b.imageModel : undefined
@@ -195,9 +219,12 @@ export function Composer({
   }
   // The chip reads the CONVERSATION's cwd (resolveConvCwd — the same resolver the Files/Diff panels use):
   // for a solo conv that IS the PathBar's cwd; for coordinator/collab convs it falls back to the first
-  // participating role with a folder. Greeting (no conversation yet) → the composer's own cwd.
+  // participating role with a folder. Greeting (no conversation yet) → the composer's own cwd. This
+  // expert's entry is overridden with effectiveCwd so a vanished folder hides the chip too.
   const conv = chat.conversations.find((c) => c.id === activeConv) ?? null
-  const gitCwd = conv ? resolveConvCwd(conv, cwdByExpert, messages) : cwd.trim() || null
+  const gitCwd = conv
+    ? resolveConvCwd(conv, { ...cwdByExpert, [expert.id]: effectiveCwd }, messages)
+    : effectiveCwd.trim() || null
 
   // Slash-command palette (optimization E): `/` at the start (no space yet) opens a quick-action menu.
   // Single-line `/…` input opens the palette; matchCommands does the precise filtering (so prose like
@@ -241,7 +268,7 @@ export function Composer({
             and persisted now, taking effect once that role gets an agent. The git chip beside it shows
             the CC-style working ± + Commit/Push handoff button for agent roles with a repo cwd. */}
         <div className="cmp-path-row">
-          <PathBar cwd={cwd} onPick={(dir) => setCwd(expert.id, dir)} />
+          <PathBar cwd={effectiveCwd} onPick={(dir) => setCwd(expert.id, dir)} />
           {agent ? <GitStatusChip cwd={gitCwd} disabled={!ready || streaming || compacting} onAction={sendGitPreset} /> : null}
         </div>
         <div

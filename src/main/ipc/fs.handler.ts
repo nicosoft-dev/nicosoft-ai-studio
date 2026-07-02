@@ -5,6 +5,7 @@ import * as filesService from '../services/workspace-files.service'
 // renderer resolved for the active expert (cwdByExpert[role]); the service confines relPath under it via
 // confineReal. No SQL, no path logic here. `shell:reveal` is the repurposed reveal channel (design §3 P25).
 export function registerFsHandlers(): void {
+  ipcMain.handle('fs:dirExists', (_e, path: string) => filesService.dirExists(typeof path === 'string' ? path : ''))
   ipcMain.handle('fs:listDir', (_e, cwd: string, relPath: string) => filesService.listDir(cwd, relPath))
   ipcMain.handle('fs:readForView', (_e, cwd: string, relPath: string) => filesService.readForView(cwd, relPath))
   ipcMain.handle('fs:openDefault', (_e, cwd: string, relPath: string) => filesService.openDefault(cwd, relPath))
