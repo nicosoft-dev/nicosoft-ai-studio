@@ -8,7 +8,7 @@ import type { ViewerImage } from '@/components/image-viewer'
 import { Avatar, NameChip } from '@/components/primitives'
 import type { ChatMessage, MsgBlock, ToolCall } from '@/stores/chat'
 import { ServerBubble, Sources } from '@/components/tool-bubble'
-import { ToolRun, TASKS_PANEL_ONLY, OMIT_WHEN_DONE } from '@/components/tool-run'
+import { ToolRun, OMIT_WHEN_DONE } from '@/components/tool-run'
 import { Markdown } from '@/components/markdown'
 import { useT } from '@/stores/locale'
 import { isSynthesis, groupRuns, sameChain, segmentFolds } from '@/stores/chat-helpers'
@@ -224,15 +224,13 @@ function RunBody({ msgs, onOpenImage, live }: { msgs: ChatMessage[]; onOpenImage
       }
       const tool = tools.find((tl) => tl.id === b.id)
       if (!tool) return
-      // Inline-fold surface routing — role-agnostic, no per-tool control-flow fork (the two sets live next to
-      // tool-run's verb tables). TASKS_PANEL_ONLY (StudioLens panel card): renders EXCLUSIVELY in the Workspace
-      // Tasks panel (live "Panel reviews" while running, History once done) → never inline, in ANY mode. OMIT_
-      // WHEN_DONE (studio_lens): its settled row is redundant once the review moved to the Tasks panel, so drop it
-      // when done — but WHILE RUNNING it folds in with the turn's other tools, so a PARALLEL investigation
-      // (Glob + studio_lens + Task fired together, by ANY agent role incl. the coordinator) collapses into ONE
-      // live line. ToolRun's live branch already renders a single gerund for N running tools, exactly like a long
-      // Bash/Task — no flush-first split (that split WAS the fragmentation: it special-cased studio_lens alone).
-      if (TASKS_PANEL_ONLY.has(tool.name)) return
+      // Inline-fold surface routing — role-agnostic, no per-tool control-flow fork (the set lives next to
+      // tool-run's verb tables). OMIT_WHEN_DONE (studio_lens tool call + the StudioLens panel card): the settled
+      // row is redundant once the review lives in the Tasks panel, so it drops when done — but WHILE RUNNING it
+      // folds in with the turn's other tools, so a parallel investigation collapses into ONE live line AND a
+      // gate-driven examine (no tool call — the panel card is its only chat trace) still shows a live presence
+      // on the verifier segment. ToolRun's live branch renders a single gerund for N running tools, exactly like
+      // a long Bash/Task — no flush-first split, and no double-render with the Tasks panel's rich card.
       if (OMIT_WHEN_DONE.has(tool.name) && tool.status !== 'running') return
       fold.push(tool)
     })

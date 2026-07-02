@@ -158,17 +158,19 @@ function verbLive(t: ToolCall): string {
 }
 
 // ---- inline-fold surface routing (role-agnostic; consumed by chat-segment RunBody) --------------------
-// Two DECLARATIVE sets replace the old per-tool control-flow forks in RunBody, so the aggregator stays
+// One DECLARATIVE set replaces the old per-tool control-flow forks in RunBody, so the aggregator stays
 // tool-name-agnostic and every agent role folds identically.
-// TASKS_PANEL_ONLY — the rich card renders EXCLUSIVELY in the Workspace Tasks panel, NEVER inline (running OR
-// done): the StudioLens panel card (subjects / verdicts / refute) is orphan-appended as a TOP-LEVEL card the
-// Tasks panel collects (LENS_PANEL_ROOT sentinel), so inlining it — even while running — would double-render.
-export const TASKS_PANEL_ONLY = new Set(['StudioLens'])
-// OMIT_WHEN_DONE — the SETTLED inline row is redundant (its result surfaced elsewhere) so drop it once done, but
-// KEEP folding it in WHILE RUNNING so a parallel turn (Glob + studio_lens + Task fired together) collapses into
-// ONE live line, exactly like a long Bash/Task does — no flush-first special-case. studio_lens: its completed
-// review moved to the Tasks panel → History. Universal: every agent role emits studio_lens via PANEL_TOOLS.
-export const OMIT_WHEN_DONE = new Set(['studio_lens'])
+// OMIT_WHEN_DONE — the SETTLED inline row is redundant (the result lives in the Tasks panel → History) so it
+// drops once done, but WHILE RUNNING it folds in like any long tool, giving the segment a live one-line
+// presence ("Running a Studio Lens review…" / "Examining across perspectives…"):
+//   studio_lens — the caller's tool call (solo / collab driver / Danny's investigation).
+//   StudioLens — the panel card itself (orphan-appended top-level via the LENS_PANEL_ROOT sentinel). This is
+//   the ONLY chat trace a GATE-driven examine has (Gate B drives the lens engine directly — no tool call), so
+//   dropping it even while running left the verifier segment showing a bare "Working…" with zero sign a review
+//   was in flight (dogfood 2026-07-02). No double-render with the Tasks panel: the inline LIVE line is a single
+//   gerund (ToolRun renders running[last] only, never sub-structure); the rich subjects/verdict card renders
+//   exclusively in the Tasks panel, and the settled row never renders inline at all.
+export const OMIT_WHEN_DONE = new Set(['studio_lens', 'StudioLens'])
 
 // ---- the run summary ("Read 13 files, ran 18 commands, edited a file, created 3 files") ---------------
 
