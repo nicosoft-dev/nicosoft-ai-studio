@@ -17,6 +17,30 @@ import type { Expert } from '@/types'
 // The segment-identity model (pure, JSX-free — see chat-helpers) re-exported for view-level consumers.
 export { groupRuns, sameChain } from '@/stores/chat-helpers'
 
+// One compaction line, rendered IN PLACE for both phases of a manual /compact: a ticking
+// "Compacting… Ns" while the fold's summary call runs (pending), then the settled receipt — the store
+// swaps the block, the position never changes and no second line appears (user call 2026-07-02). The
+// 1s timer re-renders only this component. Auto-compaction notes arrive already settled (never pending).
+function CompactionNote({ b }: { b: Extract<MsgBlock, { kind: 'compaction' }> }): ReactElement {
+  const [, tick] = useState(0)
+  useEffect(() => {
+    if (!b.pending) return
+    const t = setInterval(() => tick((n) => n + 1), 1000)
+    return () => clearInterval(t)
+  }, [b.pending])
+  if (b.pending) {
+    return <div className="seg-compaction">Compacting… {fmtElapsed(Math.max(0, Date.now() - (b.startedAt ?? Date.now())))}</div>
+  }
+  const k = b.tokens >= 1000 ? `${Math.round(b.tokens / 1000)}k` : `${b.tokens}`
+  return (
+    <div className="seg-compaction">
+      {b.manual
+        ? <>Compacted on request · folded ~{k} tokens of older history into the summary</>
+        : <>Summarized older context · freed ~{k} tokens to stay within the window</>}
+    </div>
+  )
+}
+
 // Coding-agent-style readout formatters for the streaming indicator: compact lower-case token count
 // ("1.2k") and a coarse elapsed string ("3s" / "1m 5s").
 const READOUT_NUM = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
@@ -216,14 +240,7 @@ function RunBody({ msgs, onOpenImage, live }: { msgs: ChatMessage[]; onOpenImage
         // turn; skip them so reopened/scrolled-back conversations aren't flooded.
         if (!b.auto && !b.manual) return
         flushFold(false)
-        const k = b.tokens >= 1000 ? `${Math.round(b.tokens / 1000)}k` : `${b.tokens}`
-        out.push(
-          <div key={`c${m.id}:${bi}`} className="seg-compaction">
-            {b.manual
-              ? <>Compacted on request · folded ~{k} tokens of older history into the summary</>
-              : <>Summarized older context · freed ~{k} tokens to stay within the window</>}
-          </div>
-        )
+        out.push(<CompactionNote key={`c${m.id}:${bi}`} b={b} />)
         return
       }
       const tool = tools.find((tl) => tl.id === b.id)

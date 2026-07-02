@@ -241,11 +241,7 @@ export function Composer({
             ) : null}
             <ThinkingPicker family={b.family} model={b.model} depth={effectiveDepth} onChange={b.onDepth} disabled={!ready} />
             {agent ? <ModePicker value={mode} onChange={(m) => setMode(expert.id, m)} disabled={!ready} /> : null}
-            {activeConv && chat.compacting[activeConv] ? (
-              // Manual /compact in flight — the fold is a minutes-scale LLM call with no stream events, so
-              // this quiet readout (in the meter's slot) is the only sign it's working. Clears on the receipt.
-              <span className="cmp-tokens">Compacting…</span>
-            ) : b.contextLength > 0 ? (
+            {b.contextLength > 0 ? (
               <span className={'cmp-tokens' + (tokenAmber ? ' amber' : '')}>
                 {fmtTokens(usedTokens)} / {fmtTokens(b.contextLength)}
               </span>

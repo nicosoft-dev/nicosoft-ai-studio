@@ -55,7 +55,9 @@ export type CompactSkipReason =
   | 'too-few-messages' // nothing worth folding (the continuity tail is the whole history)
   | 'no-key' // endpoint has no API key
 export type CompactOutcome =
-  | { status: 'compacted'; foldedMessages: number; foldedTokens: number }
+  // summaryTokens (estimate of the replacement summary) lets the composer meter self-correct in place:
+  // new context ≈ old measured count − foldedTokens + summaryTokens (the next real count_tokens supersedes it).
+  | { status: 'compacted'; foldedMessages: number; foldedTokens: number; summaryTokens: number }
   | { status: 'skipped'; reason: CompactSkipReason }
   | { status: 'failed' }
 
@@ -139,7 +141,7 @@ export async function maybeCompress(input: CompressInput): Promise<CompactOutcom
       coveredUpTo
     })
     agentEvents.emit({ type: 'compact:post', convId: input.convId, roleId: input.roleId, ts: Date.now() })
-    return { status: 'compacted', foldedMessages: fold.length, foldedTokens: estimateMessageTokens(fold) }
+    return { status: 'compacted', foldedMessages: fold.length, foldedTokens: estimateMessageTokens(fold), summaryTokens: estimateTextTokens(summaryText) }
   } catch (err) {
     // best-effort: a compression failure must never break the chat flow, but surface it (CLAUDE.md)
     console.warn('[compression] failed for conversation', input.convId, err)

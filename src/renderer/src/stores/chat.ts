@@ -1072,28 +1072,50 @@ export const useChat = create<ChatState>((set, get) => {
 
     // Manual /compact. The old wiring was fire-and-forget into a Promise<void> — success, "nothing to
     // fold" and a dead endpoint were indistinguishable, so the UI stayed silent and the user couldn't
-    // tell whether compaction happened (dogfood 2026-07-02). Now: a per-conv "Compacting…" readout while
-    // the fold runs (composer toolbar), then the SAME receipt language the auto path uses — a compaction
-    // block on the conversation's last assistant segment — or a skip/fail toast naming the reason.
+    // tell whether compaction happened (dogfood 2026-07-02). Now: ONE line in the chat, at the receipt's
+    // final position (after the last assistant segment) — planted as a ticking "Compacting… Ns" pending
+    // block when the fold starts, settled IN PLACE into the receipt on success, removed (toast instead)
+    // on skip/failure. No composer readout, no extra line (user call 2026-07-02).
     compactNow: async (convId) => {
       if (get().compacting[convId]) return // main also holds a per-conv lock; this just de-dups the UI
       set((s) => ({ compacting: { ...s.compacting, [convId]: true } }))
+      // Plant the pending line where the receipt will end up. Replace-or-remove it via settlePending —
+      // keyed by the pending flag (only one can exist per conv: the compacting guard above).
+      let planted = false
+      const settlePending = (msgs: ChatMessage[], final?: MsgBlock): ChatMessage[] =>
+        msgs.map((m) => {
+          if (!m.blocks?.some((b) => b.kind === 'compaction' && b.pending)) return m
+          const blocks = m.blocks.flatMap((b) => (b.kind === 'compaction' && b.pending ? (final ? [final] : []) : [b]))
+          return { ...m, blocks }
+        })
+      set((s) => {
+        const msgs = (s.byConversation[convId] ?? []).map((m) => ({ ...m }))
+        let i = -1
+        for (let j = msgs.length - 1; j >= 0; j--) if (msgs[j].role === 'assistant') { i = j; break }
+        if (i < 0) return s // no assistant segment to anchor (degenerate history) — toasts cover the outcome
+        planted = true
+        msgs[i] = { ...msgs[i], blocks: [...(msgs[i].blocks ?? []), { kind: 'compaction', tokens: 0, auto: false, manual: true, pending: true, startedAt: Date.now() }] }
+        return { byConversation: { ...s.byConversation, [convId]: msgs } }
+      })
       try {
         const out = await window.api.agent.compact(convId)
         if (out.status === 'compacted') {
           const k = out.foldedTokens >= 1000 ? `${Math.round(out.foldedTokens / 1000)}k` : `${out.foldedTokens}`
-          let anchored = false // set() runs synchronously — this records whether a receipt block landed
           set((s) => {
-            const msgs = (s.byConversation[convId] ?? []).map((m) => ({ ...m }))
-            let i = -1
-            for (let j = msgs.length - 1; j >= 0; j--) if (msgs[j].role === 'assistant') { i = j; break }
-            if (i < 0) return s // no assistant segment to anchor (degenerate history) — the toast below covers it
-            anchored = true
-            msgs[i] = { ...msgs[i], blocks: [...(msgs[i].blocks ?? []), { kind: 'compaction', tokens: out.foldedTokens, auto: false, manual: true }] }
-            return { byConversation: { ...s.byConversation, [convId]: msgs } }
+            // Settle the pending line into the receipt AND correct the composer meter in place: the fold
+            // replaced foldedTokens of history with a summaryTokens summary, so the measured context drops
+            // by the difference now (the next turn's real count_tokens supersedes this estimate).
+            const prev = s.contextTokens[convId] ?? 0
+            return {
+              byConversation: planted
+                ? { ...s.byConversation, [convId]: settlePending(s.byConversation[convId] ?? [], { kind: 'compaction', tokens: out.foldedTokens, auto: false, manual: true }) }
+                : s.byConversation,
+              contextTokens: prev > 0 ? { ...s.contextTokens, [convId]: Math.max(0, prev - out.foldedTokens + out.summaryTokens) } : s.contextTokens
+            }
           })
-          if (!anchored) toast.success(`Compacted — folded ${out.foldedMessages} messages (~${k} tokens) into the summary`)
+          if (!planted) toast.success(`Compacted — folded ${out.foldedMessages} messages (~${k} tokens) into the summary`)
         } else if (out.status === 'skipped') {
+          if (planted) set((s) => ({ byConversation: { ...s.byConversation, [convId]: settlePending(s.byConversation[convId] ?? []) } }))
           const copy: Record<string, string> = {
             busy: 'A compaction is already running for this conversation.',
             'too-few-messages': 'Nothing to compact yet — the history is already minimal.',
@@ -1105,9 +1127,11 @@ export const useChat = create<ChatState>((set, get) => {
           }
           toast.info(copy[out.reason] ?? 'Compaction skipped.')
         } else {
+          if (planted) set((s) => ({ byConversation: { ...s.byConversation, [convId]: settlePending(s.byConversation[convId] ?? []) } }))
           toast.error('Compaction failed — the conversation was left unchanged.')
         }
       } catch {
+        if (planted) set((s) => ({ byConversation: { ...s.byConversation, [convId]: settlePending(s.byConversation[convId] ?? []) } }))
         toast.error('Compaction failed — the conversation was left unchanged.')
       } finally {
         set((s) => ({ compacting: { ...s.compacting, [convId]: false } }))
