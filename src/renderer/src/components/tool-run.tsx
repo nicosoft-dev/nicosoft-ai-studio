@@ -102,6 +102,12 @@ function verbDone(t: ToolCall): string {
     case 'WebSearch': return 'Searched the web for'
     case 'Task': return 'Ran agent'
     case 'TodoWrite': return 'Updated todos'
+    // Async ops — 'used await_async' told the user nothing while a parked lens ran for an hour.
+    case 'launch_async': return 'Launched a background operation'
+    case 'await_async': return 'Waited for a background operation'
+    case 'EnterWorktree': return 'Entered an isolated worktree'
+    case 'ExitWorktree': return 'Left the isolated worktree'
+    case 'elect_lens_driver': return 'Registered the review driver'
     // Coordination internals — never leak the mechanism name (IndependentVerifier/GateBFailHandler/…)
     case 'IndependentVerifier': return 'Verified independently'
     case 'GateBFailHandler': return 'Reworked after failed verification'
@@ -131,6 +137,12 @@ function verbLive(t: ToolCall): string {
     case 'WebSearch': return 'Searching the web for'
     case 'Task': return 'Running agent'
     case 'TodoWrite': return 'Updating todos'
+    // Async ops — the await line is the segment's face for however long the background op runs.
+    case 'launch_async': return 'Launching a background operation'
+    case 'await_async': return 'Waiting for a background operation'
+    case 'EnterWorktree': return 'Entering an isolated worktree'
+    case 'ExitWorktree': return 'Leaving the isolated worktree'
+    case 'elect_lens_driver': return 'Registering the review driver'
     // Coordination internals — never leak the mechanism name as "Running GateBFailHandler"
     case 'IndependentVerifier': return 'Verifying independently'
     case 'GateBFailHandler': return 'Reworking after failed verification'
@@ -207,6 +219,17 @@ export function summarizeRun(tools: ToolCall[]): string {
         break
       case 'TodoWrite':
         bump('todos', () => 'updated todos')
+        break
+      // Async ops read as what they DID, not their tool id ("used await_async" was the dogfood complaint).
+      case 'launch_async':
+        bump('launched', (n) => plural(n, 'launched a background operation', 'launched {n} background operations'))
+        break
+      case 'await_async':
+        bump('awaited', (n) => plural(n, 'waited for a background operation', 'waited for {n} background operations'))
+        break
+      case 'EnterWorktree':
+      case 'ExitWorktree':
+        bump('worktree', () => 'switched worktrees')
         break
       default:
         bump(`other:${t.name}`, (n) => (n === 1 ? `used ${t.name}` : `used ${t.name} ×${n}`))

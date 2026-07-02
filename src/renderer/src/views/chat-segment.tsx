@@ -47,9 +47,22 @@ const TOOL_ACTIVITY: Record<string, string> = {
   lsp: 'Analyzing',
   Task: 'Delegating', agent_spawn: 'Delegating', agent_send: 'Delegating', agent_wait: 'Delegating',
   agent_batch: 'Delegating', agent_close: 'Delegating', assign_task: 'Delegating', send_message: 'Delegating', wait: 'Delegating',
+  elect_lens_driver: 'Delegating',
   route_decision: 'Routing',
-  schedule_create: 'Scheduling', schedule_delete: 'Scheduling', schedule_list: 'Scheduling',
-  AskUserQuestion: 'Waiting'
+  schedule_create: 'Scheduling', schedule_delete: 'Scheduling', schedule_list: 'Scheduling', schedule_wakeup: 'Scheduling',
+  monitor_start: 'Monitoring', monitor_stop: 'Monitoring',
+  // A parked/awaiting background op can hold the readout for many minutes (a solo lens review runs ~an hour)
+  // — 'Waiting' tells the truth; the old fallback read 'Working' the whole time (dogfood 2026-07-02).
+  await_async: 'Waiting', AskUserQuestion: 'Waiting',
+  launch_async: 'Launching',
+  EnterWorktree: 'Preparing', ExitWorktree: 'Preparing',
+  playwright_browser: 'Testing', playwright_request: 'Testing',
+  preview_navigate: 'Previewing', preview_click: 'Previewing', preview_fill: 'Previewing', preview_eval: 'Previewing',
+  preview_console: 'Previewing', preview_network: 'Previewing', preview_resize: 'Previewing', preview_inspect: 'Previewing',
+  preview_screenshot: 'Previewing', preview_snapshot: 'Previewing',
+  // Coordination/lens mechanism cards orphan-append as top-level tools, so the readout can land on them too.
+  StudioLens: 'Reviewing', Subject: 'Reviewing', SubjectRefute: 'Reviewing', PlanReview: 'Reviewing',
+  IndependentVerifier: 'Verifying', GateBFailHandler: 'Fixing'
 }
 function segmentActivity(tools?: ToolCall[]): string {
   // findLast, NOT find: the readout reflects the MOST RECENT activity. With find (first-running) a tool whose
