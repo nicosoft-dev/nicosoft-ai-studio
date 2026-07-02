@@ -32,7 +32,7 @@ import { disposePlaywrightSessionsOwnedBy } from '../agent/tools/playwright-brow
 import type { Tool } from '../agent/tool'
 import type { AgentRunInput } from '../ipc/contracts'
 import { manager as skillManager } from './skill.service'
-import { DEV_ROLES, PLAYWRIGHT_TOOLS, PREVIEW_AGENT_TOOLS, toolsForAgentRole } from './agent-tools'
+import { DEV_ROLES, PLAYWRIGHT_TOOLS, toolsForAgentRole } from './agent-tools'
 import { monitorService } from './monitor.service'
 import { selfRhythmService } from './self-rhythm.service'
 import { buildAgentSystem } from './agent-system'
@@ -308,7 +308,7 @@ export async function runCollabSession(
       stopServiceTool,
       serviceLogsTool,
       listServicesTool,
-      ...(DEV_ROLES.has(x.roleId) ? [lspTool as unknown as Tool, ...PLAYWRIGHT_TOOLS, ...PREVIEW_AGENT_TOOLS] : [])
+      ...(DEV_ROLES.has(x.roleId) ? [lspTool as unknown as Tool, ...PLAYWRIGHT_TOOLS] : []) // preview_* moved into toolsForAgentRole (universal)
     ]
     const serverTools: ServerToolSchema[] = x.protocol === 'openai' ? [{ type: 'web_search', name: 'web_search' }] : []
     const system = buildCollabSystem(
@@ -361,7 +361,8 @@ export async function runCollabSession(
           services: registry,
           async: asyncRegistry,
           lsp,
-          preview: DEV_ROLES.has(x.roleId) ? createPreviewHandle(convId, sig) : undefined,
+          // handle ⟺ tool (same self-enforcing pattern as panel below): kit decides who gets preview_*.
+          preview: tools.some((t) => t.name === 'preview_navigate') ? createPreviewHandle(convId, sig) : undefined,
           // 批B (dogfood2 P1): restore ctx.panel for collab implementers (批3 had nulled it). Solo-style handle so
           // an elected collaborator can drive the consolidated review from its OWN turn (批C wraps the studio_lens
           // tool in ctx.async for non-blocking launch + await_async suspend). Gated on the tool's presence —

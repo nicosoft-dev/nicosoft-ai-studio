@@ -39,7 +39,7 @@ import { hookContextFromAgent, baseHookPayload } from '../agent/hooks/adapter'
 import { fileWatchManager } from '../agent/hooks/file-watch'
 import * as skillService from './skill.service'
 import { manager as skillManager } from './skill.service'
-import { DEV_ROLES, PLAYWRIGHT_TOOLS, PREVIEW_AGENT_TOOLS, SERVICE_TOOLS, SUBAGENT_TOOLS, toolsForAgentRole } from './agent-tools'
+import { DEV_ROLES, PLAYWRIGHT_TOOLS, SERVICE_TOOLS, SUBAGENT_TOOLS, toolsForAgentRole } from './agent-tools'
 import { AsyncRegistry } from '../agent/async-registry'
 import { awaitAsyncTool } from '../agent/tools/await-async'
 import { launchAsyncTool } from '../agent/tools/launch-async'
@@ -400,7 +400,9 @@ export async function runAgentLoop(
     async: asyncReg, // launch_async/await_async (+ studio_lens launches through it when present)
     parkSolo: loop.parkSolo, // 批C2b: direct-chat solo cross-turn park; undefined for dispatched/collab → within-turn await
     lsp,
-    preview: DEV_ROLES.has(loop.roleId) ? createPreviewHandle(loop.convId, signal) : undefined,
+    // handle ⟺ tool (same self-enforcing pattern as panel below): the kit is the single source of truth
+    // for who gets preview_*; a fixed-kit run without the tools gets no handle.
+    preview: loop.tools.some((t) => t.name === 'preview_navigate') ? createPreviewHandle(loop.convId, signal) : undefined,
     // studio_lens bridge (studio-lens §4.1 / closure-loop decision ⑤) — inject the handle iff this run's kit
     // actually carries the studio_lens tool (every agent role now does; a fixed-kit verifier / sub-agent does
     // NOT). Handle-presence ⟺ tool-presence is the recursion guard: no tool → no handle, self-enforcing.
@@ -636,7 +638,7 @@ export async function runDispatchedAgent(
     tools = [...CORE_TOOLS, ...PLAYWRIGHT_TOOLS].filter((t) => allow.has(t.name))
   } else {
     tools = [...toolsForAgentRole(d.roleId), launchAsyncTool, awaitAsyncTool] // 批C2a: solo can launch/await async ops (studio_lens launches through ctx.async too)
-    if (DEV_ROLES.has(d.roleId)) tools = [...tools, ...SERVICE_TOOLS, ...PLAYWRIGHT_TOOLS, ...PREVIEW_AGENT_TOOLS, ...SUBAGENT_TOOLS, lspTool as unknown as Tool]
+    if (DEV_ROLES.has(d.roleId)) tools = [...tools, ...SERVICE_TOOLS, ...PLAYWRIGHT_TOOLS, ...SUBAGENT_TOOLS, lspTool as unknown as Tool] // preview_* moved into toolsForAgentRole (universal)
     if (!d.cwd && !DEV_ROLES.has(d.roleId)) tools = tools.filter((t) => t.name !== 'Read' && t.name !== 'Glob')
     // Session-pacing tools (monitor_start/monitor_stop/schedule_wakeup) belong to the SESSION OWNER — the solo
     // top-level run (agent.service.run) or a collab's parked experts (agent-collab) — both of which ARM bus

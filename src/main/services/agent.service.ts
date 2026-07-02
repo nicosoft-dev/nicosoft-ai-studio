@@ -36,7 +36,7 @@ import { pickSmallModel } from './model-select'
 import { recallText } from './project-map.service'
 import { countContext } from './token-count.service'
 import { manager as skillManager } from './skill.service'
-import { DEV_ROLES, ENGINEER_ROLE_ID, PLAYWRIGHT_TOOLS, PREVIEW_AGENT_TOOLS, SERVICE_TOOLS, SUBAGENT_TOOLS, toolsForAgentRole } from './agent-tools'
+import { DEV_ROLES, ENGINEER_ROLE_ID, PLAYWRIGHT_TOOLS, SERVICE_TOOLS, SUBAGENT_TOOLS, toolsForAgentRole } from './agent-tools'
 import { buildAgentSystem } from './agent-system'
 import { conversationToAgentMessages, runAgentLoop, type AgentCallbacks } from './agent-dispatch'
 import type { AgentContext } from '../agent/context'
@@ -71,7 +71,7 @@ export async function run(
   let submittedPrompt = input.prompt
   let userPromptContexts: string[] = []
   let tools = [...toolsForAgentRole(roleId), launchAsyncTool, awaitAsyncTool] // 批C2a: solo direct chat can launch/await async ops (studio_lens launches through ctx.async too)
-  if (DEV_ROLES.has(roleId)) tools = [...tools, ...SERVICE_TOOLS, ...PLAYWRIGHT_TOOLS, ...PREVIEW_AGENT_TOOLS, ...SUBAGENT_TOOLS, lspTool as unknown as Tool]
+  if (DEV_ROLES.has(roleId)) tools = [...tools, ...SERVICE_TOOLS, ...PLAYWRIGHT_TOOLS, ...SUBAGENT_TOOLS, lspTool as unknown as Tool] // preview_* moved into toolsForAgentRole (universal)
   // Read needs a folder boundary; without a cwd, drop it for non-dev roles so the model can't read the
   // process working dir. Dev roles (Flynn/Shuri) always have a cwd (required in the composer).
   if (!input.cwd && !DEV_ROLES.has(roleId)) tools = tools.filter((t) => t.name !== 'Read')

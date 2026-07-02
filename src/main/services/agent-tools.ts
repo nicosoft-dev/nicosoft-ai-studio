@@ -93,6 +93,12 @@ const MONITOR_TOOLS = [monitorStartTool, monitorStopTool, scheduleWakeupTool] as
 // blocking `Bash ... &` that wedges the loop and leaks the process.
 export const SERVICE_TOOLS = [startServiceTool, stopServiceTool, serviceLogsTool, listServicesTool] as unknown as Tool[]
 export const PLAYWRIGHT_TOOLS = [playwrightBrowserTool, playwrightRequestTool] as unknown as Tool[]
+// preview_* — UNIVERSAL across agent roles (user decision 2026-07-02): non-dev roles open the shared
+// Preview to COLLECT data (navigate a URL → snapshot/screenshot/console/network); dev roles additionally
+// pair it with start_service for local apps (SERVICE_TOOLS stays DEV_ROLES-only). Granted in
+// toolsForAgentRole below; the ctx.preview handle follows tool-presence at the injection sites
+// (handle ⟺ tool, same recursion-guard pattern as studio_lens), and sub-agents keep being stripped in
+// loop.ts — the Preview panel is a conversation-level surface, a child has no anchor for it.
 export const PREVIEW_AGENT_TOOLS = PREVIEW_TOOLS as unknown as Tool[]
 // Async sub-agent tools (batch 3) — only on top-level dev-role runs, which reach ctx.subAgents (set by
 // runAgentLoop). Sub-agents and collab experts don't get them: their ctx.subAgents is undefined (the loop
@@ -121,9 +127,10 @@ export function toolsForAgentRole(roleId: string): Tool[] {
   // so it does not get it; the runtime gate handles whether an independent reviewer can be formed.
   const panel = AGENT_ROLE_IDS.has(roleId) ? PANEL_TOOLS : []
   const visualize = AGENT_ROLE_IDS.has(roleId) ? VISUALIZE_TOOLS : []
+  const preview = AGENT_ROLE_IDS.has(roleId) ? PREVIEW_AGENT_TOOLS : []
   const monitor = AGENT_ROLE_IDS.has(roleId) ? MONITOR_TOOLS : []
   // remember_project_map — project memory's write side for every role incl. coordinator-direct (§4.6: seed when
   // none recorded / refresh when verified stale; app-DB only, read-only classified). Sub-agents are stripped in
   // loop.ts (a Task/async child sees a narrow slice by construction — exactly the write the prompt forbids).
-  return [...core, ...PLAN_TOOLS, askUserQuestionTool as unknown as Tool, rememberProjectMapTool as unknown as Tool, ...panel, ...visualize, ...monitor, ...mcpManager.toolsForRole(roleId), ...(skill ? [skill] : [])]
+  return [...core, ...PLAN_TOOLS, askUserQuestionTool as unknown as Tool, rememberProjectMapTool as unknown as Tool, ...panel, ...visualize, ...preview, ...monitor, ...mcpManager.toolsForRole(roleId), ...(skill ? [skill] : [])]
 }
