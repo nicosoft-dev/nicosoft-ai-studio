@@ -11,7 +11,7 @@ import { deriveAcceptanceCriteria } from './coordinator-route'
 import { gitHead, changedPathsSince } from './lens/diff'
 import type { WrittenFile } from '../agent/context'
 import { describeSnapshot, snapshotWorkspace } from './git-snapshot'
-import { runRoleStep, type RunStepOptions } from './coordinator-step'
+import { emitCoordinatorIntro, runRoleStep, type RunStepOptions } from './coordinator-step'
 import { ulid } from '../db/id'
 // Studio Lens (§3): the multi-lens fan-out is now the YAML engine — Gate-B drives it via runLensReview and
 // consumes the raw folded SubjectFinding[]. The SHARED single FLOOR verifier body stays in examine/verifier —
@@ -254,6 +254,19 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
     outputTokens += floorClosure.outputTokens
   }
   const subjectRoundsBudget = MAX_FIX_ROUNDS - (floorFailed ? 1 : 0)
+  // Narrate the examine → fix hand-off in Danny's voice — the SAME emitCoordinatorIntro beat every other gate
+  // transition uses (persisted, so it survives reload). Without it the transition is invisible: the verifier's
+  // visible text often reads PASS (the floor check) while the adversarial subjects still confirmed findings, so
+  // the fix segment opened with no visible reason at all (dogfood 2026-07-02 — "Turing 结束就到了 Flynn,没有原因").
+  // The findings' full detail stays on the Tasks-panel card; this beat carries the count + dimensions + who fixes.
+  if (failedSubjects.length > 0 && !opts.quiet) {
+    const dims = failedSubjects.map((lv) => lv.key).join(', ')
+    emitCoordinatorIntro(
+      opts.convId,
+      `**Adversarial review confirmed ${failedSubjects.length} finding${failedSubjects.length === 1 ? '' : 's'}** (${dims})${floorFailed ? ' on top of the failed floor check' : ' beyond the passed floor check'} — routing them to ${displayName(roleId)} for one consolidated fix round.`,
+      opts.cb
+    )
+  }
   const integrated = await integrateSubjectClosures(roleId, opts, gate, result.text, failedSubjects, subjectRoundsBudget, stepId, signal)
   inputTokens += integrated.inputTokens
   outputTokens += integrated.outputTokens
