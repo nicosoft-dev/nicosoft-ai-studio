@@ -79,9 +79,9 @@ export function WorkspaceDiff({ conv, activeExpert }: { conv: ConversationDto | 
     }
   }, [rootCwd, load])
 
-  if (resolving || (rootCwd && !loaded)) return <div className="ws-empty">{t('files.loading')}</div>
-  if (!rootCwd) return <div className="ws-empty">{t('files.noCwd')}</div>
-  if (!diff) return <div className="ws-empty">{t('diff.noRepo')}</div>
+  if (resolving || (rootCwd && !loaded)) return <div className="gd-empty">{t('files.loading')}</div>
+  if (!rootCwd) return <div className="gd-empty">{t('files.noCwd')}</div>
+  if (!diff) return <div className="gd-empty">{t('diff.noRepo')}</div>
 
   const additions = diff.files.reduce((s, f) => s + f.additions, 0)
   const deletions = diff.files.reduce((s, f) => s + f.deletions, 0)
@@ -120,7 +120,7 @@ export function WorkspaceDiff({ conv, activeExpert }: { conv: ConversationDto | 
       ) : null}
       {diff.patchesOmitted ? <div className="gd-notice">{t('diff.patchesOmitted')}</div> : null}
       {diff.files.length === 0 ? (
-        <div className="ws-empty">{t('diff.clean')}</div>
+        <div className="gd-empty">{t('diff.clean')}</div>
       ) : (
         <div className="gd-files">
           {diff.files.map((f) => (
