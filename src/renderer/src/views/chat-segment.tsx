@@ -220,8 +220,8 @@ function RunBody({ msgs, onOpenImage, live }: { msgs: ChatMessage[]; onOpenImage
         out.push(
           <div key={`c${m.id}:${bi}`} className="seg-compaction">
             {b.manual
-              ? <>🗜 Compacted on request · folded ~{k} tokens of older history into the summary</>
-              : <>🗜 Summarized older context · freed ~{k} tokens to stay within the window</>}
+              ? <>Compacted on request · folded ~{k} tokens of older history into the summary</>
+              : <>Summarized older context · freed ~{k} tokens to stay within the window</>}
           </div>
         )
         return
