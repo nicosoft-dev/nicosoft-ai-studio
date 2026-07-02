@@ -193,6 +193,44 @@ export interface ConvLens {
   event: AgentLlmEvent
 }
 
+// ---- Workspace git status/diff (docs/workspace-git-diff-design.md §2/§3) ----
+// Read-only DTOs behind the composer git chip + the Workspace Diff panel. Base semantics are CC-aligned
+// (§2): ± spans merge-base(origin/<branch>, HEAD) → working tree, so uncommitted AND unpushed changes
+// count together — the chip persists after a commit until the push zeroes it.
+export interface GitWorkStatus {
+  isRepo: boolean
+  branch: string | null // null = detached / unborn
+  dirty: boolean // any staged/unstaged/untracked change (porcelain probe, 5s memo)
+  additions: number // merge-base → working tree, incl. untracked within the §6 tiers
+  deletions: number
+  fileCount: number // changed files in that same span
+  ahead: number // commits not on origin/<branch> (rev-list --left-right --count)
+  behind: number
+  hasUpstream: boolean // origin/<branch> exists
+  hasRemote: boolean // any remote configured
+}
+export interface GitFileDiff {
+  path: string
+  oldPath?: string // renames (numstat `{a => b}` / `a => b` parsed)
+  status: 'added' | 'removed' | 'renamed' | 'modified'
+  additions: number
+  deletions: number
+  patch: string // '' = stubbed (binary / oversize / over-cap) — counts above remain authoritative
+}
+export interface GitWorkDiff {
+  branch: string | null
+  ahead: number
+  files: GitFileDiff[]
+  patchesOmitted: boolean // 5 MB overflow degraded patch bodies (the file list itself NEVER truncates)
+  unpushedSubjects: string[] // `git log base..HEAD --format=%s` — panel orientation header (§5.1)
+}
+// Pushed when a git-mutating Bash tool result lands for a conversation (agent-dispatch tool:post seam):
+// main has just invalidated that cwd's git memos — the renderer chip/panel should refresh now.
+export interface ConvGit {
+  convId: string
+  cwd: string
+}
+
 export interface PreviewOpenRequest {
   convId: string
   url?: string | null

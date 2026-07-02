@@ -10,7 +10,7 @@ import type { ConversationDto } from '@/lib/api'
 export function resolveConvCwd(
   conv: ConversationDto | null,
   cwdByExpert: Record<string, string>,
-  messages: { expertId: string | null }[]
+  messages: { expertId?: string | null }[]
 ): string | null {
   if (!conv) return null
   const primary = conv.primaryRoleId ? cwdByExpert[conv.primaryRoleId]?.trim() : ''

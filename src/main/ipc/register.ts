@@ -9,6 +9,7 @@ import { registerChatHandlers, abortAllChatRuns } from './chat.handler'
 import { registerMemoryHandlers } from './memory.handler'
 import { registerMediaHandlers } from './media.handler'
 import { registerFsHandlers } from './fs.handler'
+import { registerGitHandlers } from './git.handler'
 import { registerTaskHandlers } from './tasks.handler'
 import { registerTerminalHandlers } from './terminal.handler'
 import { registerMcpHandlers } from './mcp.handler'
@@ -35,6 +36,7 @@ export function registerIpc(): void {
   registerMemoryHandlers()
   registerMediaHandlers()
   registerFsHandlers()
+  registerGitHandlers()
   registerTaskHandlers()
   registerTerminalHandlers()
   registerMcpHandlers()

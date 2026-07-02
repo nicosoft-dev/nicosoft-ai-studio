@@ -48,6 +48,8 @@ import { recallText } from './project-map.service'
 import { setActiveServices, clearActiveServices, broadcastConvServices } from './active-services'
 import { createPreviewHandle } from './active-preview'
 import { broadcastConvLens } from '../ipc/lens-broadcast'
+import { broadcastConvGit } from '../ipc/git-broadcast'
+import { invalidateGitCaches } from './git.service'
 import * as workspaceTasks from './workspace-tasks.service'
 
 export interface AgentCallbacks {
@@ -225,6 +227,12 @@ export interface DrainedRun {
   toolImages: MessageAttachmentDto[]
 }
 
+// A Bash command that can change git state (CC's refresh-trigger list, workspace-git-diff §4.2/§10.3).
+// When its tool RESULT lands, the conv-cwd's git memos are invalidated + conv:git pushed so the composer
+// chip / Diff panel refresh immediately instead of waiting out a TTL. Read-only git (status/diff/log) is
+// deliberately absent — it can't change what the chip shows.
+const GIT_STATE_RE = /\bgit\s+(commit|push|pull|fetch|checkout|switch|branch|merge|rebase|reset|revert|cherry-pick|stash|apply|am|add|rm|mv|restore|tag|worktree)\b/
+
 export async function drainAgentRun(opts: {
   gen: AsyncGenerator<AgentEvent, AgentResult, void>
   ctx: AgentContext
@@ -243,6 +251,7 @@ export async function drainAgentRun(opts: {
   let outTokens = 0
   const toolImages: MessageAttachmentDto[] = [] // images any tool produced this run → assistant-message attachments
   const toolNames = new Map<string, string>() // tool_use id → name, to pair tool:post with its tool
+  const gitBashIds = new Set<string>() // tool_use ids of git-MUTATING Bash calls → invalidate+push on their result
   const toolCalls = { total: 0, errors: 0, byName: {} as Record<string, number> }
   let displayIndex = 0
   let result!: AgentResult
@@ -265,6 +274,7 @@ export async function drainAgentRun(opts: {
       for (const b of value.message.content) {
         if (isContentBlock(b) && b.type === 'tool_use') {
           toolNames.set(b.id, b.name)
+          if (b.name === 'Bash' && typeof b.input.command === 'string' && GIT_STATE_RE.test(b.input.command)) gitBashIds.add(b.id)
           toolCalls.total++
           toolCalls.byName[b.name] = (toolCalls.byName[b.name] ?? 0) + 1
           agentEvents.emit({ type: 'tool:pre', convId, roleId, tool: b.name, ts: Date.now() })
@@ -279,6 +289,13 @@ export async function drainAgentRun(opts: {
         if (isContentBlock(b) && b.type === 'tool_result') {
           if (b.is_error) toolCalls.errors++
           agentEvents.emit({ type: 'tool:post', convId, roleId, tool: toolNames.get(b.tool_use_id) ?? 'unknown', isError: b.is_error ?? false, ts: Date.now() })
+          // A git-mutating Bash result just landed (workspace-git-diff §4.2): drop this cwd's git memos and
+          // push conv:git so the composer chip / Diff panel refresh NOW — CC's event-push invalidation, on
+          // the one seam every mode (solo / dispatched / collab) drains through.
+          if (gitBashIds.delete(b.tool_use_id)) {
+            invalidateGitCaches(ctx.cwd)
+            broadcastConvGit(convId, ctx.cwd)
+          }
           const { attachments, redacted } = await persistToolResultImages(convId, b)
           for (const att of attachments) {
             toolImages.push(att)

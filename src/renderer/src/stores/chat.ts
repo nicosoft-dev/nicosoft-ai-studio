@@ -27,6 +27,14 @@ const runMeta = new Map<string, { convId: string; kind: 'agent' | 'coordinator';
 let creating = false // sync guard: blocks a double-create when a fresh thread's first message fires twice
 let listening = false
 
+// Post-turn git refresh ping (workspace-git-diff §4): a settled turn may have changed files or git state —
+// nudge the git-status store to re-ask now (its ask lands on main's TTL memos, so this is cheap; the
+// git-Bash case was already push-invalidated via conv:git). A window event, not an import: chat.ts must
+// not depend on the git store (it would be a cycle the moment the chip reads chat state).
+const pingTurnSettled = (convId: string): void => {
+  window.dispatchEvent(new CustomEvent('nsai:turn-settled', { detail: { convId } }))
+}
+
 export const useChat = create<ChatState>((set, get) => {
   // Append a text delta into a message's ordered block list: extend the trailing text block, or open a new
   // one if the list is empty or ends in a tool block (text emitted AFTER a tool call → its own segment, so
@@ -209,6 +217,7 @@ export const useChat = create<ChatState>((set, get) => {
           retry: { ...s.retry, [meta.convId]: null }
         }
       })
+      pingTurnSettled(meta.convId)
       const ctxTok = d.inputTokens
       if (typeof ctxTok === 'number')
         set((s) => ({ contextTokens: { ...s.contextTokens, [meta.convId]: ctxTok } }))
@@ -456,6 +465,7 @@ export const useChat = create<ChatState>((set, get) => {
           contextTokens: typeof lastCtx === 'number' ? { ...s.contextTokens, [meta.convId]: lastCtx } : s.contextTokens
         }
       })
+      pingTurnSettled(meta.convId)
       void get().loadConversations() // bump title / updated_at
     })
     at.onError((d) => {
@@ -704,6 +714,7 @@ export const useChat = create<ChatState>((set, get) => {
         permission: { ...s.permission, [convId]: null }
       }
     })
+    pingTurnSettled(convId) // an errored run may still have changed files before failing
   }
 
   return {
@@ -1009,6 +1020,7 @@ export const useChat = create<ChatState>((set, get) => {
           approvals: { ...s.approvals, [cid]: [] } // drop stale coordinator approval cards from the killed run
         }
       })
+      pingTurnSettled(cid) // a stopped run may have already changed files
     },
 
     respondPermission: (convId, allow) => {

@@ -1452,6 +1452,48 @@
 .ws-empty { font-size: 12px; color: var(--text-4); line-height: 1.5; }
 
 /* ============================================================
+   Workspace · git chip (composer) + Diff panel (workspace-git-diff §5)
+   ============================================================ */
+/* Composer path row — PathBar left, git chip right, one line. */
+.cmp-path-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cmp-path-row .path-bar { min-width: 0; }
+.git-chip { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; flex: 0 0 auto; }
+.git-chip-counts { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.git-add { color: var(--success); }
+.git-del { color: var(--error); }
+.git-chip-act { font-size: 11.5px; padding: 3px 9px; border-radius: var(--r-sm); border: 1px solid var(--border-2); background: var(--bg-2); color: var(--text-2); cursor: pointer; white-space: nowrap; }
+.git-chip-act:hover:not(:disabled) { color: var(--text-1); background: var(--bg-3); }
+.git-chip-act:disabled { opacity: 0.5; cursor: default; }
+
+.ws-diff { flex: 1; display: flex; flex-direction: column; overflow-y: auto; padding: 8px 10px; gap: 8px; }
+.gd-header { display: flex; align-items: center; gap: 8px; min-height: 26px; flex: 0 0 auto; }
+.gd-branch { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); font-size: 12px; min-width: 0; }
+.gd-branch-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
+.gd-filecount { color: var(--text-4); font-size: 11.5px; white-space: nowrap; }
+.gd-unpushed { border: 1px solid var(--border-1); border-radius: var(--r-md); padding: 7px 10px; display: flex; flex-direction: column; gap: 3px; flex: 0 0 auto; }
+.gd-unpushed-title { font-size: 11.5px; color: var(--text-3); }
+.gd-unpushed-subject { font-size: 12px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gd-notice { font-size: 11.5px; color: var(--text-3); flex: 0 0 auto; }
+.gd-files { display: flex; flex-direction: column; gap: 6px; }
+.gd-file { border: 1px solid var(--border-1); border-radius: var(--r-md); overflow: hidden; flex: 0 0 auto; }
+.gd-file-head { display: flex; align-items: center; gap: 7px; width: 100%; padding: 6px 9px; background: none; border: none; cursor: pointer; text-align: left; color: var(--text-2); }
+.gd-file-head:hover { background: var(--bg-2); }
+.gd-caret { flex: 0 0 auto; transition: transform 0.12s ease; color: var(--text-4); }
+.gd-caret.open { transform: rotate(90deg); }
+.gd-status { flex: 0 0 auto; font-size: 10px; font-weight: 600; font-family: var(--mono); padding: 1px 5px; border-radius: var(--r-sm); border: 1px solid var(--border-2); color: var(--text-3); }
+.gd-status.added { color: var(--success); border-color: color-mix(in oklch, var(--success) 45%, var(--border-2)); }
+.gd-status.removed { color: var(--error); border-color: color-mix(in oklch, var(--error) 45%, var(--border-2)); }
+.gd-status.renamed { color: var(--warning); border-color: color-mix(in oklch, var(--warning) 45%, var(--border-2)); }
+.gd-path { flex: 1; min-width: 0; font-size: 12px; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gd-patch { margin: 0; padding: 6px 0; border-top: 1px solid var(--border-1); font-size: 11.5px; line-height: 1.5; overflow-x: auto; font-family: var(--mono); }
+.gd-line { padding: 0 10px; white-space: pre; }
+.gd-line.add { background: color-mix(in oklch, var(--success) 12%, transparent); }
+.gd-line.del { background: color-mix(in oklch, var(--error) 12%, transparent); }
+.gd-line.hunk { color: var(--text-3); background: var(--bg-2); }
+.gd-line.meta { color: var(--text-4); }
+.gd-stub { padding: 8px 10px; border-top: 1px solid var(--border-1); font-size: 11.5px; color: var(--text-4); }
+
+/* ============================================================
    Projects
    ============================================================ */
 .proj-list-body, .proj-detail-body { flex: 1; overflow-y: auto; padding: 24px 28px 32px; }

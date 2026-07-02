@@ -9,6 +9,8 @@ import { AttachmentStrip } from '@/components/attachment-strip'
 import { ModelPicker, ThinkingPicker, ImageModelPicker, ModePicker } from '@/components/composer-controls'
 import { CommandPalette, matchCommands, type SlashCommand } from '@/components/command-palette'
 import { PathBar } from '@/components/path-bar'
+import { GitStatusChip } from '@/components/git-status-chip'
+import { resolveConvCwd } from '@/lib/resolve-cwd'
 import { useWorkspace } from '@/stores/workspace'
 import { useMemoryCloud } from '@/stores/memory-cloud'
 import { useChat, roleHasAgent, roleHasImageGen } from '@/stores/chat'
@@ -64,6 +66,7 @@ export function Composer({
   const chat = useChat()
   const b = useRoleBinding(expert)
   const cwd = useWorkspace((s) => s.cwdByExpert[expert.id] ?? '')
+  const cwdByExpert = useWorkspace((s) => s.cwdByExpert)
   const setCwd = useWorkspace((s) => s.setCwd)
   const mode = useWorkspace((s) => s.modeByExpert[expert.id] ?? 'default')
   const setMode = useWorkspace((s) => s.setMode)
@@ -156,13 +159,10 @@ export function Composer({
     }
   }, [])
 
-  const send = (): void => {
-    const text = value.trim()
-    if ((!text && attach.length === 0) || !ready || streaming || compacting) return // compacting: the send slot is a Stop button — Enter stays consistent with it
-    setValue('')
-    setTimeout(grow, 0)
-    const images = attach.map((a) => ({ dataUrl: a.dataUrl, mime: a.mime, name: a.name }))
-    setAttach([])
+  // The one send payload builder — the typed-text path (send) and the git chip's preset instructions
+  // (visible user messages riding the SAME turn machinery) both go through here, so binding/model/
+  // thinking/mode always come from the current UI state.
+  const dispatchSend = (text: string, images?: { dataUrl: string; mime: string; name: string }[]): void => {
     const thinking = resolveThinking(getThinkingCapability(b.family, b.model), effectiveDepth) ?? undefined
     void chat.send({
       expertId: expert.id,
@@ -170,13 +170,34 @@ export function Composer({
       model: b.model,
       thinking,
       text,
-      images: images.length ? images : undefined,
+      images: images?.length ? images : undefined,
       cwd: agent ? cwd : undefined,
       contextWindow: agent ? b.contextLength || undefined : undefined,
       permissionMode: agent ? mode : undefined,
       imageModel: roleHasImageGen(expert.id) ? b.imageModel : undefined
     })
   }
+
+  const send = (): void => {
+    const text = value.trim()
+    if ((!text && attach.length === 0) || !ready || streaming || compacting) return // compacting: the send slot is a Stop button — Enter stays consistent with it
+    setValue('')
+    setTimeout(grow, 0)
+    const images = attach.map((a) => ({ dataUrl: a.dataUrl, mime: a.mime, name: a.name }))
+    setAttach([])
+    dispatchSend(text, images)
+  }
+
+  // Git chip action: hand the commit/push work to this conversation's agent as a normal, visible turn.
+  const sendGitPreset = (preset: string): void => {
+    if (!ready || streaming || compacting) return
+    dispatchSend(preset)
+  }
+  // The chip reads the CONVERSATION's cwd (resolveConvCwd — the same resolver the Files/Diff panels use):
+  // for a solo conv that IS the PathBar's cwd; for coordinator/collab convs it falls back to the first
+  // participating role with a folder. Greeting (no conversation yet) → the composer's own cwd.
+  const conv = chat.conversations.find((c) => c.id === activeConv) ?? null
+  const gitCwd = conv ? resolveConvCwd(conv, cwdByExpert, messages) : cwd.trim() || null
 
   // Slash-command palette (optimization E): `/` at the start (no space yet) opens a quick-action menu.
   // Single-line `/…` input opens the palette; matchCommands does the precise filtering (so prose like
@@ -217,8 +238,12 @@ export function Composer({
         ) : null}
         {/* Folder picker on every chat — per-role cwd (cwdByExpert). For agent roles it's the working
             dir + restricted-read boundary (required before sending); for chat-only roles it's optional
-            and persisted now, taking effect once that role gets an agent. */}
-        <PathBar cwd={cwd} onPick={(dir) => setCwd(expert.id, dir)} />
+            and persisted now, taking effect once that role gets an agent. The git chip beside it shows
+            the CC-style working ± + Commit/Push handoff button for agent roles with a repo cwd. */}
+        <div className="cmp-path-row">
+          <PathBar cwd={cwd} onPick={(dir) => setCwd(expert.id, dir)} />
+          {agent ? <GitStatusChip cwd={gitCwd} disabled={!ready || streaming || compacting} onAction={sendGitPreset} /> : null}
+        </div>
         <div
           className={'composer2' + (ready ? '' : ' disabled') + (dragDepth > 0 ? ' dragging' : '')}
           onDragEnter={(e) => {

@@ -106,7 +106,10 @@ import type {
   PreviewStatusDto,
   ConvPreviewStatus,
   PlaywrightAvailabilityDto,
-  CompactOutcome
+  CompactOutcome,
+  GitWorkStatus,
+  GitWorkDiff,
+  ConvGit
 } from '../main/ipc/contracts'
 
 // Typed bridge exposed to the renderer as `window.api`. Window controls (Batch 0) + Batch 1
@@ -184,6 +187,16 @@ const api = {
   },
   // Files tree live-refresh: main fires this (debounced) when the watched root's contents change.
   onFsChanged: (cb: (d: FsChanged) => void): (() => void) => agentListen('fs:changed', cb),
+
+  // Workspace git status/diff (composer chip + Diff panel) — read-only; cwd is the renderer-resolved conv
+  // cwd (resolveConvCwd). Both land on main's TTL memos, so polling is cheap by construction.
+  git: {
+    status: (cwd: string): Promise<GitWorkStatus | null> => ipcRenderer.invoke('git:status', cwd),
+    diff: (cwd: string): Promise<GitWorkDiff | null> => ipcRenderer.invoke('git:diff', cwd)
+  },
+  // A git-mutating Bash tool result landed for this conversation — main invalidated its git memos; the
+  // chip/panel should refresh immediately instead of waiting out their poll interval.
+  onConvGit: (cb: (d: ConvGit) => void): (() => void) => agentListen('conv:git', cb),
 
   // Workspace Tasks panel history (completed-phase snapshots + studio_lens verdicts), per conversation.
   tasks: {

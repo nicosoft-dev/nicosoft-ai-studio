@@ -11,11 +11,12 @@ import { useChat } from '@/stores/chat'
 import { useT } from '@/stores/locale'
 import { WorkspaceTasks } from '@/views/workspace-tasks'
 import { WorkspaceFiles } from '@/views/workspace-files'
+import { WorkspaceDiff } from '@/views/workspace-diff'
 import { WorkspaceTerminal } from '@/views/workspace-terminal'
 import { WorkspacePreview } from '@/views/workspace-preview'
 import type { PreviewOpenEvent } from '@/lib/preview-api'
 
-export type WorkspacePanel = 'menu' | 'tasks' | 'files' | 'terminal' | 'preview'
+export type WorkspacePanel = 'menu' | 'tasks' | 'files' | 'diff' | 'terminal' | 'preview'
 
 const MIN_W = 290
 // max 60vw so the drawer can never crush the main chat area on a small window.
@@ -81,6 +82,7 @@ export function WorkspaceDrawer({
     menu: 'topbar.workspace',
     tasks: 'workspace.tasks',
     files: 'workspace.files',
+    diff: 'workspace.diff',
     terminal: 'workspace.terminal',
     preview: 'workspace.preview'
   }
@@ -105,6 +107,8 @@ export function WorkspaceDrawer({
         <WorkspaceTasks activeConv={activeConv} />
       ) : panel === 'files' ? (
         <WorkspaceFiles conv={conv} activeExpert={activeExpert} />
+      ) : panel === 'diff' ? (
+        <WorkspaceDiff conv={conv} activeExpert={activeExpert} />
       ) : panel === 'terminal' ? (
         <WorkspaceTerminal conv={conv} activeExpert={activeExpert} />
       ) : null}
@@ -126,6 +130,7 @@ function Launcher({ onPick }: { onPick: (p: WorkspacePanel) => void }): ReactEle
   const entries: { panel: WorkspacePanel; icon: (typeof Icons)[string]; label: string; kbd: string }[] = [
     { panel: 'tasks', icon: Icons.listChecks, label: t('workspace.tasks'), kbd: '⌘J' },
     { panel: 'files', icon: Icons.folder, label: t('workspace.files'), kbd: '⌘P' },
+    { panel: 'diff', icon: Icons.gitBranch, label: t('workspace.diff'), kbd: '⌘⇧D' },
     { panel: 'terminal', icon: Icons.terminal, label: t('workspace.terminal'), kbd: '⌃`' },
     { panel: 'preview', icon: Icons.globe, label: t('workspace.preview'), kbd: '⌘⇧V' }
   ]

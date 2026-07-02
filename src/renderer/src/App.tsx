@@ -132,7 +132,7 @@ export default function App(): ReactElement {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // Workspace panel shortcuts (Files ⌘P / Tasks ⌘J / Terminal ⌃` / Preview ⌘⇧V). Only in the conversation view (the
+  // Workspace panel shortcuts (Files ⌘P / Tasks ⌘J / Terminal ⌃` / Preview ⌘⇧V / Diff ⌘⇧D). Only in the conversation view (the
   // drawer lives there). Two guards (design §1):
   //  - Focus guard (P23): never hijack a key while focus is in an editable field (composer textarea,
   //    xterm's hidden textarea, any contentEditable) — `editable` short-circuits before we preventDefault.
@@ -169,6 +169,11 @@ export default function App(): ReactElement {
       } else if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'v') {
         e.preventDefault()
         togglePanel('preview')
+      } else if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'd') {
+        // ⌘⇧D — verified free: not bound by the default app menu (⌘R/⌘⇧R/⌥⌘I/…), cmdk (⌘K) or any
+        // panel shortcut above; same modifier pattern as Preview's ⌘⇧V.
+        e.preventDefault()
+        togglePanel('diff')
       }
     }
     window.addEventListener('keydown', onKey)
