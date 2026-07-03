@@ -131,6 +131,7 @@ export interface ChatState {
   loadConversations: () => Promise<void>
   openConversation: (convId: string) => Promise<void>
   newConversation: () => void
+  insertCard: (convId: string, card: { id: string; content: string; segmentKind: string }) => void // slot a persisted card row (e.g. /workflow launch) into the live list without disturbing a streaming tail
   send: (opts: SendOpts) => Promise<void>
   stop: () => void
   compactNow: (convId: string) => Promise<void> // manual /compact — awaits the fold, shows the receipt/skip reason

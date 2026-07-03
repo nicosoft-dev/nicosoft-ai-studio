@@ -245,7 +245,9 @@
 .cmd-item { display: flex; align-items: baseline; gap: 10px; padding: 7px 11px; border-radius: 7px; cursor: pointer; }
 .cmd-item.active { background: var(--bg-3); }
 .cmd-name { color: var(--text-1); font-weight: 600; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 13px; }
-.cmd-desc { color: var(--text-3); font-size: 12px; }
+.cmd-desc { color: var(--text-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* workflow entries: right-aligned params preview (prototype Screen 4 `.m-cmd .params`) */
+.cmd-params { margin-left: auto; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; color: var(--text-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; flex-shrink: 0; }
 
 /* top toolbar */
 /* flex-wrap: at narrow widths (small window + open drawer) the pickers + meter exceed the row —
@@ -2004,3 +2006,19 @@ select.wf-cell { appearance: auto; }
 .wf-runrow.clickable:hover { background: var(--bg-2); color: var(--text-1); }
 .wf-runrow.current { color: var(--text-1); }
 .wf-runrow small { color: var(--text-4); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* /workflow launch card — the record a composer-launched run leaves in the conversation (§6.5).
+   wf-card's simple form: one bordered row, mono name + param chips + live status dot + open hint. */
+.segment.wfl { padding: 2px 0; }
+.wfl-card {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; cursor: pointer;
+  border: 1px solid var(--border-1); border-radius: var(--r-md); background: var(--bg-1);
+  padding: 8px 12px; font-size: 12.5px; color: var(--text-2); min-width: 0;
+}
+.wfl-card:hover { border-color: var(--border-2); background: var(--bg-2); }
+.wfl-icon { color: var(--text-4); display: inline-flex; flex-shrink: 0; }
+.wfl-name { font-family: var(--mono); font-size: 12px; color: var(--text-1); flex-shrink: 0; }
+.wfl-param { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wfl-status { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11px; color: var(--text-3); margin-left: auto; flex-shrink: 0; }
+.wfl-open { color: var(--text-4); font-size: 11.5px; flex-shrink: 0; }
+.wfl-card:hover .wfl-open { color: var(--accent); }

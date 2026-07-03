@@ -197,7 +197,13 @@ function runReducer(state: LiveMap, ev: RunEvent): LiveMap {
 
 type Sub = { kind: 'list' } | { kind: 'edit'; id: string | null } | { kind: 'run'; workflowId: string; runId: string }
 
-export function WorkflowsView(): ReactElement {
+export function WorkflowsView({
+  runRequest = null
+}: {
+  // External open request (a chat launch card clicked → App switches view + passes this): nonce marks
+  // each click so the same run can be reopened after navigating away within the view.
+  runRequest?: { workflowId: string; runId: string; nonce: number } | null
+}): ReactElement {
   const [sub, setSub] = useState<Sub>({ kind: 'list' })
   const [items, setItems] = useState<WorkflowDto[]>([])
   const [live, dispatch] = useReducer(runReducer, {})
@@ -205,6 +211,9 @@ export function WorkflowsView(): ReactElement {
     void window.api.workflows.list().then(setItems).catch(() => {})
   }
   useEffect(reload, [])
+  useEffect(() => {
+    if (runRequest) setSub({ kind: 'run', workflowId: runRequest.workflowId, runId: runRequest.runId })
+  }, [runRequest?.nonce])
   useEffect(
     () =>
       window.api.workflows.onRunEvent((ev) => {

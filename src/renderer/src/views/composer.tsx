@@ -8,6 +8,8 @@ import { Icons } from '@/components/icons'
 import { AttachmentStrip } from '@/components/attachment-strip'
 import { ModelPicker, ThinkingPicker, ImageModelPicker, ModePicker } from '@/components/composer-controls'
 import { CommandPalette, matchCommands, type SlashCommand } from '@/components/command-palette'
+import { workflowCommandSpecs, parseWorkflowArgs, launchPayload, type WfCmdWorkflow } from '@/lib/workflow-command'
+import { toast } from '@/stores/toast'
 import { PathBar } from '@/components/path-bar'
 import { GitStatusChip } from '@/components/git-status-chip'
 import { resolveConvCwd } from '@/lib/resolve-cwd'
@@ -244,16 +246,86 @@ export function Composer({
     ? resolveConvCwd(conv, { ...cwdByExpert, [expert.id]: effectiveCwd }, messages)
     : effectiveCwd.trim() || null
 
+  // `/workflow <name> [k=v …]` (workflow-design §6.5): every ENABLED workflow surfaces as a palette
+  // command (drafts/disabled never do — §9 red line). The list is fetched when the palette opens, so a
+  // just-enabled workflow appears without a view switch. Running/validation lives in launchWorkflow via
+  // a latest-closure ref (same pattern as sendPromptRef) — the fetched entries never go stale on conv switch.
+  const launchWorkflow = (w: WfCmdWorkflow, arg?: string): boolean | undefined => {
+    const parsed = parseWorkflowArgs(w.params, arg)
+    if (!parsed.ok) {
+      const err = parsed.error
+      toast.error(
+        err.kind === 'unknown'
+          ? t('wf.unknownParam', { name: err.name })
+          : err.kind === 'missing'
+            ? t('wf.missingParam', { name: err.name })
+            : err.kind === 'bad-value'
+              ? t('wf.badParam', { name: err.name })
+              : t('wf.malformedArg', { token: err.token })
+      )
+      return false // keep the typed command in the composer so the user fixes it in place
+    }
+    const convId = activeConv
+    void (async () => {
+      try {
+        const { runId } = await window.api.workflows.run(w.id, parsed.values, 'command')
+        if (convId) {
+          // The launch card: a persisted row in THIS conversation (segmentKind='workflow-launch') whose
+          // renderer shows live status + links to the run panel. No conversation open yet → the run
+          // still starts; a toast points at the Workflows view instead of minting a card-only conv.
+          const dto = await window.api.conversations.append(convId, {
+            author: 'expert',
+            content: launchPayload(w.id, runId, w.name, parsed.values),
+            segmentKind: 'workflow-launch'
+          })
+          chat.insertCard(convId, { id: dto.id, content: dto.content, segmentKind: 'workflow-launch' })
+        } else {
+          toast.success(t('wf.started', { name: w.name }))
+        }
+      } catch (err) {
+        toast.error(t('wf.startFailed', { name: w.name, message: err instanceof Error ? err.message : String(err) }))
+      }
+    })()
+    return undefined
+  }
+  const launchWorkflowRef = useRef(launchWorkflow)
+  launchWorkflowRef.current = launchWorkflow
+  const [wfCommands, setWfCommands] = useState<SlashCommand[]>([])
+  const paletteRelevant = value.startsWith('/') && !value.includes('\n')
+  useEffect(() => {
+    if (!paletteRelevant) return
+    let alive = true
+    void window.api.workflows
+      .list()
+      .then((list) => {
+        if (!alive) return
+        setWfCommands(
+          workflowCommandSpecs(list).map((spec) => ({
+            name: spec.name,
+            desc: spec.desc,
+            takesArg: true,
+            params: spec.params,
+            complete: spec.complete,
+            run: (_ctx, arg) => launchWorkflowRef.current(spec.wf, arg)
+          }))
+        )
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [paletteRelevant])
+
   // Slash-command palette (optimization E): `/` at the start (no space yet) opens a quick-action menu.
   // Single-line `/…` input opens the palette; matchCommands does the precise filtering (so prose like
   // "/clear the cache" yields no match → closed), and multi-word commands like `/mode Ask` keep it open.
-  const cmdQuery = value.startsWith('/') && !value.includes('\n') ? value : ''
-  const cmdMatches = cmdQuery ? matchCommands(cmdQuery) : []
+  const cmdQuery = paletteRelevant ? value : ''
+  const cmdMatches = cmdQuery ? matchCommands(cmdQuery, wfCommands) : []
   const cmdOpen = cmdMatches.length > 0
   const runCommand = (cmd: SlashCommand): void => {
     // arg = whatever the user typed after the command name (e.g. "Ask" in "/mode Ask"); undefined if none.
     const arg = value.replace(/^\//, '').slice(cmd.name.length).trim() || undefined
-    cmd.run({
+    const outcome = cmd.run({
       newConversation: chat.newConversation,
       compact: () => {
         // Store action (not a bare IPC call): it owns the "Compacting…" readout, the receipt block and
@@ -264,6 +336,7 @@ export function Composer({
       setMode: (m) => setMode(expert.id, m),
       openMemoryCloud: () => useMemoryCloud.getState().show()
     }, arg)
+    if (outcome === false) return // validation failed (workflow args) — input stays for in-place fixing
     setValue('')
     setCmdIndex(0)
     setTimeout(grow, 0)
@@ -345,6 +418,19 @@ export function Composer({
                 if (e.key === 'ArrowUp') {
                   e.preventDefault()
                   setCmdIndex((i) => Math.max(i - 1, 0))
+                  return
+                }
+                // Workflow entries with params: Tab fills the `k=v` defaults template for inline editing
+                // (§6.5 "Tab 内联改参"); Enter runs. Commands without a template keep Enter=Tab=run.
+                if (e.key === 'Tab' && !native.isComposing && cmdMatches[cmdIndex]?.complete) {
+                  e.preventDefault()
+                  const filled = cmdMatches[cmdIndex].complete
+                  setValue(filled)
+                  setCmdIndex(0)
+                  setTimeout(() => {
+                    grow()
+                    taRef.current?.setSelectionRange(filled.length, filled.length) // caret to the end — React keeps the old (shorter) offset otherwise
+                  }, 0)
                   return
                 }
                 if ((e.key === 'Enter' || e.key === 'Tab') && !native.isComposing) {

@@ -19,7 +19,10 @@ export interface SlashCommand {
   name: string
   desc: string
   takesArg?: boolean // when true, the palette stays open as the user types an argument (e.g. `/mode Ask`)
-  run: (ctx: CommandContext, arg?: string) => void
+  params?: string // right-aligned mono preview (e.g. a workflow's `url=… days=7` defaults)
+  complete?: string // Tab fills the composer with this template for inline editing instead of running
+  // Returning false keeps the composer input (validation failed — the user fixes it in place).
+  run: (ctx: CommandContext, arg?: string) => void | boolean
 }
 
 const SLASH_COMMANDS: SlashCommand[] = [
@@ -43,10 +46,11 @@ const SLASH_COMMANDS: SlashCommand[] = [
 ]
 
 // Match the typed query (with or without a leading slash) against command names by prefix (case-insensitive,
-// so `/mode a` matches `mode Ask`/`mode Auto`).
-export function matchCommands(query: string): SlashCommand[] {
+// so `/mode a` matches `mode Ask`/`mode Auto`). `extra` appends dynamic entries — the composer feeds the
+// enabled workflows in as `workflow <name>` commands (workflow-design §6.5).
+export function matchCommands(query: string, extra: SlashCommand[] = []): SlashCommand[] {
   const q = query.replace(/^\//, '').toLowerCase()
-  return SLASH_COMMANDS.filter((cmd) => {
+  return [...SLASH_COMMANDS, ...extra].filter((cmd) => {
     const n = cmd.name.toLowerCase()
     // normal name-prefix match; arg-taking commands also stay matched once the user types an argument
     // (`/mode Ask`) — non-arg commands do NOT, so prose like "/clear the cache" is not treated as a command.
@@ -80,6 +84,7 @@ export function CommandPalette({
         >
           <span className="cmd-name">/{cmd.name}</span>
           <span className="cmd-desc">{cmd.desc}</span>
+          {cmd.params ? <span className="cmd-params">{cmd.params}</span> : null}
         </div>
       ))}
     </div>

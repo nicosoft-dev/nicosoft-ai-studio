@@ -11,6 +11,7 @@ import { ServerBubble, Sources } from '@/components/tool-bubble'
 import { ToolRun, OMIT_WHEN_DONE, INLINE_SURFACE } from '@/components/tool-run'
 import { WidgetCard } from '@/components/widget-card'
 import { ChunkedMarkdown } from '@/components/markdown'
+import { WorkflowLaunchCard } from '@/components/workflow-launch-card'
 import { useT } from '@/stores/locale'
 import { isSynthesis, groupRuns, sameChain, segmentFolds } from '@/stores/chat-helpers'
 import type { Expert } from '@/types'
@@ -366,6 +367,16 @@ export function ChatSegment({
   useEffect(() => {
     if (windowed && bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight
   }, [last.text, last.tools?.length, last.servers?.length, last.streaming, msgs.length, windowed])
+  // A `/workflow` launch record (workflow-design §6.5): a system card linking to the run panel — not an
+  // utterance, so no avatar/name chip/readout. Placed AFTER every hook so the hook order stays stable
+  // across message kinds. segmentKind is a merge condition (chat-helpers), so the card is always alone.
+  if (!isUser && first.segmentKind === 'workflow-launch') {
+    return (
+      <div className="segment wfl">
+        <WorkflowLaunchCard content={first.text} />
+      </div>
+    )
+  }
   return (
     <div className={'segment' + (isUser ? ' user' : '')} style={{ '--seg-color': segColor } as CSSProperties}>
       <div className="seg-head">

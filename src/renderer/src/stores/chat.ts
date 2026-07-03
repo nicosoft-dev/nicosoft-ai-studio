@@ -798,6 +798,19 @@ export const useChat = create<ChatState>((set, get) => {
     },
 
     newConversation: () => set({ activeConv: null }),
+    // Slot an already-PERSISTED card row (e.g. a /workflow launch card appended via conversations:append)
+    // into the live message list. Every delta handler writes to msgs[msgs.length-1] — a streaming tail
+    // must stay the tail, so the card lands just before it (chronologically right too: the launch
+    // happened while that turn was still writing). Reload rebuilds the same order from the DB rows.
+    insertCard: (convId, card) => {
+      set((s) => {
+        const msgs = [...(s.byConversation[convId] ?? [])]
+        const msg: ChatMessage = { id: card.id, role: 'assistant', text: card.content, expertId: null, dispatch: null, segmentKind: card.segmentKind }
+        if (msgs.length && msgs[msgs.length - 1].streaming) msgs.splice(msgs.length - 1, 0, msg)
+        else msgs.push(msg)
+        return { byConversation: { ...s.byConversation, [convId]: msgs } }
+      })
+    },
 
     send: async ({ expertId, endpointId, model, thinking, text, images, cwd, contextWindow, permissionMode, imageModel }) => {
       ensureListeners()
@@ -1084,7 +1097,9 @@ export const useChat = create<ChatState>((set, get) => {
       set((s) => {
         const msgs = (s.byConversation[convId] ?? []).map((m) => ({ ...m }))
         let i = -1
-        for (let j = msgs.length - 1; j >= 0; j--) if (msgs[j].role === 'assistant') { i = j; break }
+        // Card rows (workflow launch records) are role 'assistant' but not turns — the receipt anchors
+        // to the newest REAL assistant segment, never to a card (whose renderer shows no blocks).
+        for (let j = msgs.length - 1; j >= 0; j--) if (msgs[j].role === 'assistant' && msgs[j].segmentKind !== 'workflow-launch') { i = j; break }
         if (i < 0) return s // no assistant segment to anchor (degenerate history) — toasts cover the outcome
         planted = true
         msgs[i] = { ...msgs[i], blocks: [...(msgs[i].blocks ?? []), { kind: 'compaction', tokens: 0, auto: false, manual: true, pending: true, startedAt: Date.now() }] }

@@ -217,6 +217,21 @@ export default function App(): ReactElement {
     window.addEventListener('nsai:open-conversation', h)
     return () => window.removeEventListener('nsai:open-conversation', h)
   })
+  // A workflow launch card (chat) links to its run panel — same window-event pattern as
+  // nsai:open-conversation, because the card renders layers away from the view switcher. The request is
+  // held as state (not just a view switch) so WorkflowsView can open the run AFTER it mounts.
+  const [wfOpenRun, setWfOpenRun] = useState<{ workflowId: string; runId: string; nonce: number } | null>(null)
+  useEffect(() => {
+    const h = (e: Event): void => {
+      const d = (e as CustomEvent<{ workflowId?: string; runId?: string }>).detail
+      if (!d?.workflowId || !d?.runId) return
+      setWfOpenRun({ workflowId: d.workflowId, runId: d.runId, nonce: Date.now() })
+      setView('workflows')
+      setCmdk(false)
+    }
+    window.addEventListener('nsai:open-workflow-run', h)
+    return () => window.removeEventListener('nsai:open-workflow-run', h)
+  }, [])
 
   const selectConv = (id: string): void => {
     const conv = chat.conversations.find((c) => c.id === id)
@@ -348,7 +363,7 @@ export default function App(): ReactElement {
           ) : view === 'extensions' ? (
             <ExtensionsView />
           ) : view === 'workflows' ? (
-            <WorkflowsView />
+            <WorkflowsView runRequest={wfOpenRun} />
           ) : view === 'projects' ? (
             <ProjectsView
               activeProject={activeProject}
