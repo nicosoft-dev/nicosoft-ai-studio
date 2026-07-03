@@ -5,7 +5,7 @@
 import type { ReactElement } from 'react'
 import { Avatar, Segmented } from './primitives'
 import { STUDIO_DATA } from '@/data/studio-data'
-import { roleHasAgent } from '@/stores/chat'
+import { roleRunsAgentLoop } from '@/stores/chat'
 import { useT } from '@/stores/locale'
 
 export function ScopePicker({
@@ -35,7 +35,11 @@ export function ScopePicker({
       {!scopeAll ? (
         <div className="mcp-scope-roles">
           {EXPERTS.map((e) => {
-            const noAgent = !roleHasAgent(e.id)
+            // Capability, not routing: coordinator's direct turns run an agent loop too (read-only kit,
+            // Skill/MCP injected) — it must never wear a "no agent" badge (dogfood 2026-07-03). Every
+            // built-in role passes today; the badge machinery stays for role classes that genuinely
+            // lack a loop (pure chat personas, if they ever enter this picker).
+            const noAgent = !roleRunsAgentLoop(e.id)
             return (
               <button
                 key={e.id}

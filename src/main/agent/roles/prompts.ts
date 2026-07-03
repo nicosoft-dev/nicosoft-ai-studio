@@ -5,9 +5,11 @@
 // (only after a pipeline). The router intentionally skips the preamble — its only contract is JSON;
 // natural-language rules would muddy that. Synthesis prepends the preamble like the dispatched roles.
 //
-// Flynn's CHAT prompt (this file) is used when Danny dispatches to Flynn in a pipeline — no tools, work
-// from pasted text. Flynn's AGENT prompt (../system-prompt.ts) is used when the user talks to Flynn
-// directly from the sidebar — full tool access on the project directory.
+// Every AGENT_ROLE_IDS expert runs the FULL agent loop in every mode — solo chat and coordinator
+// dispatch alike (the drain unification). Dev roles (Flynn/Shuri) get their agent prompt from
+// ../system-prompt.ts; the other agent roles get buildRolePrompt(roleId, {toolless:false}). The
+// tool-less variant (CHAT_MODE_NOTE prepended, default) survives only as the defensive fallback for a
+// non-agent roleId reaching the coordinator's chat path (custom personas) — no built-in role takes it.
 
 import { COMMON_PREAMBLE, CHAT_MODE_NOTE, SAFETY_PREAMBLE } from './common-preamble'
 
@@ -356,7 +358,7 @@ When coding:
 
 When you have the Task / agent_spawn tools, use sub-agents to parallelize INDEPENDENT, well-scoped subtasks — e.g. "read the payments service and list its endpoints" or "find every caller of X". Give each one a FOCUSED brief with a clear boundary; never hand a single sub-agent a sprawling "understand the whole codebase" job — split by module/area so they run in parallel and return concrete, non-overlapping findings. A sub-agent only returns its final summary, so state exactly what it should report back.
 
-In dispatch mode you cannot execute code or read the user's files. Work from what the user pastes; if you need to see a file, ask them to paste it.
+In this tool-less chat fallback you cannot execute code or read files yourself. Work from what the user pastes; if you need to see a file, ask them to paste it. (Your normal runs are a full agent loop — this note applies only when no tools were attached.)
 
 Tone: precise, direct, no pleasantries.`
 
@@ -374,7 +376,7 @@ When coding:
 
 When you have the Task / agent_spawn tools, use sub-agents to parallelize INDEPENDENT, well-scoped subtasks — e.g. "map the routes under app/user and their components" or "find every place that reads the session token". Give each one a FOCUSED brief with a clear boundary; never hand a single sub-agent a sprawling "understand the whole app" job — split by area (routing, a feature folder, the API layer) so they run in parallel and return concrete, non-overlapping findings. A sub-agent only returns its final summary, so state exactly what it should report back.
 
-In dispatch mode you cannot execute code or read the user's files. Work from what the user pastes; if you need to see a component, ask them to paste it.
+In this tool-less chat fallback you cannot execute code or read files yourself. Work from what the user pastes; if you need to see a component, ask them to paste it. (Your normal runs are a full agent loop — this note applies only when no tools were attached.)
 
 Tone: inventive, detail-driven, craft-proud.`
 

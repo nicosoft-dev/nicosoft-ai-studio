@@ -24,7 +24,7 @@ const EXAMINE_SUBJECT_STALL_MS = 600_000
 export function chooseVerifierRole(implementer: string | string[]): string {
   // The verifier runs the agent loop with an overridden read-only kit (Read/Grep/Glob/Bash) + the Gate B
   // verifier persona, so we only need an independent, BOUND agent role for its model/endpoint. It must be an
-  // AGENT_ROLE (the coordinator has no agent-loop path — picking it would throw) and never an implementer.
+  // AGENT_ROLE (the coordinator is not dispatchable — picking it would throw) and never an implementer.
   // `implementer` is a SET in collaborate (multiple builders) so the reviewer is independent of ALL of them
   // (else Flynn+Turing would pick Turing to "independently" review its own work). A single string → set of one,
   // byte-identical to the prior single-implementer behavior (floor/panel callers unchanged).

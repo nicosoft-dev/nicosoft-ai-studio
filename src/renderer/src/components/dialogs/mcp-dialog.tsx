@@ -1,5 +1,7 @@
 /* — Add / Edit MCP server dialog (controlled) — */
-// Extensions (MCP + Skills) only run inside an agent loop, which today only Engineer has. A capability
+// Extensions (MCP + Skills) run inside an expert's agent loop — every built-in expert has one today,
+// coordinator-direct included (read-only kit, Skill/MCP injected). Scope only picks WHICH experts are
+// offered the capability on their runs.
 import { useState } from 'react'
 import type { ReactElement } from 'react'
 import { Icons } from '@/components/icons'

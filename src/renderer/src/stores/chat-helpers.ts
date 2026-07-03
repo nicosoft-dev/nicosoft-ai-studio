@@ -15,6 +15,12 @@ const COORDINATOR_ID = 'coordinator'
 export const roleHasAgent = (expertId: string): boolean => AGENT_ROLES.has(expertId)
 export const roleHasImageGen = (expertId: string): boolean => IMAGE_GEN_ROLES.has(expertId)
 export const roleIsCoordinator = (expertId: string): boolean => expertId === COORDINATOR_ID
+// CAPABILITY predicate (distinct from roleHasAgent, which keys the agent:run-vs-chat:send ROUTING):
+// does this role's turn run an agent loop at all? The coordinator routes through coordinator:run, not
+// agent:run — but its DIRECT/investigation turns are a real agent loop too (read-only kit + Skill/MCP
+// injection), so capability UI (scope pickers, "no agent" badges) must count it. Every built-in role
+// has an agent loop today; only pure custom/chat personas don't.
+export const roleRunsAgentLoop = (expertId: string): boolean => AGENT_ROLES.has(expertId) || expertId === COORDINATOR_ID
 
 export const uid = (): string => globalThis.crypto.randomUUID()
 

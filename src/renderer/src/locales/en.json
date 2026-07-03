@@ -375,7 +375,7 @@
   "scope.allExperts": "All experts",
   "scope.specific": "Specific",
   "scope.noAgent": "no agent",
-  "scope.agentScopeNote": "Only experts with an agent run extensions today (currently Engineer). Others are saved but stay inactive until they get an agent.",
+  "scope.agentScopeNote": "Extensions run inside an expert's agent loop — every built-in expert has one (Danny included). Scoping only controls WHICH experts are offered this capability on their runs.",
   "common.addEndpoint": "Add endpoint",
   "mem.source": "Open source conversation",
   "workspace.tasks": "Tasks",

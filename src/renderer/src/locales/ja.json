@@ -375,7 +375,7 @@
   "scope.allExperts": "すべての専門家",
   "scope.specific": "特定",
   "scope.noAgent": "agent なし",
-  "scope.agentScopeNote": "現在は agent を持つ専門家のみが拡張機能を実行します（現在は Engineer）。他の専門家は保存されますが、agent を取得するまで非アクティブのままです。",
+  "scope.agentScopeNote": "拡張機能は専門家の agent ループ内で実行されます——すべての組み込み専門家（Danny を含む）が agent を持っています。スコープは、どの専門家の実行にこの機能を提供するかだけを決めます。",
   "common.addEndpoint": "エンドポイントを追加",
   "mem.source": "学習元の会話を開く",
   "workspace.tasks": "タスク",

@@ -375,7 +375,7 @@
   "scope.allExperts": "所有專家",
   "scope.specific": "指定",
   "scope.noAgent": "無 agent",
-  "scope.agentScopeNote": "目前只有擁有 agent 的專家才會執行擴充功能（目前為 Engineer）。其他專家會被儲存，但在取得 agent 之前保持未啟用。",
+  "scope.agentScopeNote": "擴充功能在專家的 agent 迴圈中執行——所有內建專家（包括 Danny）都有 agent。限定範圍只決定哪些專家在執行時獲得此能力。",
   "common.addEndpoint": "新增端點",
   "mem.source": "查看來源會話",
   "workspace.tasks": "任務",

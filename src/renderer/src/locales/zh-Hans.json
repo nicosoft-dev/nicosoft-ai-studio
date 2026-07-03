@@ -375,7 +375,7 @@
   "scope.allExperts": "所有专家",
   "scope.specific": "指定",
   "scope.noAgent": "无 agent",
-  "scope.agentScopeNote": "目前只有拥有 agent 的专家才会运行扩展（当前为 Engineer）。其他专家会被保存，但在获得 agent 之前保持未激活。",
+  "scope.agentScopeNote": "扩展在专家的 agent 循环中运行——所有内置专家（包括 Danny）都有 agent。限定范围只决定哪些专家在运行时获得此能力。",
   "common.addEndpoint": "添加端点",
   "mem.source": "查看来源会话",
   "workspace.tasks": "任务",

@@ -779,7 +779,8 @@
 }
 .scope-pick:hover { background: var(--bg-3); }
 .scope-pick.on { color: var(--text-1); border-color: var(--accent); }
-/* "no agent" marker on a scoped role chip + the honest note that extensions only run for agent roles */
+/* "no agent" marker on a scoped role chip (shown only for roles without an agent loop — no built-in
+   role today) + the scope note under the picker */
 .scope-noagent { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-4); border: 1px solid var(--border-2); border-radius: 3px; padding: 0 4px; margin-left: 2px; }
 .scope-note { margin-top: 8px; font-size: 11px; line-height: 1.45; color: var(--text-4); }
 /* SkillDialog: imported-folder picker row + inline error */

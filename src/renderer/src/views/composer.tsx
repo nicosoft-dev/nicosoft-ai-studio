@@ -281,10 +281,11 @@ export function Composer({
             </span>
           </div>
         ) : null}
-        {/* Folder picker on every chat — per-role cwd (cwdByExpert). For agent roles it's the working
-            dir + restricted-read boundary (required before sending); for chat-only roles it's optional
-            and persisted now, taking effect once that role gets an agent. The git chip beside it shows
-            the CC-style working ± + Commit/Push handoff button for agent roles with a repo cwd. */}
+        {/* Folder picker on every chat — per-role cwd (cwdByExpert). For dispatchable agent roles it's
+            the working dir + restricted-read boundary; for Danny it scopes his read-only direct kit
+            (coordinator.run reads cwdByExpert). Every built-in role has an agent loop today. The git
+            chip beside it shows the CC-style working ± + Commit/Push handoff button — only for roles
+            whose kit can actually run git (Danny's read-only direct kit can't). */}
         <div className="cmp-path-row">
           <PathBar cwd={effectiveCwd} onPick={(dir) => setCwd(expert.id, dir)} />
           {agent ? <GitStatusChip cwd={gitCwd} disabled={!ready || streaming || compacting} onAction={sendGitPreset} /> : null}

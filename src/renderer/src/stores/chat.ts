@@ -17,7 +17,7 @@ import type { ApprovalCard, ChatMessage, ChatState, MsgBlock } from './chat-type
 // Re-export the store's public types + role predicates: consumers import them from '@/stores/chat' (the
 // store's API face) even though their definitions now live in chat-types.ts / chat-helpers.ts.
 export type { ToolCall, MsgBlock, ChatMessage, ServerNote, PermissionPrompt, QuestionPrompt, ApprovalCard } from './chat-types'
-export { roleHasAgent, roleHasImageGen } from './chat-helpers'
+export { roleHasAgent, roleHasImageGen, roleRunsAgentLoop } from './chat-helpers'
 
 type Meta = { convId: string; expertId: string; endpointId: string; model: string }
 const streamMeta = new Map<string, Meta>() // chat (plain text) path: streamId → conversation
