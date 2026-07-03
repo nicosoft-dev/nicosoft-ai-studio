@@ -2,6 +2,7 @@ import * as skillRepo from '../repos/skill.repo'
 import { SkillManager } from '../skills/manager'
 import { loadSkillDir } from '../skills/loader'
 import * as settingsService from './settings.service'
+import { normalizeMemoryName as normalizeSlug } from './agent-memory.service'
 import type { SkillRow, SkillUpdatePatch } from '../repos/skill.repo'
 import type { SkillDto, SkillInput } from '../ipc/contracts'
 import type { LoadedSkill } from '../skills/types'
@@ -155,7 +156,11 @@ export type DistillOutcome =
   | { kind: 'limit'; activeCount: number }
 
 export function distillUpsert(input: DistillInput): DistillOutcome {
-  const name = input.name.trim()
+  // Enforce the slug the schemas only ASK for (same CC rule as memory names): the name is both the
+  // Skill tool's invocation key and the update-over-duplicate match key, so "Kraken Backfill" and
+  // "kraken-backfill" must normalize to ONE entry — especially for the gate path, whose small model
+  // has no in-loop retry. Normalizing to empty (e.g. a fully non-latin name) rejects like empty input.
+  const name = normalizeSlug(input.name.trim())
   if (!name) throw new Error('Skill needs a name')
   const body = input.body.trim()
   if (!body) throw new Error('Skill needs instructions')
