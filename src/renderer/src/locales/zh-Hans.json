@@ -42,6 +42,7 @@
   "sidebar.projects": "项目",
   "sidebar.scheduled": "计划任务",
   "sidebar.extensions": "扩展",
+  "sidebar.workflows": "工作流",
   "sidebar.roles": "角色",
   "sidebar.newRole": "新建角色",
   "sidebar.disabled": "已禁用",

@@ -42,6 +42,7 @@
   "sidebar.projects": "프로젝트",
   "sidebar.scheduled": "일정",
   "sidebar.extensions": "확장 프로그램",
+  "sidebar.workflows": "워크플로",
   "sidebar.roles": "역할",
   "sidebar.newRole": "새 역할 생성",
   "sidebar.disabled": "비활성화됨",

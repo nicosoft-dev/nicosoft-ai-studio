@@ -982,6 +982,108 @@ export interface SkillInput {
   enabled?: boolean
 }
 
+// === Workflows (docs/workflow-design.md) ===
+// A workflow is a user-saved multi-expert orchestration script — agent(prompt, { role }) steps over the
+// shared script engine. The DTO mirrors the parsed meta (name/description/params/cwd) so the renderer
+// never re-parses; `script` is the single source of truth. enabled=false IS the draft state (imported/
+// distilled rows start disabled until the user reviews + activates — same gate as distilled skills).
+export type WorkflowSource = 'user' | 'distilled' | 'imported'
+export type WorkflowParamType = 'string' | 'number' | 'boolean' | 'folder'
+
+export interface WorkflowParamDto {
+  name: string
+  type: WorkflowParamType
+  default?: string | number | boolean
+  label?: string
+}
+
+export interface WorkflowDto {
+  id: string
+  name: string // slug
+  description: string
+  script: string
+  params: WorkflowParamDto[]
+  cwd: string | null // workflow-level default working folder (meta.cwd mirror)
+  enabled: boolean
+  source: WorkflowSource
+  originRole: string | null // distilled: the roleId that proposed it; others null
+  roles: string[] // distinct agent() roles in script order (derived at read time — the auto role chain)
+  steps: number // static agent() call-site count (list progress "x/y" + run rail scaffold)
+  lastRun: { status: WorkflowRunStatus; startedAt: string } | null // list-page "last run" chip
+}
+
+export type WorkflowRunStatus = 'running' | 'ok' | 'failed' | 'stopped'
+export type WorkflowFailReason = 'script-error' | 'step-error' | 'stalled' | 'backstop'
+export type WorkflowRunTrigger = 'manual' | 'command' | 'scheduled' | 'danny'
+
+export interface WorkflowRunDto {
+  id: string
+  workflowId: string
+  convId: string // the hidden conversation (kind='workflow') carrying the run's segments
+  status: WorkflowRunStatus
+  failReason: WorkflowFailReason | null
+  failDetail: string | null // one-line cause (script error message / failed step label)
+  trigger: WorkflowRunTrigger
+  params: Record<string, string | number | boolean>
+  inTokens: number // turn-final aggregate (settled at finish; live values ride the run broadcast)
+  outTokens: number
+  startedAt: string
+  finishedAt: string | null
+}
+
+// Result of the AST allow-list security scan (§5.1) — run on IMPORT and SAVE alike. `checks` are the four
+// green-card lines; a violation carries the offending line so the dialog / lint row can point at it.
+export interface WorkflowScanDto {
+  ok: boolean
+  violations: Array<{ line: number; message: string }>
+  checks: { dynamicCode: boolean; prototypeAccess: boolean; hostIdentifiers: boolean; allowListedCalls: boolean }
+}
+
+// Live run events on the `workflow:run:event` broadcast — one flat stream keyed by runId + stepIndex
+// (steps run concurrently under parallel/pipeline, so every event carries its step). The panel renders
+// LIVE from these; replay of a finished run reads the hidden conversation (conversations:messages +
+// agent:transcript) instead — same data, settled.
+export type WorkflowRunEvent =
+  | { kind: 'status'; runId: string; workflowId: string; status: WorkflowRunStatus; failReason?: WorkflowFailReason; failDetail?: string; inTokens: number; outTokens: number }
+  | { kind: 'phase'; runId: string; title: string }
+  | { kind: 'log'; runId: string; message: string }
+  | { kind: 'step-start'; runId: string; stepIndex: number; role: string; phase: string | null; hint: string }
+  | { kind: 'step-delta'; runId: string; stepIndex: number; text: string }
+  | { kind: 'step-reasoning'; runId: string; stepIndex: number; text: string }
+  | { kind: 'step-usage'; runId: string; stepIndex: number; inTokens: number; outTokens?: number }
+  | { kind: 'step-tool-start'; runId: string; stepIndex: number; toolId: string; name: string }
+  | { kind: 'step-tool-done'; runId: string; stepIndex: number; toolId: string; name: string; isError: boolean; summary: string }
+  | { kind: 'step-approval'; runId: string; stepIndex: number; zone: 'yellow' | 'red'; toolName: string; reason: string; pendingId?: string }
+  | { kind: 'step-done'; runId: string; stepIndex: number; ok: boolean; outTokens: number; error?: string; stalled?: boolean }
+
+// One node of the editor's read-only DAG projection (source order): a phase marker or an agent step.
+export interface WorkflowFlowNodeDto {
+  kind: 'phase' | 'agent'
+  line: number
+  title?: string // phase
+  role?: string // agent
+  hint?: string // agent: first chars of the prompt (with ${…} placeholders)
+  parallel?: boolean
+  loop?: boolean
+}
+
+// Parse+lint outcome for the editor lint row and the import preview: meta mirror + derived shape.
+export interface WorkflowLintDto {
+  ok: boolean
+  error: string | null // parse/meta error when !ok
+  scan: WorkflowScanDto | null // null when the script doesn't even parse
+  name: string | null
+  description: string | null
+  params: WorkflowParamDto[]
+  cwd: string | null
+  cwdWarning: 'missing' | 'sensitive' | null // import preview: folder not on this machine / sensitive location
+  roles: string[] // agent() role chain in script order
+  unknownRoles: string[] // roles not bound to an enabled agent role (lint error)
+  steps: number // static agent() call count
+  phases: string[]
+  nodes: WorkflowFlowNodeDto[] // the DAG projection (editor right pane + run rail scaffold)
+}
+
 export type PluginBundleType = 'skill' | 'mcp' | 'role'
 
 export interface PluginBundleDto {

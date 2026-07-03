@@ -59,7 +59,11 @@ function toMsgDto(r: convRepo.MessageRow): MessageDto {
 }
 
 export function list(): ConversationDto[] {
-  return convRepo.list().map(toConvDto)
+  // kind='workflow' conversations are the HIDDEN storage backing workflow runs (workflow-design §2.3):
+  // they never appear in chat history and are never a startup/switch restore target — the renderer's
+  // whole conversation surface reads THIS list, so the one filter here covers both (same layer as the
+  // archived-restore filter). The run panel reads them by id (messages/agent:transcript), not from here.
+  return convRepo.list().filter((r) => r.kind !== 'workflow').map(toConvDto)
 }
 
 export function create(input: ConversationCreateDto): ConversationDto {

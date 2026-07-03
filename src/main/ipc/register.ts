@@ -22,6 +22,7 @@ import { registerAnalyticsHandlers } from './analytics.handler'
 import { registerServiceHandlers } from './services.handler'
 import { registerUpdateHandlers } from './update.handler'
 import { registerPreviewHandlers } from './preview.handler'
+import { registerWorkflowHandlers, abortAllWorkflowRuns } from './workflow.handler'
 
 // Single entry point — main/index.ts calls this once on app ready.
 export function registerIpc(): void {
@@ -48,6 +49,7 @@ export function registerIpc(): void {
   registerAnalyticsHandlers()
   registerServiceHandlers()
   registerPreviewHandlers()
+  registerWorkflowHandlers()
   registerUpdateHandlers()
 }
 
@@ -60,4 +62,5 @@ export function abortAllRuns(): void {
   abortAllChatRuns()
   abortAllAgentRuns()
   abortAllCoordinatorRuns()
+  abortAllWorkflowRuns()
 }

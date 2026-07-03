@@ -344,10 +344,12 @@ export function Sidebar({
   conversations,
   studioActive,
   extensionsActive,
+  workflowsActive,
   projectsActive,
   scheduledActive,
   onStudio,
   onExtensions,
+  onWorkflows,
   onProjects,
   onScheduled,
   onSelectExpert,
@@ -362,10 +364,12 @@ export function Sidebar({
   conversations: ConversationDto[]
   studioActive?: boolean
   extensionsActive?: boolean
+  workflowsActive?: boolean
   projectsActive?: boolean
   scheduledActive?: boolean
   onStudio: () => void
   onExtensions: () => void
+  onWorkflows: () => void
   onProjects: () => void
   onScheduled: () => void
   onSelectExpert: (id: string) => void
@@ -428,6 +432,10 @@ export function Sidebar({
         <div className={"studio-nav-row" + (extensionsActive ? " active" : "")} onClick={onExtensions}>
           <span className="sn-grid"><Icons.puzzle size={16} /></span>
           {t('sidebar.extensions')}
+        </div>
+        <div className={"studio-nav-row" + (workflowsActive ? " active" : "")} onClick={onWorkflows}>
+          <span className="sn-grid"><Icons.workflow size={16} /></span>
+          {t('sidebar.workflows')}
         </div>
 
         <SideSectionHead label={t('sidebar.roles')} count={1 + enabledRest.length} collapsed={!rolesOpen} onToggle={() => setRolesOpen((s) => !s)} />

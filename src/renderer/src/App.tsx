@@ -12,6 +12,7 @@ import { Onboarding } from '@/views/onboarding'
 import { SettingsView } from '@/views/settings'
 import { StudioHome } from '@/views/studio'
 import { ExtensionsView } from '@/views/extensions'
+import { WorkflowsView } from '@/views/workflows'
 import { ProjectsView } from '@/views/projects'
 import { ScheduledView } from '@/views/scheduled'
 import { ExpertDetail } from '@/views/expert'
@@ -269,6 +270,10 @@ export default function App(): ReactElement {
     setView('scheduled')
     setCmdk(false)
   }
+  const openWorkflows = (): void => {
+    setView('workflows')
+    setCmdk(false)
+  }
   const openProfile = (id: string): void => {
     setActiveExpert(id)
     setView('expert')
@@ -280,7 +285,7 @@ export default function App(): ReactElement {
   }
 
   const expert = EXPERT_BY_ID[activeExpert] || EXPERT_BY_ID.generalist
-  const navView = ['studio', 'extensions', 'projects', 'scheduled'].includes(view)
+  const navView = ['studio', 'extensions', 'workflows', 'projects', 'scheduled'].includes(view)
 
   if (view === 'onboarding') {
     return (
@@ -307,10 +312,12 @@ export default function App(): ReactElement {
           <Sidebar
             studioActive={view === 'studio'}
             extensionsActive={view === 'extensions'}
+            workflowsActive={view === 'workflows'}
             projectsActive={view === 'projects'}
             scheduledActive={view === 'scheduled'}
             onStudio={openStudio}
             onExtensions={openExtensions}
+            onWorkflows={openWorkflows}
             onProjects={openProjects}
             onScheduled={openScheduled}
             activeExpert={navView ? null : activeExpert}
@@ -340,6 +347,8 @@ export default function App(): ReactElement {
             />
           ) : view === 'extensions' ? (
             <ExtensionsView />
+          ) : view === 'workflows' ? (
+            <WorkflowsView />
           ) : view === 'projects' ? (
             <ProjectsView
               activeProject={activeProject}

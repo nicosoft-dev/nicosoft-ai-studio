@@ -404,6 +404,14 @@ export const Icons: Record<string, IconFn> = {
       <circle cx="12" cy="12" r="2" />
     </Icon>
   ),
+  workflow: (p) => (
+    <Icon {...p}>
+      <circle cx="5.5" cy="6" r="2.4" />
+      <circle cx="18.5" cy="6" r="2.4" />
+      <circle cx="12" cy="18" r="2.4" />
+      <path d="M7.5 7.5 10.4 16M16.5 7.5 13.6 16M8 6h8" />
+    </Icon>
+  ),
   kanban: (p) => (
     <Icon {...p}>
       <path d="M5 3a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z" />

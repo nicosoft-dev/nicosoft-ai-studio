@@ -19,6 +19,21 @@ export async function pickDirectory(
   return res.canceled || res.filePaths.length === 0 ? null : res.filePaths[0]
 }
 
+// Open a file picker; returns the chosen absolute path or null when cancelled.
+export async function pickFile(
+  e: IpcMainInvokeEvent,
+  opts: { title?: string; filters?: Electron.FileFilter[] } = {}
+): Promise<string | null> {
+  const win = BrowserWindow.fromWebContents(e.sender)
+  const dialogOpts = {
+    ...(opts.title ? { title: opts.title } : {}),
+    ...(opts.filters ? { filters: opts.filters } : {}),
+    properties: ['openFile'] as Array<'openFile'>,
+  }
+  const res = await (win ? dialog.showOpenDialog(win, dialogOpts) : dialog.showOpenDialog(dialogOpts))
+  return res.canceled || res.filePaths.length === 0 ? null : res.filePaths[0]
+}
+
 // Save-dialog → write → return the saved path, or null when the user cancels.
 export async function saveToFile(
   opts: { defaultPath: string; filters: Electron.FileFilter[] },

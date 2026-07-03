@@ -319,6 +319,43 @@ CREATE TABLE IF NOT EXISTS gate_outcomes (
 );
 CREATE INDEX IF NOT EXISTS idx_gate_outcomes_created ON gate_outcomes (created_at);
 
+-- Workflows (docs/workflow-design.md §2.1): user-savable multi-expert orchestration scripts. The SCRIPT
+-- column is the single source of truth (meta is embedded in it); name/description/params/cwd are parsed
+-- MIRRORS so the read path never re-parses. Same provenance shape as skills (source/origin_role/
+-- origin_conv_id; enabled=0 is the imported/distilled draft state the user reviews + activates).
+CREATE TABLE IF NOT EXISTS workflows (
+  id             TEXT PRIMARY KEY,
+  name           TEXT NOT NULL,              -- slug (normalizeSlug on distill/import; validated on UI create)
+  description    TEXT,                       -- hand-written; empty → the list renders an auto role chain (derived, not stored)
+  script         TEXT NOT NULL,              -- the single source of truth (meta embedded)
+  params         TEXT NOT NULL DEFAULT '[]', -- JSON [{name,type:'string'|'number'|'boolean'|'folder',default?,label?}] (meta mirror)
+  cwd            TEXT,                       -- workflow-level default working folder (meta.cwd mirror; NULL = unbound)
+  enabled        INTEGER NOT NULL DEFAULT 1, -- distilled/imported rows start 0 (draft/pending review)
+  source         TEXT NOT NULL DEFAULT 'user', -- user | distilled | imported
+  origin_role    TEXT,                       -- distilled: authoring roleId; others NULL (skills parity)
+  origin_conv_id TEXT,
+  created_at     TEXT, updated_at TEXT
+);
+
+-- Workflow runs (§2.2): a LIGHT pointer row per run for fast history listing — the heavy data (segments,
+-- tool cards, approvals, usage) lives in the run's hidden conversation (kind='workflow', filtered out of
+-- chat history + startup restore). Token columns are the turn-final aggregate snapshot taken at finish.
+CREATE TABLE IF NOT EXISTS workflow_runs (
+  id          TEXT PRIMARY KEY,
+  workflow_id TEXT NOT NULL,
+  conv_id     TEXT NOT NULL,              -- the hidden conversation carrying the run (kind='workflow')
+  status      TEXT NOT NULL,              -- running | ok | failed | stopped
+  fail_reason TEXT,                       -- script-error | step-error | stalled | backstop (when status='failed')
+  fail_detail TEXT,                       -- one-line cause for the Runs history (§4.2: +message / +step label)
+  trigger     TEXT NOT NULL,              -- manual | command | scheduled | danny
+  params_json TEXT NOT NULL DEFAULT '{}', -- this run's actual params snapshot (re-run / replay)
+  in_tokens   INTEGER NOT NULL DEFAULT 0, -- turn-final aggregate, settled at finish (live value reads the usage broadcast)
+  out_tokens  INTEGER NOT NULL DEFAULT 0,
+  started_at  TEXT NOT NULL, finished_at TEXT,
+  FOREIGN KEY (workflow_id) REFERENCES workflows (id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_wf ON workflow_runs (workflow_id, started_at DESC);
+
 -- Workspace Tasks panel history (design §5): completed-phase TODO snapshots + studio_lens verdicts,
 -- per conversation. dedup_key makes capture replay-idempotent (phase=convId:setHash; examine=convId:
 -- examinedAt). A user Clear flips cleared=1 (rows are kept so the dedup_key still blocks re-add — clear

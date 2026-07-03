@@ -42,6 +42,7 @@
   "sidebar.projects": "Projects",
   "sidebar.scheduled": "Scheduled",
   "sidebar.extensions": "Extensions",
+  "sidebar.workflows": "Workflows",
   "sidebar.roles": "Roles",
   "sidebar.newRole": "New Role",
   "sidebar.disabled": "disabled",

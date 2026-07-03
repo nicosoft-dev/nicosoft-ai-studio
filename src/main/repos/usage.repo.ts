@@ -14,6 +14,18 @@ export interface UsageRecordInput {
   toolCalls?: string[]
 }
 
+// Aggregate a conversation's settled usage. Every row here is a TURN-FINAL billing record (record() is
+// called once per completed step/turn, never per streaming chunk) — so this sum is the safe source for a
+// workflow run's Σ header (doc 39 discipline: never accumulate live stream deltas).
+export function sumByConversation(conversationId: string): { inTokens: number; outTokens: number } {
+  const row = getDb()
+    .prepare(
+      'SELECT COALESCE(SUM(in_tokens), 0) AS i, COALESCE(SUM(out_tokens), 0) AS o FROM usage_events WHERE conversation_id = ?'
+    )
+    .get(conversationId) as unknown as { i: number; o: number }
+  return { inTokens: row.i, outTokens: row.o }
+}
+
 export function record(e: UsageRecordInput): void {
   const id = ulid()
   const createdAt = new Date().toISOString()

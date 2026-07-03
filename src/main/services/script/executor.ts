@@ -1,10 +1,12 @@
-// Studio Lens — the node:vm script executor.
-//
-// This is the engine half of the lens rewrite: the reviewer AUTHORS a deterministic JS orchestration script
-// and this module SAFELY EXECUTES it, replacing the old YAML-engine auto-fan-out. It mirrors how Claude
-// Code's Workflow tool runs model-authored scripts — a hardened node:vm sandbox, the orchestration primitives
-// (agent/parallel/pipeline), and a cross-realm async bridge — so the dynamic review fans out the way the model
-// intends rather than being multiplied by an engine.
+// Studio script core — the SHARED node:vm script executor (services/script), consumed by BOTH domains:
+//   • lens (services/lens): the reviewer AUTHORS an ad-hoc review orchestration script, run once + discarded.
+//   • workflows (services/workflow): the USER's saved orchestration asset (docs/workflow-design.md).
+// It mirrors how Claude Code's Workflow tool runs model-authored scripts — a hardened node:vm sandbox, the
+// orchestration primitives (agent/parallel/pipeline), and a cross-realm async bridge — so a script fans
+// agents out the way its author intends rather than being multiplied by an engine. The engine itself is
+// domain-free: each consumer injects its own spawnAgent (lens → reviewer sub-agents; workflow → full role
+// agent runs) and keeps its own discipline (lens adds NOTHING the CC Workflow tool lacks; the workflow
+// executor layers the §5 security scan + exception management ON TOP, never in here).
 //
 // Pipeline: parse + validate the `export const meta` header, transpile the body, build the hardened sandbox,
 // then run the script. Without orchestration hooks it runs as a pure computation (args in, return value out)
@@ -17,12 +19,13 @@
 // is a pure-literal `export const meta`; a transpile that wraps the body in an async IIFE; and execution under
 // a sync timeout with dynamic import() disabled.
 //
-// SECURITY BOUNDARY: this contains a TRUSTED-BUT-FALLIBLE author — the user's OWN configured model reviewing
-// the user's OWN code. The hardening contains an author that ERRS (no host object or function reaches the
-// script, code generation is disabled, and results AND rejections are cloned into the vm realm). It is NOT a
-// defense against a deliberately MALICIOUS author — a compromised or spoofed-slug reviewer endpoint — because
-// node:vm is not a hard isolation boundary. Reviewing untrusted code, or wiring an untrusted reviewer
-// endpoint, is OUT OF SCOPE for these guarantees and would require isolated-vm.
+// SECURITY BOUNDARY: this contains a TRUSTED-BUT-FALLIBLE author — the user's own reviewer model (lens) or
+// the user's own hand (workflow). The hardening contains an author that ERRS (no host object or function
+// reaches the script, code generation is disabled, and results AND rejections are cloned into the vm realm).
+// It is NOT a defense against a deliberately MALICIOUS author, because node:vm is not a hard isolation
+// boundary. That is why an IMPORTED workflow (.nsw — untrusted input) must pass the AST allow-list scanner
+// (services/workflow/scanner) BEFORE it can reach this executor, and imports land disabled behind the human
+// review gate; isolated-vm as a hard boundary stays a ledger item (workflow-design §10).
 
 import vm from 'node:vm'
 import { parse, type Node } from 'acorn'
@@ -37,7 +40,7 @@ type Ast = Node & { [k: string]: unknown }
 // The vm.Script runInContext timeout. NOTE: a vm timeout bounds the SYNCHRONOUS portion only (it cannot
 // interrupt an awaited microtask); it's a runaway-sync backstop, not an overall wall-clock. The async budget
 // is governed elsewhere (the agent cap / abort signal). 30s matches the Workflow default.
-export const LENS_SCRIPT_TIMEOUT_MS = 30_000
+export const SCRIPT_TIMEOUT_MS = 30_000
 
 // The reserved internal-variable prefix. The transpiler rejects any user identifier starting with it so a
 // script can't collide with / shadow the bridge variables the primitives inject.
@@ -78,9 +81,9 @@ const HARDEN_PRELUDE = `(() => {
 // explicit argument is still allowed (parsing a passed-in timestamp); only Date.now()/`new Date()` (no arg)/
 // bare `Date()` throw.
 const NOW_ERR =
-  'Date.now() / new Date() are unavailable in lens scripts (reproducibility). Pass any needed timestamp via args.'
+  'Date.now() / new Date() are unavailable in studio scripts (reproducibility). Pass any needed timestamp via args.'
 const RANDOM_ERR =
-  'Math.random() is unavailable in lens scripts (reproducibility). For N independent samples, include the index in the agent label or prompt.'
+  'Math.random() is unavailable in studio scripts (reproducibility). For N independent samples, include the index in the agent label or prompt.'
 const DATE_RANDOM_SHIM = `(() => {
   const NOW_ERR = ${JSON.stringify(NOW_ERR)};
   const RANDOM_ERR = ${JSON.stringify(RANDOM_ERR)};
@@ -209,7 +212,7 @@ export function parseScript(src: string): ParseResult {
     return {
       error:
         `Script parse error: ${e instanceof Error ? e.message : String(e)}. ` +
-        'Lens scripts must be plain JavaScript — TypeScript syntax (type annotations like `: string[]`, ' +
+        'Studio scripts must be plain JavaScript — TypeScript syntax (type annotations like `: string[]`, ' +
         'interfaces, generics) fails to parse.',
     }
   }
@@ -292,13 +295,19 @@ export function detectNonDeterminism(scriptBody: string): string[] {
 
 // ── orchestration primitives (批 2) ─────────────────────────────────────────────────────────────────────
 
-// The total agent() spawns across ONE review's lifetime — a runaway
-// backstop set far above any real review (~32-40 agents), never a normal throttle. The CONCURRENCY cap
-// (min(16,cores-2)) is deliberately NOT here: it lives in the spawnAgent hook (批 5 → pool.ts), exactly like
-// the Workflow tool, where parallel/pipeline just fire the thunks and a semaphore wraps each individual spawn.
-export const LENS_MAX_AGENTS = 1000
+// The total agent() spawns across ONE script run's lifetime — a runaway backstop set far above any real
+// run (a real review/workflow is a few dozen agents), never a normal throttle. The CONCURRENCY cap
+// (min(16,cores-2)) is deliberately NOT here: it lives in each consumer's spawnAgent hook (lens → pool.ts),
+// exactly like the Workflow tool, where parallel/pipeline just fire the thunks and a semaphore wraps each
+// individual spawn.
+export const SCRIPT_MAX_AGENTS = 1000
 // The per-call fan-out cap (parallel thunks / pipeline items) — an oversized batch is rejected, not fired.
-export const LENS_MAX_FANOUT = 4096
+export const SCRIPT_MAX_FANOUT = 4096
+
+// Recognize the lifetime-cap throw AFTER it crossed the vm boundary (only the message string survives the
+// realm clone) — the workflow executor classifies this as the 'backstop' fail reason.
+const CAP_MARK = '-agent lifetime cap (runaway fan-out backstop)'
+export const isAgentCapError = (msg: string): boolean => msg.includes(CAP_MARK)
 
 // The script-facing agent() options — the Workflow agent opts (label/phase/schema/model/effort/isolation/
 // agentType). Passed through to the spawnAgent hook; unknown keys are preserved.
@@ -315,8 +324,8 @@ export interface AgentOpts {
 
 export interface OrchestrationHooks {
   // The host agent-spawn seam: receives the script's prompt + opts, returns the sub-agent's result as
-  // JSON-safe data (text, or parsed structured output). 批 5 wires this to lens step.ts (runAgent over
-  // pool.ts; unbounded turns, stall-timeout-bounded); unit tests inject a fake to prove the primitives off-channel.
+  // JSON-safe data (text, or parsed structured output). lens wires this to its step.ts (runAgent over
+  // pool.ts); the workflow executor wires it to a full role agent run; tests inject a fake.
   spawnAgent: (prompt: string, opts: AgentOpts) => Promise<unknown>
   onLog?: (msg: string) => void
   onPhase?: (title: string) => void
@@ -346,26 +355,26 @@ interface VmBridge {
 //   • settle  — `async v => ({__proto__:null, v: await v})` — await a vm-realm thenable IN-realm, handing back
 //               a {v} envelope so the host never holds a raw cross-realm thenable
 //   • vmClone — `s => JSON.parse(s)` — materialize a host JSON value as a FRESH vm-realm object (severs host
-//               references AND the host-realm prototype chain). A JSON round-trip is enough for lens's
+//               references AND the host-realm prototype chain). A JSON round-trip is enough for the consumers'
 //               JSON-safe data under this benign threat model.
 //   • wrapHost— present a host primitive to the script as a VM-realm async function (its `.constructor` is the
 //               neutered vm Function), cloning BOTH the resolve AND the reject path so a host throw never leaks
 //               a host object the script could walk back to the host Function.
 function vmBridge(ctx: vm.Context): VmBridge {
-  const call = vm.runInContext('((fn, ...args) => fn(...args))', ctx, { filename: 'lens:call' }) as VmBridge['call']
+  const call = vm.runInContext('((fn, ...args) => fn(...args))', ctx, { filename: 'script:call' }) as VmBridge['call']
   const settle = vm.runInContext('(async v => ({__proto__: null, v: await v}))', ctx, {
-    filename: 'lens:settle',
+    filename: 'script:settle',
   }) as VmBridge['settle']
-  const vmClone = vm.runInContext('(s => JSON.parse(s))', ctx, { filename: 'lens:clone' }) as VmBridge['vmClone']
+  const vmClone = vm.runInContext('(s => JSON.parse(s))', ctx, { filename: 'script:clone' }) as VmBridge['vmClone']
   // A host throw/rejection must NOT reach the script as a raw host object: its `.constructor.constructor` is the
   // live host Function (codeGeneration:false only neuters the vm context), so `try { await agent() } catch (e) {
   // e.constructor.constructor('return process')() }` would be host RCE. Catch it IN-realm and re-throw a vm-realm
   // Error carrying only a cloned string message — mirroring how toVm clones the RESOLVE path. Covers both async
   // rejections and synchronous throws of the host fn (e.g. the cap error, a validation TypeError).
   const wrapHost = vm.runInContext(
-    '(h => async (...a) => { try { return await h(...a) } catch (e) { let m = "lens sub-agent error"; try { m = String(e && e.message != null ? e.message : e) } catch (_) {} throw new Error(m) } })',
+    '(h => async (...a) => { try { return await h(...a) } catch (e) { let m = "script sub-agent error"; try { m = String(e && e.message != null ? e.message : e) } catch (_) {} throw new Error(m) } })',
     ctx,
-    { filename: 'lens:wrap' },
+    { filename: 'script:wrap' },
   ) as VmBridge['wrapHost']
   const toVm = (hostVal: unknown): unknown => (hostVal === undefined ? undefined : vmClone(JSON.stringify(hostVal)))
   return { call, settle, vmClone, wrapHost, toVm }
@@ -376,7 +385,7 @@ function vmBridge(ctx: vm.Context): VmBridge {
 // function is vm-realm (no host-Function escape).
 function injectPrimitives(ctx: vm.Context, bridge: VmBridge, hooks: OrchestrationHooks): void {
   const { call, settle, toVm, wrapHost } = bridge
-  const maxAgents = hooks.maxAgents ?? LENS_MAX_AGENTS
+  const maxAgents = hooks.maxAgents ?? SCRIPT_MAX_AGENTS
   let agentCount = 0
   let currentPhase: string | undefined
 
@@ -384,16 +393,16 @@ function injectPrimitives(ctx: vm.Context, bridge: VmBridge, hooks: Orchestratio
   const checkCap = (): void => {
     if (agentCount >= maxAgents) {
       throw new Error(
-        `studio_lens exceeded the ${maxAgents}-agent lifetime cap (runaway fan-out backstop) — the review folds with what completed.`,
+        `the script exceeded the ${maxAgents}${CAP_MARK} — the run folds with what completed.`,
       )
     }
   }
-  // Coerce a vm-realm array-like into a host array, capped at LENS_MAX_FANOUT (an oversized batch is rejected,
+  // Coerce a vm-realm array-like into a host array, capped at SCRIPT_MAX_FANOUT (an oversized batch is rejected,
   // not fired). Array.from keeps element references (thunks stay callable) while giving the host a clean array.
   const asArray = (v: unknown, what: string): unknown[] => {
     if (Array.isArray(v) || (v && typeof v === 'object' && typeof (v as { length?: unknown }).length === 'number')) {
       const arr = Array.from(v as ArrayLike<unknown>)
-      if (arr.length > LENS_MAX_FANOUT) throw new RangeError(`fan-out of ${arr.length} exceeds the ${LENS_MAX_FANOUT}-item cap`)
+      if (arr.length > SCRIPT_MAX_FANOUT) throw new RangeError(`fan-out of ${arr.length} exceeds the ${SCRIPT_MAX_FANOUT}-item cap`)
       return arr
     }
     throw new TypeError(what)
@@ -410,10 +419,10 @@ function injectPrimitives(ctx: vm.Context, bridge: VmBridge, hooks: Orchestratio
   }
   const aborted = (): boolean => hooks.signal?.aborted === true
 
-  // agent(prompt, opts) — spawn ONE read-only reviewer sub-agent. Counts toward the cap, threads
+  // agent(prompt, opts) — spawn ONE sub-agent through the consumer's hook. Counts toward the cap, threads
   // the current phase onto opts, returns the result cloned into the vm realm.
   const agent = async (prompt: unknown, opts?: unknown): Promise<unknown> => {
-    if (aborted()) throw new Error('review aborted')
+    if (aborted()) throw new Error('script run aborted')
     checkCap()
     agentCount++
     const o: AgentOpts = opts && typeof opts === 'object' ? { ...(opts as AgentOpts) } : {}
@@ -501,7 +510,7 @@ export interface SandboxHooks {
 // disabled (eval/Function throw → blocks the classic `constructor.constructor('return process')()` escape),
 // then run the harden + date/random preludes INSIDE the realm, then inject args + log/phase. Returns the
 // context ready for a compiled vm.Script.
-export function createLensSandbox(
+export function createScriptSandbox(
   args: unknown,
   hooks: SandboxHooks = {},
   orchestration?: OrchestrationHooks,
@@ -510,8 +519,8 @@ export function createLensSandbox(
     codeGeneration: { strings: false, wasm: false },
   })
   // Run the determinism shim then the harden prelude; either order is safe since they touch disjoint globals.
-  vm.runInContext(DATE_RANDOM_SHIM, ctx, { filename: 'lens:shim' })
-  vm.runInContext(HARDEN_PRELUDE, ctx, { filename: 'lens:harden' })
+  vm.runInContext(DATE_RANDOM_SHIM, ctx, { filename: 'script:shim' })
+  vm.runInContext(HARDEN_PRELUDE, ctx, { filename: 'script:harden' })
 
   const bridge = vmBridge(ctx)
   // args injection: clone INTO the vm realm. A host object here would expose host Function via
@@ -567,10 +576,10 @@ export async function runScript(opts: RunScriptOptions): Promise<RunScriptResult
   let script: vm.Script
   try {
     script = new vm.Script(t.code, {
-      filename: 'lens-script.js',
-      // import() is unavailable — a lens script is self-contained, not a module loader.
+      filename: 'studio-script.js',
+      // import() is unavailable — a studio script is self-contained, not a module loader.
       importModuleDynamically: (() => {
-        throw new Error('import() is not available in lens scripts.')
+        throw new Error('import() is not available in studio scripts.')
       }) as never,
     })
   } catch (e) {
@@ -581,14 +590,14 @@ export async function runScript(opts: RunScriptOptions): Promise<RunScriptResult
   // (e.g. a circular value), a prelude throw, a script throw, or a sync-timeout — degrades to ok:false
   // instead of escaping runScript.
   try {
-    const ctx = createLensSandbox(opts.args, opts.hooks, opts.orchestration)
+    const ctx = createScriptSandbox(opts.args, opts.hooks, opts.orchestration)
     // settle bridge: the wrapped IIFE returns a vm-realm Promise. Awaiting a cross-realm
     // thenable directly is brittle, so we await it INSIDE the realm via a tiny helper that hands back a
     // null-prototype { v } envelope — the host then reads `.v`.
     const settle = vm.runInContext('(async v => ({__proto__: null, v: await v}))', ctx, {
-      filename: 'lens:settle',
+      filename: 'script:settle',
     }) as (p: unknown) => Promise<{ v: unknown }>
-    const promise = script.runInContext(ctx, { timeout: opts.timeoutMs ?? LENS_SCRIPT_TIMEOUT_MS })
+    const promise = script.runInContext(ctx, { timeout: opts.timeoutMs ?? SCRIPT_TIMEOUT_MS })
     const settled = await settle(promise)
     return { ok: true, meta: parsed.meta, value: settled.v }
   } catch (e) {

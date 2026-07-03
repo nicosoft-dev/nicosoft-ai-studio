@@ -76,6 +76,11 @@ import type {
   McpServerInput,
   McpTestResult,
   SkillDto,
+  WorkflowDto,
+  WorkflowLintDto,
+  WorkflowRunDto,
+  WorkflowRunEvent,
+  WorkflowRunTrigger,
   SkillInput,
   PluginDto,
   ProjectDto,
@@ -471,6 +476,30 @@ const api = {
       ipcRenderer.invoke('skills:update', id, patch),
     remove: (id: string): Promise<void> => ipcRenderer.invoke('skills:remove', id),
     pickDir: (): Promise<string | null> => ipcRenderer.invoke('skills:pickDir')
+  },
+  workflows: {
+    list: (): Promise<WorkflowDto[]> => ipcRenderer.invoke('workflows:list'),
+    get: (id: string): Promise<WorkflowDto | null> => ipcRenderer.invoke('workflows:get', id),
+    lint: (script: string): Promise<WorkflowLintDto> => ipcRenderer.invoke('workflows:lint', script),
+    rewriteMeta: (script: string, patch: { name?: string; description?: string; cwd?: string | null; params?: WorkflowLintDto['params'] }): Promise<string> =>
+      ipcRenderer.invoke('workflows:rewriteMeta', script, patch),
+    pickDir: (): Promise<string | null> => ipcRenderer.invoke('workflows:pickDir'),
+    save: (input: { id?: string; script: string }): Promise<WorkflowDto> => ipcRenderer.invoke('workflows:save', input),
+    setEnabled: (id: string, enabled: boolean): Promise<WorkflowDto> => ipcRenderer.invoke('workflows:setEnabled', id, enabled),
+    remove: (id: string): Promise<void> => ipcRenderer.invoke('workflows:remove', id),
+    export: (id: string): Promise<string | null> => ipcRenderer.invoke('workflows:export', id),
+    importPick: (): Promise<{ script: string; lint: WorkflowLintDto } | null> => ipcRenderer.invoke('workflows:importPick'),
+    importConfirm: (script: string): Promise<WorkflowDto> => ipcRenderer.invoke('workflows:importConfirm', script),
+    run: (id: string, params: Record<string, string | number | boolean>, trigger?: WorkflowRunTrigger): Promise<{ runId: string; convId: string }> =>
+      ipcRenderer.invoke('workflows:run', id, params, trigger),
+    stop: (runId: string): Promise<boolean> => ipcRenderer.invoke('workflows:stop', runId),
+    runs: (workflowId: string): Promise<WorkflowRunDto[]> => ipcRenderer.invoke('workflows:runs', workflowId),
+    runGet: (runId: string): Promise<WorkflowRunDto | null> => ipcRenderer.invoke('workflows:runGet', runId),
+    onRunEvent: (cb: (ev: WorkflowRunEvent) => void): (() => void) => {
+      const h = (_e: IpcRendererEvent, ev: WorkflowRunEvent): void => cb(ev)
+      ipcRenderer.on('workflow:run:event', h)
+      return () => ipcRenderer.off('workflow:run:event', h)
+    }
   },
   plugins: {
     list: (): Promise<PluginDto[]> => ipcRenderer.invoke('plugins:list'),
