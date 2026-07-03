@@ -1127,16 +1127,20 @@ function RunPanel({
         {runs.map((r, i) => {
           const no = runs.length - i
           const dot = r.status === 'running' ? 'run' : r.status === 'failed' ? 'err' : r.status === 'stopped' ? 'stop' : ''
+          const current = r.id === runId
           return (
-            <div key={r.id} className="wf-runrow">
+            <div
+              key={r.id}
+              className={'wf-runrow' + (current ? ' current' : ' clickable')}
+              onClick={current ? undefined : () => onOpenRun(r.id)}
+              title={current ? undefined : 'Open this run'}
+            >
               <span className={'wf-dot ' + dot} />
               <span>#{no} · {r.status === 'failed' ? `failed${r.failReason ? ` (${r.failReason})` : ''}` : r.status}</span>
               <small>
                 · {ago(r.startedAt)}{r.finishedAt ? ` · ${fmtDur(new Date(r.finishedAt).getTime() - new Date(r.startedAt).getTime())}` : ''} · via {r.trigger} · ↑{kTok(r.inTokens)} ↓{kTok(r.outTokens)}
                 {r.failDetail ? ` · ${r.failDetail.slice(0, 80)}` : ''}
               </small>
-              <span className="wf-spacer" />
-              {r.id !== runId && <button className="btn ghost sm" onClick={() => onOpenRun(r.id)}>Open</button>}
             </div>
           )
         })}
