@@ -242,11 +242,12 @@ export function ExpertDetail({
   }
   // Real conversations owned by this role (primary_role_id = expertId). For Coordinator this surfaces every
   // routed conversation; for individual experts it's the direct-chat history. Most-recent-first; cap
-  // to a sensible display count so the panel doesn't become a scroll trap.
+  // to a sensible display count so the panel doesn't become a scroll trap. Archived chats are excluded —
+  // same rule as the sidebar (they live only under its folded Archived group, not in regular lists).
   const recents = useMemo(
     () =>
       conversations
-        .filter((c) => c.primaryRoleId === expertId)
+        .filter((c) => c.primaryRoleId === expertId && !c.archived)
         .slice(0, 12)
         .map((c) => ({ id: c.id, title: c.title || 'Untitled', when: relativeWhen(c.updatedAt) })),
     [conversations, expertId]

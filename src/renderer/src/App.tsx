@@ -95,10 +95,12 @@ export default function App(): ReactElement {
       // active expert (e.g. Georgia) but not its conversation, so the chat opened on the greeting until
       // you re-clicked the role. Open that expert's most-recent conversation now (conversations are
       // updated_at-DESC → first match is the latest). No-op if the user already navigated or the expert
-      // has no history. Mirrors selectExpert's in-session restore.
+      // has no history. Mirrors selectExpert's in-session restore. Archived conversations never restore:
+      // archiving moves a chat out of every regular entry point (the sidebar folds them away) — being
+      // pulled back into one on relaunch undid the archive.
       const s = useChat.getState()
       if (s.activeConv) return
-      const restore = s.conversations.find((c) => c.primaryRoleId === startupExpert)
+      const restore = s.conversations.find((c) => c.primaryRoleId === startupExpert && !c.archived)
       if (restore) void s.openConversation(restore.id)
     })
     void useRoles.getState().load()
@@ -192,8 +194,11 @@ export default function App(): ReactElement {
       // in-flight run (never drop you on an empty screen while a run keeps going invisibly), else the
       // expert's most-recent conversation (conversations is updated_at-DESC, so the first match for this
       // role is its latest), else start fresh. "Switch back to Flynn → continue where I left off."
+      // Archived conversations never restore — EXCEPT one that is still streaming: the never-invisible-run
+      // rule outranks the archive while the run lasts (once it ends, streaming clears and the archive
+      // filter takes over on the next switch).
       const running = chat.conversations.find((c) => c.primaryRoleId === id && chat.streaming[c.id])
-      const restore = running ?? chat.conversations.find((c) => c.primaryRoleId === id)
+      const restore = running ?? chat.conversations.find((c) => c.primaryRoleId === id && !c.archived)
       if (restore) void chat.openConversation(restore.id)
       else chat.newConversation()
     }
