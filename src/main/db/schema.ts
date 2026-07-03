@@ -348,6 +348,9 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
   fail_reason TEXT,                       -- script-error | step-error | stalled | backstop (when status='failed')
   fail_detail TEXT,                       -- one-line cause for the Runs history (§4.2: +message / +step label)
   trigger     TEXT NOT NULL,              -- manual | command | scheduled | danny
+  initiator   TEXT,                       -- §7.5 provenance: launching role id (NULL = the user by hand)
+  origin_conv_id TEXT,                    -- conversation the run was launched from (launch card / Tasks anchor)
+  origin_task_id TEXT,                    -- scheduled task that fired it (trigger='scheduled')
   params_json TEXT NOT NULL DEFAULT '{}', -- this run's actual params snapshot (re-run / replay)
   in_tokens   INTEGER NOT NULL DEFAULT 0, -- turn-final aggregate, settled at finish (live value reads the usage broadcast)
   out_tokens  INTEGER NOT NULL DEFAULT 0,

@@ -16,6 +16,11 @@ export interface WorkflowRunRow {
   failReason: WorkflowFailReason | null
   failDetail: string | null
   trigger: WorkflowRunTrigger
+  // §7.5 provenance: the launching role id (null = the user by hand), the conversation the run was
+  // launched from, and the scheduled task that fired it. All optional facts, never load-bearing.
+  initiator: string | null
+  originConvId: string | null
+  originTaskId: string | null
   params: Record<string, string | number | boolean>
   inTokens: number
   outTokens: number
@@ -31,6 +36,9 @@ interface WorkflowRunRaw {
   fail_reason: string | null
   fail_detail: string | null
   trigger: string
+  initiator: string | null
+  origin_conv_id: string | null
+  origin_task_id: string | null
   params_json: string
   in_tokens: number
   out_tokens: number
@@ -47,6 +55,9 @@ function mapRow(raw: WorkflowRunRaw): WorkflowRunRow {
     failReason: (raw.fail_reason as WorkflowFailReason | null) ?? null,
     failDetail: raw.fail_detail,
     trigger: raw.trigger as WorkflowRunTrigger,
+    initiator: raw.initiator,
+    originConvId: raw.origin_conv_id,
+    originTaskId: raw.origin_task_id,
     params: parseJson<Record<string, string | number | boolean>>(raw.params_json, {}),
     inTokens: raw.in_tokens,
     outTokens: raw.out_tokens,
@@ -60,15 +71,18 @@ export function create(input: {
   convId: string
   trigger: WorkflowRunTrigger
   params: Record<string, string | number | boolean>
+  initiator?: string | null
+  originConvId?: string | null
+  originTaskId?: string | null
 }): WorkflowRunRow {
   const id = ulid()
   const now = new Date().toISOString()
   getDb()
     .prepare(
-      `INSERT INTO workflow_runs (id, workflow_id, conv_id, status, trigger, params_json, started_at)
-       VALUES (?, ?, ?, 'running', ?, ?, ?)`
+      `INSERT INTO workflow_runs (id, workflow_id, conv_id, status, trigger, initiator, origin_conv_id, origin_task_id, params_json, started_at)
+       VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?)`
     )
-    .run(id, input.workflowId, input.convId, input.trigger, JSON.stringify(input.params), now)
+    .run(id, input.workflowId, input.convId, input.trigger, input.initiator ?? null, input.originConvId ?? null, input.originTaskId ?? null, JSON.stringify(input.params), now)
   return getById(id) as WorkflowRunRow
 }
 

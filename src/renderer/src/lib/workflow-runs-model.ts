@@ -13,6 +13,9 @@ export interface LiveWorkflowRun {
   stepsDone: number
   phase: string | null
   role: string | null // the most recently started step's role
+  // §7.5: the conversation the run was launched FROM (null = the user by hand / unknown) — the Tasks
+  // panel shows an entry ONLY in that conversation ("you weren't there when it started" rule).
+  originConvId: string | null
   inTokens: number
   outTokens: number
 }
@@ -29,6 +32,7 @@ export interface RunEventLike {
   inTokens?: number
   outTokens?: number
   ok?: boolean
+  originConvId?: string | null
 }
 
 // Fold ONE event. `metaOf` resolves a workflow id to its display meta (name + declared step count) from
@@ -52,6 +56,7 @@ export function applyRunEvent(
           stepsDone: prev?.stepsDone ?? 0,
           phase: prev?.phase ?? null,
           role: prev?.role ?? null,
+          originConvId: ev.originConvId ?? prev?.originConvId ?? null,
           inTokens: ev.inTokens ?? prev?.inTokens ?? 0,
           outTokens: ev.outTokens ?? prev?.outTokens ?? 0
         }
@@ -76,7 +81,7 @@ export function applyRunEvent(
 // Seed an entry for a run already in flight when the renderer (re)loads — status events will keep it fresh.
 export function seedRun(
   state: Record<string, LiveWorkflowRun>,
-  seed: { runId: string; workflowId: string; name: string; steps: number; inTokens?: number; outTokens?: number }
+  seed: { runId: string; workflowId: string; name: string; steps: number; originConvId?: string | null; inTokens?: number; outTokens?: number }
 ): Record<string, LiveWorkflowRun> {
   if (state[seed.runId]) return state // live events beat the seed — never regress a fresher entry
   return {
@@ -89,6 +94,7 @@ export function seedRun(
       stepsDone: 0,
       phase: null,
       role: null,
+      originConvId: seed.originConvId ?? null,
       inTokens: seed.inTokens ?? 0,
       outTokens: seed.outTokens ?? 0
     }

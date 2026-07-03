@@ -15,6 +15,7 @@ import { drainSoloResume } from '../services/solo-async'
 import { ENGINEER_ROLE_ID } from '../services/agent-tools'
 import { isSoloPreviewWriteTool } from '../agent/tools/preview'
 import type { AgentPermissionResponse, AgentQuestionResponse, AgentRunInput } from './contracts'
+import type { Tool } from '../agent/tool'
 
 // Streaming agent over IPC. CONTROL stays on agent:* (`agent:run` starts a run and returns its streamId;
 // `agent:stop` aborts; `agent:question`/`agent:permission:respond` bridge solo-only dialogs) — but the
@@ -52,7 +53,10 @@ function sweepStream(streamId: string): void {
 // permission/question bridging a user-initiated run gets. opts.resumeNote marks a resume: it's pushed to the
 // renderer up front (agent:resume-stream binds the new streamId to the conv) and handed to agent.service.run so
 // it seeds the completion note instead of persisting a user turn.
-function startAgentRun(input: AgentRunInput, sender: WebContents, opts?: { resumeNote?: string }): { streamId: string } {
+// Exported for backend-orchestrated turns: the /workflow launch review (workflow.handler) drives a role
+// turn through the SAME streaming/permission machinery a user-initiated run gets, with its per-run
+// closure tool riding opts.extraTools.
+export function startAgentRun(input: AgentRunInput, sender: WebContents, opts?: { resumeNote?: string; extraTools?: Tool[] }): { streamId: string } {
   const streamId = ulid()
   const roleId = input.roleId ?? ENGINEER_ROLE_ID
   const { controller, send, finish } = streams.open(streamId, sender)
@@ -173,7 +177,7 @@ function startAgentRun(input: AgentRunInput, sender: WebContents, opts?: { resum
             }),
         },
         controller.signal,
-        { resumeNote: opts?.resumeNote },
+        { resumeNote: opts?.resumeNote, extraTools: opts?.extraTools },
       )
       .then((r) => {
         // step:done settles the segment (authoritative text — mirrors the persisted row), then the terminal

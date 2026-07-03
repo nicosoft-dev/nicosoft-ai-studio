@@ -82,6 +82,7 @@ import type {
   WorkflowRunDto,
   WorkflowRunEvent,
   WorkflowRunTrigger,
+  WorkflowLaunchFromConvReq,
   SkillInput,
   PluginDto,
   ProjectDto,
@@ -494,6 +495,9 @@ const api = {
     importConfirm: (script: string): Promise<WorkflowDto> => ipcRenderer.invoke('workflows:importConfirm', script),
     run: (id: string, params: Record<string, string | number | boolean>, trigger?: WorkflowRunTrigger): Promise<{ runId: string; convId: string }> =>
       ipcRenderer.invoke('workflows:run', id, params, trigger),
+    // §7.5 launch review: the /workflow command path — the conversation's role reviews then decides;
+    // the review turn streams on the returned streamId like any solo turn (agent:resume-stream binds it).
+    launchFromConv: (req: WorkflowLaunchFromConvReq): Promise<{ streamId: string }> => ipcRenderer.invoke('workflows:launchFromConv', req),
     stop: (runId: string): Promise<boolean> => ipcRenderer.invoke('workflows:stop', runId),
     runs: (workflowId: string): Promise<WorkflowRunDto[]> => ipcRenderer.invoke('workflows:runs', workflowId),
     runGet: (runId: string): Promise<WorkflowRunDto | null> => ipcRenderer.invoke('workflows:runGet', runId),

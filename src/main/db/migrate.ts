@@ -44,6 +44,12 @@ export function runMigrations(db: DatabaseSync): void {
   ensureColumn(db, 'gate_outcomes', 'row_kind', "TEXT NOT NULL DEFAULT 'floor'")
   ensureColumn(db, 'gate_outcomes', 'step_id', 'TEXT')
   ensureColumn(db, 'gate_outcomes', 'subject', 'TEXT')
+  // Workflow-run provenance (§7.5 launch discipline): WHO launched a run — initiating role id (NULL = the
+  // user by hand), the conversation it was launched from (launch-card / Tasks anchor), and the scheduled
+  // task that fired it. NULL on existing rows (an honest "unknown"). schema.ts carries them for fresh DBs.
+  ensureColumn(db, 'workflow_runs', 'initiator', 'TEXT')
+  ensureColumn(db, 'workflow_runs', 'origin_conv_id', 'TEXT')
+  ensureColumn(db, 'workflow_runs', 'origin_task_id', 'TEXT')
   migrateShuriToFrontend(db)
 }
 

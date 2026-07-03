@@ -7,8 +7,13 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { readFile } from 'node:fs/promises'
 import * as workflowService from '../services/workflow/service'
+import { buildLaunchNote, makeLaunchDecisionTool, type LaunchReviewRequest } from '../services/workflow/launch-review'
+import * as rolesService from '../services/roles.service'
+import { resolveDepth } from '../llm/thinking'
+import * as endpointRepo from '../repos/endpoint.repo'
+import { startAgentRun } from './agent.handler'
 import { pickDirectory, pickFile, saveToFile } from './dialogs'
-import type { WorkflowRunEvent, WorkflowRunTrigger } from './contracts'
+import type { WorkflowLaunchFromConvReq, WorkflowRunEvent, WorkflowRunTrigger } from './contracts'
 
 // .nsw files are the SCRIPT TEXT — cap reads at 1MB (a workflow script is a few KB; anything bigger is
 // not a workflow file).
@@ -57,6 +62,56 @@ export function registerWorkflowHandlers(): void {
   ipcMain.handle('workflows:run', (_e, id: string, params: Record<string, string | number | boolean>, trigger?: WorkflowRunTrigger) =>
     workflowService.run(id, params ?? {}, trigger ?? 'manual', broadcastRunEvent)
   )
+  // §7.5 launch review ("whoever launches, checks"): a /workflow command in a role's conversation starts
+  // ONE visible role turn that reviews the workflow (mechanical preflight verdict + its own read of the
+  // script/params) and submits the decision through a per-run closure tool — the only path that actually
+  // starts the run. Streams through the SAME solo machinery as any turn (startAgentRun + resumeNote).
+  ipcMain.handle('workflows:launchFromConv', (e, req: WorkflowLaunchFromConvReq) => {
+    const w = workflowService.get(req.workflowId)
+    if (!w) throw new Error('workflow not found')
+    const binding = rolesService.getBinding(req.roleId)
+    if (!binding?.endpointId || !binding.model) throw new Error(`${req.roleId} has no endpoint/model bound — bind one in Settings, or run it from the Workflows page`)
+    const ep = endpointRepo.getById(binding.endpointId)
+    if (!ep) throw new Error('bound endpoint not found')
+    // Mechanical verdict FIRST (same gate the run itself enforces) — resolved here so the review turn
+    // relays a definite result instead of re-deriving it. A failure doesn't abort the turn: the role
+    // reports it and blocks (the decision tool refuses a failed preflight anyway).
+    let mechanicalIssue: string | null = null
+    try {
+      workflowService.preflightRun(req.workflowId, req.params ?? {})
+    } catch (err) {
+      mechanicalIssue = err instanceof Error ? err.message : String(err)
+    }
+    const sender = e.sender
+    let streamId = '' // bound right below — the tool only fires after startAgentRun returns
+    const reviewReq: LaunchReviewRequest = {
+      workflow: w,
+      params: req.params ?? {},
+      roleId: req.roleId,
+      convId: req.convId,
+      mechanicalIssue,
+      onCard: (messageId, payload) => {
+        if (!sender.isDestroyed()) sender.send('coordinator:workflow:launch-card', { streamId, convId: req.convId, messageId, payload })
+      },
+      onRunEvent: broadcastRunEvent,
+    }
+    const started = startAgentRun(
+      {
+        convId: req.convId,
+        roleId: req.roleId,
+        endpointId: binding.endpointId,
+        model: binding.model,
+        prompt: '',
+        cwd: req.cwd ?? '',
+        permissionMode: req.permissionMode,
+        thinking: resolveDepth(ep.protocol, binding.model, binding.thinkingDepth),
+      },
+      sender,
+      { resumeNote: buildLaunchNote(reviewReq), extraTools: [makeLaunchDecisionTool(reviewReq)] }
+    )
+    streamId = started.streamId
+    return started
+  })
   ipcMain.handle('workflows:stop', (_e, runId: string) => workflowService.stop(runId))
   ipcMain.handle('workflows:runs', (_e, workflowId: string) => workflowService.runs(workflowId))
   ipcMain.handle('workflows:runGet', (_e, runId: string) => workflowService.getRun(runId))

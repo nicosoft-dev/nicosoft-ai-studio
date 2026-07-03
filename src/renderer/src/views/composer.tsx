@@ -9,6 +9,7 @@ import { AttachmentStrip } from '@/components/attachment-strip'
 import { ModelPicker, ThinkingPicker, ImageModelPicker, ModePicker } from '@/components/composer-controls'
 import { CommandPalette, matchCommands, type SlashCommand } from '@/components/command-palette'
 import { workflowCommandSpecs, parseWorkflowArgs, launchPayload, type WfCmdWorkflow } from '@/lib/workflow-command'
+import { AGENT_ROLE_IDS } from '@shared/roles'
 import { toast } from '@/stores/toast'
 import { PathBar } from '@/components/path-bar'
 import { GitStatusChip } from '@/components/git-status-chip'
@@ -246,10 +247,17 @@ export function Composer({
     ? resolveConvCwd(conv, { ...cwdByExpert, [expert.id]: effectiveCwd }, messages)
     : effectiveCwd.trim() || null
 
-  // `/workflow <name> [k=v …]` (workflow-design §6.5): every ENABLED workflow surfaces as a palette
-  // command (drafts/disabled never do — §9 red line). The list is fetched when the palette opens, so a
-  // just-enabled workflow appears without a view switch. Running/validation lives in launchWorkflow via
-  // a latest-closure ref (same pattern as sendPromptRef) — the fetched entries never go stale on conv switch.
+  // `/workflow <name> [k=v …]` (workflow-design §6.5 + §7.5 launch review): every ENABLED workflow
+  // surfaces as a palette command (drafts/disabled never do — §9 red line). The list is fetched when the
+  // palette opens, so a just-enabled workflow appears without a view switch. Running/validation lives in
+  // launchWorkflow via a latest-closure ref (same pattern as sendPromptRef).
+  //
+  // Launch discipline (§7.5, "whoever launches, checks"): in an AGENT role's conversation the command
+  // does NOT start the run — it persists the command line, then main drives ONE visible role turn that
+  // reviews the workflow (mechanical verdict + its own read) and decides via a per-turn closure tool;
+  // a block is absolute. On the greeting page the conversation is minted first (send()'s lazy-create
+  // shape) so the command + review + card all persist — reopening the thread shows what happened.
+  // A non-agent-loop role's conversation (no reviewer to run) keeps the direct start + card.
   const launchWorkflow = (w: WfCmdWorkflow, arg?: string): boolean | undefined => {
     const parsed = parseWorkflowArgs(w.params, arg)
     if (!parsed.ok) {
@@ -265,14 +273,34 @@ export function Composer({
       )
       return false // keep the typed command in the composer so the user fixes it in place
     }
-    const convId = activeConv
+    const rawCmd = value.trim() // the user's literal command line — persisted as their bubble
     void (async () => {
       try {
+        let convId = activeConv
+        if (AGENT_ROLE_IDS.has(expert.id)) {
+          chat.ensureStreamListeners() // the review turn streams on agent:resume-stream — subscribe before it can fire
+          if (!convId) {
+            const conv = await window.api.conversations.create({ kind: 'single', primaryRoleId: expert.id, title: rawCmd.slice(0, 60) })
+            convId = conv.id
+            chat.adoptConversation(conv)
+          }
+          const line = await window.api.conversations.append(convId, { author: 'user', content: rawCmd })
+          chat.insertUserLine(convId, { id: line.id, text: rawCmd })
+          await window.api.workflows.launchFromConv({
+            workflowId: w.id,
+            convId,
+            roleId: expert.id,
+            params: parsed.values,
+            cwd: effectiveCwd || undefined,
+            permissionMode: mode
+          })
+          // the review turn streams in via agent:resume-stream (streaming flag + segment open included)
+          return
+        }
+        // No agent loop to review with (e.g. Danny's conversation — his natural-language routing branch
+        // carries its own review; non-loop roles) → direct start + card, mechanical preflight in main.
         const { runId } = await window.api.workflows.run(w.id, parsed.values, 'command')
         if (convId) {
-          // The launch card: a persisted row in THIS conversation (segmentKind='workflow-launch') whose
-          // renderer shows live status + links to the run panel. No conversation open yet → the run
-          // still starts; a toast points at the Workflows view instead of minting a card-only conv.
           const dto = await window.api.conversations.append(convId, {
             author: 'expert',
             content: launchPayload(w.id, runId, w.name, parsed.values),

@@ -97,6 +97,8 @@ export class ScheduledTaskStore {
       enabled: true,
       steps: input.steps,
       cwd: input.cwd,
+      creatorRoleId: input.creatorRoleId,
+      creatorConvId: input.creatorConvId,
       createdAt: nowMs,
     }
     if (task.durable) {

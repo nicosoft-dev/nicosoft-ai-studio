@@ -521,8 +521,22 @@ export interface CoordinatorStepDone {
 // the renderer slots it into the live message list; reload rebuilds it from the row.
 export interface CoordinatorWorkflowLaunchCard {
   streamId: string
+  // §7.5: the conversation the card row lives in, carried directly so the store doesn't depend on the
+  // streamId→conv bind having landed first (the launch-review turn pushes cards mid-stream).
+  convId?: string
   messageId: string
   payload: string
+}
+
+// §7.5 launch review: run a saved workflow FROM a role conversation — the role reviews (mechanical
+// verdict + its own read) and decides via the per-turn closure tool; nothing starts without it.
+export interface WorkflowLaunchFromConvReq {
+  workflowId: string
+  convId: string
+  roleId: string
+  params: Record<string, string | number | boolean>
+  cwd?: string
+  permissionMode?: AgentPermissionMode
 }
 export interface CoordinatorDoneDto {
   streamId: string
@@ -1032,6 +1046,11 @@ export interface WorkflowRunDto {
   failReason: WorkflowFailReason | null
   failDetail: string | null // one-line cause (script error message / failed step label)
   trigger: WorkflowRunTrigger
+  // §7.5 provenance: launching role id (null = the user by hand), the conversation it was launched
+  // from, and the scheduled task that fired it — the Runs history's "who started this" column.
+  initiator: string | null
+  originConvId: string | null
+  originTaskId: string | null
   params: Record<string, string | number | boolean>
   inTokens: number // turn-final aggregate (settled at finish; live values ride the run broadcast)
   outTokens: number
@@ -1052,7 +1071,7 @@ export interface WorkflowScanDto {
 // LIVE from these; replay of a finished run reads the hidden conversation (conversations:messages +
 // agent:transcript) instead — same data, settled.
 export type WorkflowRunEvent =
-  | { kind: 'status'; runId: string; workflowId: string; status: WorkflowRunStatus; failReason?: WorkflowFailReason; failDetail?: string; inTokens: number; outTokens: number }
+  | { kind: 'status'; runId: string; workflowId: string; status: WorkflowRunStatus; failReason?: WorkflowFailReason; failDetail?: string; inTokens: number; outTokens: number; originConvId?: string | null } // §7.5: launch-origin conversation — the Tasks section anchors an entry to it
   | { kind: 'phase'; runId: string; title: string }
   | { kind: 'log'; runId: string; message: string }
   | { kind: 'step-start'; runId: string; stepIndex: number; role: string; phase: string | null; hint: string }
@@ -1235,6 +1254,8 @@ export interface ScheduledTask {
   steps: TaskStep[] // ordered chain; each step's output feeds the next
   cwd?: string // pre-authorized working dir for every step (full perms inside it)
   convId?: string // target conversation to inject into (else a new one per fire)
+  creatorRoleId?: string // §7.5: the role that created this task via schedule_create (undefined = user by hand)
+  creatorConvId?: string // §7.5: the conversation it was created from — a fired workflow step anchors there
   createdAt: number
   lastFiredAt?: number
   runs?: TaskRun[] // recent fire results, newest first (capped) — drives the Scheduled page's status + history
@@ -1255,6 +1276,10 @@ export interface CreateTaskInput {
   steps: TaskStep[] // at least one
   cwd?: string
   durable?: boolean
+  // §7.5 provenance: set ONLY by the agent schedule_create tool (the creating role + its conversation).
+  // UI-created tasks leave both undefined = "the user set this up by hand".
+  creatorRoleId?: string
+  creatorConvId?: string
 }
 
 // Pushed on scheduled:fired — the engine just ran a task in the background. The Scheduled page reloads so its

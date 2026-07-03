@@ -1137,6 +1137,11 @@ function RunPanel({
           const no = runs.length - i
           const dot = r.status === 'running' ? 'run' : r.status === 'failed' ? 'err' : r.status === 'stopped' ? 'stop' : ''
           const current = r.id === runId
+          // §7.5 provenance column: who started this run. trigger 'command' reads as its user-facing
+          // name (/workflow); an initiating role shows by display name; Danny's own trigger IS the name.
+          const who = r.initiator ? (byId[r.initiator]?.name ?? r.initiator) : null
+          const kind = r.trigger === 'command' ? '/workflow' : r.trigger
+          const via = r.trigger === 'danny' ? (who ?? 'Danny') : who ? `${kind} · ${who}` : kind
           return (
             <div
               key={r.id}
@@ -1147,7 +1152,7 @@ function RunPanel({
               <span className={'wf-dot ' + dot} />
               <span>#{no} · {r.status === 'failed' ? `failed${r.failReason ? ` (${r.failReason})` : ''}` : r.status}</span>
               <small>
-                · {ago(r.startedAt)}{r.finishedAt ? ` · ${fmtDur(new Date(r.finishedAt).getTime() - new Date(r.startedAt).getTime())}` : ''} · via {r.trigger} · ↑{kTok(r.inTokens)} ↓{kTok(r.outTokens)}
+                · {ago(r.startedAt)}{r.finishedAt ? ` · ${fmtDur(new Date(r.finishedAt).getTime() - new Date(r.startedAt).getTime())}` : ''} · via {via} · ↑{kTok(r.inTokens)} ↓{kTok(r.outTokens)}
                 {r.failDetail ? ` · ${r.failDetail.slice(0, 80)}` : ''}
               </small>
             </div>

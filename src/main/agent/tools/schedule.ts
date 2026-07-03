@@ -100,6 +100,10 @@ export const scheduleCreateTool = buildTool({
         })),
         cwd: input.cwd ?? ctx.cwd,
         durable: input.durable,
+        // §7.5 provenance: the creating role + its conversation — a workflow step fired by this task
+        // anchors its run to that conversation's Tasks section (user-created tasks carry neither).
+        creatorRoleId: ctx.roleId,
+        creatorConvId: ctx.convId,
       },
       Date.now()
     )

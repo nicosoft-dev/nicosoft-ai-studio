@@ -194,7 +194,7 @@ class SchedulerEngine {
         if (step.kind === 'workflow') {
           // A workflow is its own standalone run (hidden conv + run row) — like `project`, it executes
           // headlessly regardless of the target conversation's liveness; nothing to inject.
-          await this.runWorkflowStep(step, `scheduled task ${task.id} step ${i + 1} (workflow)`)
+          await this.runWorkflowStep(step, `scheduled task ${task.id} step ${i + 1} (workflow)`, task)
           continue
         }
         // Deliver into the LIVE session, which already runs under its OWN validated role/endpoint/key. We must
@@ -235,7 +235,7 @@ class SchedulerEngine {
         case 'workflow':
           // Params are the workflow's explicit contract — `prior` is NOT injected into them (a saved
           // script is a pinned path, not a prompt). Its return text becomes the next step's prior.
-          prior = await this.runWorkflowStep(step, where)
+          prior = await this.runWorkflowStep(step, where, task)
           break
       }
     }
@@ -247,9 +247,11 @@ class SchedulerEngine {
   // the script's return text. Approvals inside steps are already headless-safe (coordinatorApproval:
   // green/yellow auto, red denied + recorded). A failed/stopped run throws so the task's TaskRun records
   // the reason (fire() swallows it into last_result) instead of silently passing.
-  private async runWorkflowStep(step: TaskStep, where: string): Promise<string> {
+  private async runWorkflowStep(step: TaskStep, where: string, task: ScheduledTask): Promise<string> {
     if (!step.workflowId) throw new Error(`${where}: no workflow selected`)
-    const res = await workflowService.runAndWait(step.workflowId, step.workflowParams ?? {}, 'scheduled', (ev) => this.onWorkflowEvent?.(ev))
+    // §7.5 provenance: an AGENT-created task carries its creator — the fired run anchors to that role's
+    // conversation (Tasks section) and names the role in the history; a user-created task carries neither.
+    const res = await workflowService.runAndWait(step.workflowId, step.workflowParams ?? {}, 'scheduled', (ev) => this.onWorkflowEvent?.(ev), undefined, { taskId: task.id, initiator: task.creatorRoleId, convId: task.creatorConvId })
     if (res.status !== 'ok') {
       throw new Error(`${where}: workflow ${res.status}${res.failDetail ? ` — ${res.failDetail}` : ''}`)
     }

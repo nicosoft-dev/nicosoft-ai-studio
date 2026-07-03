@@ -133,6 +133,47 @@ async function runCollabReview(
   }
 }
 
+// §7.5 Danny's pre-launch review — one cheap pass over the ACTUAL script + params (routing only saw the
+// listing). Fail-OPEN by design: blocked=true ONLY on a definite, well-formed block verdict; an
+// unavailable binding, LLM error, or unparseable reply launches anyway (routing already confirmed
+// intent; the run's own preflight still gates mechanically). A user abort propagates.
+async function dannyReviewWorkflow(
+  wf: { id: string; name: string; params: Record<string, string | number | boolean> },
+  userPrompt: string,
+  signal: AbortSignal
+): Promise<{ blocked: boolean; issues: string[] }> {
+  const OK = { blocked: false, issues: [] as string[] }
+  try {
+    const row = workflowService.get(wf.id)
+    if (!row) return OK // vanished since routing — runAndWait's preflight reports it honestly
+    const binding = rolesService.getBinding('coordinator')
+    if (!binding?.endpointId || !binding.model) return OK
+    const target = endpointWithKey(binding.endpointId)
+    if (!target) return OK
+    const text = await chatOnce(target.ep, target.key, binding.model, [
+      {
+        role: 'user',
+        content:
+          `You are about to start the saved workflow \`${row.name}\` for this user request:\n${userPrompt.slice(0, 1500)}\n\n` +
+          `Run parameters: ${JSON.stringify(wf.params)}\n\nThe workflow script:\n\`\`\`\n${row.script}\n\`\`\`\n\n` +
+          'Final launch check: do the parameters make sense for this script, and do the steps fit the request? Reply with ONLY a JSON object — {"launch":true} when it is fine, or {"launch":false,"issues":["<concrete problem>", …]} when something is genuinely wrong. No other text.'
+      }
+    ], { signal })
+    const m = text.match(/\{[\s\S]*\}/)
+    if (!m) return OK
+    const obj = JSON.parse(m[0]) as { launch?: unknown; issues?: unknown }
+    if (obj.launch === false) {
+      const issues = Array.isArray(obj.issues) ? obj.issues.filter((i): i is string => typeof i === 'string' && !!i.trim()).slice(0, 6) : []
+      return { blocked: true, issues: issues.length ? issues : ['the workflow does not fit this request'] }
+    }
+    return OK
+  } catch (e) {
+    if (signal.aborted) throw e
+    console.warn('[coordinator] workflow pre-launch review unavailable (launching anyway):', e instanceof Error ? e.message : e)
+    return OK
+  }
+}
+
 // Top-level entrypoint. Always called from coordinator.handler; the user turn is already persisted by the
 // renderer (chat-path style — see chat store `send`). Throws on configuration errors so the handler
 // turns them into a single `coordinator:error` event.
@@ -191,6 +232,15 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
     const wf = decision.workflow
     cb.onDispatch(['coordinator'], `using workflow: ${wf.name}`)
     emitCoordinatorIntro(input.convId, decision.intro ?? `Using workflow: ${wf.name}.`, cb)
+    // §7.5 "whoever launches, checks" — Danny launched it, Danny reviews it: one cheap LLM pass over the
+    // ACTUAL script + params (routing only saw name/description). A definite block closes the turn with
+    // the problems (absolute, like the /workflow review); an unavailable/unparseable review fails OPEN —
+    // routing already confirmed intent, and the run's own preflight still gates mechanically.
+    const review = await dannyReviewWorkflow(wf, input.prompt, signal)
+    if (review.blocked) {
+      emitCoordinatorIntro(input.convId, `I looked at ${wf.name} before starting it and I'm not launching it:\n${review.issues.map((i) => `- ${i}`).join('\n')}`, cb)
+      return { inputTokens: 0, outputTokens: 0, reason: 'incomplete' }
+    }
     let launchedRunId: string | null = null
     // Chat Stop also stops the launched run (the run panel's own Stop stays independent) — without this
     // the turn would sit awaiting a run the user can no longer see the point of.
@@ -207,7 +257,8 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
         ({ runId }) => {
           launchedRunId = runId
           emitWorkflowLaunchCard(input.convId, { workflowId: wf.id, runId, name: wf.name, params: wf.params }, cb)
-        }
+        },
+        { initiator: 'coordinator', convId: input.convId } // §7.5 provenance: Danny launched it, from this chat
       )
       if (signal.aborted) throw new LlmError('network', 'aborted mid-workflow run')
       const closing =

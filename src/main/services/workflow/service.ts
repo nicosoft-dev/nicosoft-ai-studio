@@ -392,12 +392,13 @@ export async function run(
   id: string,
   params: Record<string, string | number | boolean>,
   trigger: WorkflowRunTrigger,
-  onEvent: (ev: WorkflowRunEvent) => void
+  onEvent: (ev: WorkflowRunEvent) => void,
+  origin?: { initiator?: string; convId?: string; taskId?: string } // §7.5 provenance → the run row
 ): Promise<{ runId: string; convId: string }> {
   const row = preflightRun(id, params)
   const executor = await import('./executor')
   // `done` stays in-process (a Promise can't cross IPC) — this is the fire-and-watch surface.
-  const { runId, convId } = executor.startRun({ workflow: row, params, trigger, onEvent })
+  const { runId, convId } = executor.startRun({ workflow: row, params, trigger, origin, onEvent })
   return { runId, convId }
 }
 
@@ -410,7 +411,8 @@ export async function runAndWait(
   params: Record<string, string | number | boolean>,
   trigger: WorkflowRunTrigger,
   onEvent: (ev: WorkflowRunEvent) => void,
-  onStarted?: (ids: { runId: string; convId: string }) => void // fires once the run row exists — Danny drops the launch card here, before the (minutes-long) settle
+  onStarted?: (ids: { runId: string; convId: string }) => void, // fires once the run row exists — Danny drops the launch card here, before the (minutes-long) settle
+  origin?: { initiator?: string; convId?: string; taskId?: string } // §7.5 provenance → the run row
 ): Promise<{
   runId: string
   convId: string
@@ -421,7 +423,7 @@ export async function runAndWait(
 }> {
   const row = preflightRun(id, params)
   const executor = await import('./executor')
-  const { runId, convId, done } = executor.startRun({ workflow: row, params, trigger, onEvent })
+  const { runId, convId, done } = executor.startRun({ workflow: row, params, trigger, origin, onEvent })
   onStarted?.({ runId, convId })
   const settled = await done
   return { runId, convId, ...settled }
@@ -451,6 +453,9 @@ function runToDto(r: WorkflowRunRow): WorkflowRunDto {
     failReason: r.failReason,
     failDetail: r.failDetail,
     trigger: r.trigger,
+    initiator: r.initiator,
+    originConvId: r.originConvId,
+    originTaskId: r.originTaskId,
     params: r.params,
     inTokens: r.inTokens,
     outTokens: r.outTokens,

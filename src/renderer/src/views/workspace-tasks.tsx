@@ -305,11 +305,14 @@ export function WorkspaceTasks({ activeConv }: { activeConv: string | null }): R
     }))
     .filter((g) => g.panels.length > 0 || g.items.length > 0)
 
-  // — Running workflows (§6.4 W2④) — GLOBAL background work, deliberately independent of activeConv (a
-  // run belongs to no visible conversation). One mini entry per running run: name · phase · current role ·
-  // steps x/y · ↑tokens; click jumps to the run panel via the same window event the launch card uses.
+  // — Running workflows (§6.4 / §7.5) — an entry shows ONLY in the conversation the run was launched
+  // FROM ("you weren't there when it started" rule): /workflow and Danny anchor to their chat, an
+  // agent-created scheduled task anchors to its creator's conversation. A hand launch (Workflows page
+  // Run, originConvId null) and a user-created scheduled task never surface here — the user set those
+  // off themselves. One mini entry per run: name · phase · current role · steps x/y · ↑tokens; click
+  // jumps to the run panel via the same window event the launch card uses.
   const wfRunning = useWorkflowRuns((s) => s.running)
-  const wfEntries = Object.values(wfRunning)
+  const wfEntries = Object.values(wfRunning).filter((r) => !!r.originConvId && r.originConvId === activeConv)
 
   return (
     <div className="ws-panel">

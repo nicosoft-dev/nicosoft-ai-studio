@@ -59,7 +59,7 @@ void window.api.workflows.list().then(async (ws) => {
     const top = runs[0]
     if (top?.status === 'running') {
       useWorkflowRuns.setState((s) => ({
-        running: seedRun(s.running, { runId: top.id, workflowId: w.id, name: w.name, steps: w.steps, inTokens: top.inTokens, outTokens: top.outTokens })
+        running: seedRun(s.running, { runId: top.id, workflowId: w.id, name: w.name, steps: w.steps, originConvId: top.originConvId, inTokens: top.inTokens, outTokens: top.outTokens })
       }))
     }
   }

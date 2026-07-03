@@ -34,6 +34,9 @@ export interface StartRunInput {
   workflow: WorkflowRow
   params: Record<string, string | number | boolean>
   trigger: 'manual' | 'command' | 'scheduled' | 'danny'
+  // §7.5 provenance, recorded on the run row: launching role id (undefined = the user by hand), the
+  // conversation the run was launched from, the scheduled task that fired it.
+  origin?: { initiator?: string; convId?: string; taskId?: string }
   onEvent: (ev: WorkflowRunEvent) => void
 }
 
@@ -79,11 +82,11 @@ export interface RunSettled {
 export function startRun(input: StartRunInput): { runId: string; convId: string; done: Promise<RunSettled> } {
   const { workflow, params, trigger, onEvent } = input
   const conv = convService.create({ kind: 'workflow', title: `${workflow.name} · run` })
-  const run = runRepo.create({ workflowId: workflow.id, convId: conv.id, trigger, params })
+  const run = runRepo.create({ workflowId: workflow.id, convId: conv.id, trigger, params, initiator: input.origin?.initiator ?? null, originConvId: input.origin?.convId ?? null, originTaskId: input.origin?.taskId ?? null })
   const controller = new AbortController()
   live.set(run.id, { controller, convId: conv.id, workflowId: workflow.id })
 
-  const done = executeRun({ runId: run.id, convId: conv.id, workflow, params, controller, onEvent }).finally(() => {
+  const done = executeRun({ runId: run.id, convId: conv.id, workflow, params, controller, onEvent, originConvId: run.originConvId }).finally(() => {
     live.delete(run.id)
   })
   void done.catch(() => {})
@@ -97,12 +100,13 @@ async function executeRun(opts: {
   params: Record<string, string | number | boolean>
   controller: AbortController
   onEvent: (ev: WorkflowRunEvent) => void
+  originConvId: string | null // §7.5: rides every status event — the Tasks section anchors on it
 }): Promise<RunSettled> {
-  const { runId, convId, workflow, params, controller, onEvent } = opts
+  const { runId, convId, workflow, params, controller, onEvent, originConvId } = opts
   const signal = controller.signal
   const cwd = effectiveCwd(workflow, params)
 
-  onEvent({ kind: 'status', runId, workflowId: workflow.id, status: 'running', inTokens: 0, outTokens: 0 })
+  onEvent({ kind: 'status', runId, workflowId: workflow.id, status: 'running', inTokens: 0, outTokens: 0, originConvId })
 
   // args = declared params (defaults, overridden by the run's values) + the reserved runAt timestamp —
   // the ONE sanctioned non-determinism door (the sandbox blocks Date.now; scheduled runs read args.runAt).
@@ -119,7 +123,7 @@ async function executeRun(opts: {
   const emitRunningSigma = (): void => {
     if (signal.aborted) return
     const u = usageRepo.sumByConversation(convId)
-    onEvent({ kind: 'status', runId, workflowId: workflow.id, status: 'running', inTokens: u.inTokens, outTokens: u.outTokens })
+    onEvent({ kind: 'status', runId, workflowId: workflow.id, status: 'running', inTokens: u.inTokens, outTokens: u.outTokens, originConvId })
   }
   // The most recent UNCAUGHT-candidate step failure — when the script rejects with a message containing
   // this failure's message, the run classifies as that step's kind instead of a generic script-error.
@@ -203,6 +207,7 @@ async function executeRun(opts: {
     ...(failReason ? { failReason, failDetail: failDetail ?? undefined } : {}),
     inTokens: usage.inTokens,
     outTokens: usage.outTokens,
+    originConvId,
   })
   // The script's return value, textified once here: a string returns as-is, other JSON-able values
   // stringify, no/void return reads as empty. Awaiting callers pipe this onward.

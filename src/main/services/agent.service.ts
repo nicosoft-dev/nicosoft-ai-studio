@@ -55,7 +55,10 @@ export async function run(
   input: AgentRunInput,
   cb: AgentCallbacks,
   signal: AbortSignal,
-  opts?: { resumeNote?: string },
+  // extraTools (§7.5): per-RUN closure tools appended to the role kit — the machine-protocol channel for
+  // backend-orchestrated turns (e.g. the /workflow launch review submits its decision through one). Main-
+  // process callers only (a Tool can't cross IPC); never persisted, gone next turn.
+  opts?: { resumeNote?: string; extraTools?: Tool[] },
 ): Promise<{ reason: string; turns: number; convId: string; runId: string; text: string; promptTokens: number; contextTokens: number; outputTokens: number; sentTokens: number }> {
   const ep = endpointRepo.getById(input.endpointId)
   if (!ep) throw new LlmError('bad_request', 'endpoint not found')
@@ -73,6 +76,7 @@ export async function run(
   let userPromptContexts: string[] = []
   let tools = [...toolsForAgentRole(roleId), launchAsyncTool, awaitAsyncTool] // 批C2a: solo direct chat can launch/await async ops (studio_lens launches through ctx.async too)
   if (DEV_ROLES.has(roleId)) tools = [...tools, ...SERVICE_TOOLS, ...PLAYWRIGHT_TOOLS, ...SUBAGENT_TOOLS, lspTool as unknown as Tool] // preview_* moved into toolsForAgentRole (universal)
+  if (opts?.extraTools?.length) tools = [...tools, ...opts.extraTools] // per-run closure tools (backend-orchestrated turns)
   // Read needs a folder boundary; without a cwd, drop it for non-dev roles so the model can't read the
   // process working dir. Dev roles (Flynn/Shuri) always have a cwd (required in the composer).
   if (!input.cwd && !DEV_ROLES.has(roleId)) tools = tools.filter((t) => t.name !== 'Read')

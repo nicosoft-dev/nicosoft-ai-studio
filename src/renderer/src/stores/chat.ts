@@ -316,9 +316,11 @@ export const useChat = create<ChatState>((set, get) => {
     // §7 W2 Danny → workflow: main just persisted the launch-card row — slot it into the live list via
     // the same insertCard the /workflow composer command uses (streaming-tail-safe; reload rebuilds it).
     at.onWorkflowLaunchCard((d) => {
-      const meta = runMeta.get(d.streamId)
-      if (!meta) return
-      get().insertCard(meta.convId, { id: d.messageId, content: d.payload, segmentKind: 'workflow-launch' })
+      // §7.5: prefer the direct convId (the launch-review turn pushes cards mid-stream, and the card
+      // must land even if the streamId→conv bind raced); Danny's coordinator path still resolves via meta.
+      const convId = d.convId ?? runMeta.get(d.streamId)?.convId
+      if (!convId) return
+      get().insertCard(convId, { id: d.messageId, content: d.payload, segmentKind: 'workflow-launch' })
     })
     at.onStepStart((d) => {
       const meta = runMeta.get(d.streamId)
@@ -815,6 +817,22 @@ export const useChat = create<ChatState>((set, get) => {
         const msg: ChatMessage = { id: card.id, role: 'assistant', text: card.content, expertId: null, dispatch: null, segmentKind: card.segmentKind }
         if (msgs.length && msgs[msgs.length - 1].streaming) msgs.splice(msgs.length - 1, 0, msg)
         else msgs.push(msg)
+        return { byConversation: { ...s.byConversation, [convId]: msgs } }
+      })
+    },
+    // §7.5 launch review: the review turn streams in on agent:resume-stream — a path that can fire
+    // BEFORE any send() this session (greeting /workflow, or a reopened conversation). The stream
+    // subscriptions must exist first or the whole turn is invisible live (it would only appear on
+    // reload). Idempotent — same guard send() uses.
+    ensureStreamListeners: () => ensureListeners(),
+    // §7.5 launch review: the composer minted a conversation OUTSIDE send() (a /workflow command on the
+    // greeting page) — adopt it as the active thread exactly like send()'s lazy create does.
+    adoptConversation: (conv) => set((s) => ({ activeConv: conv.id, conversations: [conv, ...s.conversations] })),
+    // The user's already-PERSISTED /workflow command line — shown as their bubble so the conversation
+    // reads like what happened (the review turn itself persists no user row: resumeNote semantics).
+    insertUserLine: (convId, line) => {
+      set((s) => {
+        const msgs = [...(s.byConversation[convId] ?? []), { id: line.id, role: 'user' as const, text: line.text, expertId: null, dispatch: null, segmentKind: null }]
         return { byConversation: { ...s.byConversation, [convId]: msgs } }
       })
     },
