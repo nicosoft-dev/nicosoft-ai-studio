@@ -28,7 +28,7 @@ import { withScriptSlot } from '../script/pool'
 import { classifyRunOutcome, effectiveCwd, stepContextWrap, STALL_RETRIES, WORKFLOW_STALL_MS, type StepFailure } from './rules'
 import type { CoordinatorCallbacks } from '../coordinator/types'
 import type { WorkflowRow } from '../../repos/workflow.repo'
-import type { WorkflowRunEvent } from '../../ipc/contracts'
+import type { WorkflowFailReason, WorkflowRunEvent, WorkflowRunStatus } from '../../ipc/contracts'
 
 export interface StartRunInput {
   workflow: WorkflowRow
@@ -62,19 +62,32 @@ export function stopAllRuns(): void {
   for (const r of live.values()) r.controller.abort()
 }
 
+// How a settled run reads back to an awaiting caller (scheduled step / Danny routing): the outcome plus
+// the script's RETURN VALUE as text — the run's answer, piped onward (next scheduled step / chat reply).
+export interface RunSettled {
+  status: Exclude<WorkflowRunStatus, 'running'>
+  failReason: WorkflowFailReason | null
+  failDetail: string | null
+  resultText: string
+}
+
 // Start a run: mint the hidden conversation + the run row synchronously (so the caller can open the
-// panel immediately), then execute the script in the background. Returns the run pointer.
-export function startRun(input: StartRunInput): { runId: string; convId: string } {
+// panel immediately), then execute the script in the background. Returns the run pointer plus `done` —
+// the settle promise for callers that need the outcome in-process (IPC strips it; scheduled/Danny await
+// it). A noop catch marks it handled so the fire-and-forget path never raises an unhandled rejection;
+// awaiting consumers still observe a rejection themselves.
+export function startRun(input: StartRunInput): { runId: string; convId: string; done: Promise<RunSettled> } {
   const { workflow, params, trigger, onEvent } = input
   const conv = convService.create({ kind: 'workflow', title: `${workflow.name} · run` })
   const run = runRepo.create({ workflowId: workflow.id, convId: conv.id, trigger, params })
   const controller = new AbortController()
   live.set(run.id, { controller, convId: conv.id, workflowId: workflow.id })
 
-  void executeRun({ runId: run.id, convId: conv.id, workflow, params, controller, onEvent }).finally(() => {
+  const done = executeRun({ runId: run.id, convId: conv.id, workflow, params, controller, onEvent }).finally(() => {
     live.delete(run.id)
   })
-  return { runId: run.id, convId: conv.id }
+  void done.catch(() => {})
+  return { runId: run.id, convId: conv.id, done }
 }
 
 async function executeRun(opts: {
@@ -84,7 +97,7 @@ async function executeRun(opts: {
   params: Record<string, string | number | boolean>
   controller: AbortController
   onEvent: (ev: WorkflowRunEvent) => void
-}): Promise<void> {
+}): Promise<RunSettled> {
   const { runId, convId, workflow, params, controller, onEvent } = opts
   const signal = controller.signal
   const cwd = effectiveCwd(workflow, params)
@@ -191,6 +204,11 @@ async function executeRun(opts: {
     inTokens: usage.inTokens,
     outTokens: usage.outTokens,
   })
+  // The script's return value, textified once here: a string returns as-is, other JSON-able values
+  // stringify, no/void return reads as empty. Awaiting callers pipe this onward.
+  const value = result.ok ? result.value : undefined
+  const resultText = typeof value === 'string' ? value : value === undefined || value === null ? '' : JSON.stringify(value)
+  return { status, failReason, failDetail, resultText }
 }
 
 // Bridge ONE step's CoordinatorCallbacks onto the flat run-event stream. runRoleStep persists the step's

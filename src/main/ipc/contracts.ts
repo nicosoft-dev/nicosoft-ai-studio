@@ -1201,7 +1201,7 @@ export interface ProjectServiceEvent {
 //             sends mail itself); to/subject set the envelope, prompt + prior output the body
 //   project — create a new Project or advance an existing one (projectService) — no agent
 // Every kind's output is captured and piped into the next step's input (cross-role pipeline, doc 28 §5.3).
-export type StepKind = 'expert' | 'tool' | 'email' | 'project'
+export type StepKind = 'expert' | 'tool' | 'email' | 'project' | 'workflow'
 
 export interface TaskStep {
   kind: StepKind
@@ -1211,6 +1211,8 @@ export interface TaskStep {
   subject?: string // email: subject line
   action?: 'create' | 'advance' // project: create a new project vs advance an existing one
   projectId?: string // project (advance): target project id
+  workflowId?: string // workflow: the saved workflow to run (trigger='scheduled'); prompt is unused
+  workflowParams?: Record<string, string | number | boolean> // workflow: run parameters (defaults apply for the rest)
 }
 
 export interface ScheduledTask {

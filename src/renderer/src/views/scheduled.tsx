@@ -34,6 +34,7 @@ const STEP_KINDS: { v: StepKind; l: string }[] = [
   { v: 'tool', l: 'Tool / MCP' },
   { v: 'email', l: 'Send email' },
   { v: 'project', l: 'Project' },
+  { v: 'workflow', l: 'Workflow' },
 ]
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const DOW_OPTS = DOW.map((l, i) => ({ v: String(i), l }))
@@ -187,6 +188,12 @@ function StepChip({ step }: { step: StepDto }): ReactElement {
         <Icons.kanban size={13} /> Project
       </span>
     )
+  if (step.kind === 'workflow')
+    return (
+      <span className="step-chip">
+        <Icons.workflow size={13} /> Workflow
+      </span>
+    )
   return (
     <span className="step-chip">
       <Icons.puzzle size={13} /> Tool
@@ -310,6 +317,22 @@ function ScheduledEditor({
   useEffect(() => {
     void window.api.project.list().then((ps) => setProjects(ps.map((p) => ({ v: p.id, l: p.title }))))
   }, [])
+  // Workflow-step picker: ENABLED workflows only (drafts/disabled are not runnable entry points — §9;
+  // a saved step whose workflow gets disabled later fails at fire time with a recorded reason).
+  type WfOption = Awaited<ReturnType<typeof window.api.workflows.list>>[number]
+  const [workflows, setWorkflows] = useState<WfOption[]>([])
+  useEffect(() => {
+    void window.api.workflows
+      .list()
+      .then((ws) => setWorkflows(ws.filter((w) => w.enabled)))
+      .catch(() => {})
+  }, [])
+  const wfById = (id?: string): WfOption | undefined => workflows.find((w) => w.id === id)
+  const wfDefaults = (w?: WfOption): Record<string, string | number | boolean> => {
+    const out: Record<string, string | number | boolean> = {}
+    for (const p of w?.params ?? []) if (p.default !== undefined) out[p.name] = p.default
+    return out
+  }
 
   const setTrig = (patch: Partial<TriggerForm>): void => setTf((p) => ({ ...p, ...patch }))
   const setStep = (i: number, patch: Partial<StepDto>): void => setSteps((p) => p.map((s, j) => (j === i ? { ...s, ...patch } : s)))
@@ -417,8 +440,31 @@ function ScheduledEditor({
                   <div className="se-body">
                     <div className="se-top">
                       <div style={{ width: 130 }}>
-                        <Dropdown options={STEP_KINDS} value={s.kind} onChange={(v) => setStep(i, { kind: v as StepKind })} />
+                        <Dropdown
+                          options={STEP_KINDS}
+                          value={s.kind}
+                          onChange={(v) => {
+                            const kind = v as StepKind
+                            // Switching INTO workflow seeds the first enabled workflow + its defaults so
+                            // the step is runnable as saved; other kinds keep their own fields.
+                            if (kind === 'workflow') setStep(i, { kind, workflowId: s.workflowId ?? workflows[0]?.id, workflowParams: s.workflowParams ?? wfDefaults(wfById(s.workflowId) ?? workflows[0]) })
+                            else setStep(i, { kind })
+                          }}
+                        />
                       </div>
+                      {s.kind === 'workflow' && (
+                        <div style={{ width: 170 }}>
+                          {workflows.length > 0 ? (
+                            <Dropdown
+                              options={workflows.map((w) => ({ v: w.id, l: w.name }))}
+                              value={s.workflowId || workflows[0].id}
+                              onChange={(v) => setStep(i, { workflowId: v, workflowParams: wfDefaults(wfById(v)) })}
+                            />
+                          ) : (
+                            <span className="se-note">No enabled workflows</span>
+                          )}
+                        </div>
+                      )}
                       {s.kind === 'expert' && (
                         <div style={{ width: 130 }}>
                           <Dropdown options={expertOpts} value={s.roleId || 'generalist'} onChange={(v) => setStep(i, { roleId: v })} />
@@ -458,20 +504,62 @@ function ScheduledEditor({
                         <input className="input se-instr mono" value={s.projectId ?? ''} onChange={(e) => setStep(i, { projectId: e.target.value })} placeholder="No projects yet — paste a project id" />
                       ))}
 
-                    <input
-                      className="input se-instr"
-                      value={s.prompt}
-                      onChange={(e) => setStep(i, { prompt: e.target.value })}
-                      placeholder={
-                        s.kind === 'expert'
-                          ? 'Instruction for the expert…'
-                          : s.kind === 'tool'
-                            ? 'What to do with your MCP tools…'
-                            : s.kind === 'email'
-                              ? 'Email body / what to write…'
-                              : 'Project goal…'
-                      }
-                    />
+                    {s.kind === 'workflow' && (wfById(s.workflowId)?.params.length ?? 0) > 0 && (
+                      <div className="se-fields">
+                        {(wfById(s.workflowId)?.params ?? []).map((p) => {
+                          const cur = s.workflowParams?.[p.name] ?? p.default ?? ''
+                          const setP = (val: string | number | boolean): void =>
+                            setStep(i, { workflowParams: { ...(s.workflowParams ?? {}), [p.name]: val } })
+                          if (p.type === 'boolean')
+                            return (
+                              <label key={p.name} className="se-wfparam">
+                                <span className="se-wfparam-name">{p.name}</span>
+                                <input type="checkbox" checked={cur === true || cur === 'true'} onChange={(e) => setP(e.target.checked)} />
+                              </label>
+                            )
+                          return (
+                            <div key={p.name} className="se-wfparam">
+                              <span className="se-wfparam-name">{p.name}</span>
+                              <input
+                                className="input se-instr mono"
+                                type={p.type === 'number' ? 'number' : 'text'}
+                                value={String(cur)}
+                                onChange={(e) => setP(p.type === 'number' ? Number(e.target.value) : e.target.value)}
+                                placeholder={p.type === 'folder' ? '/path/to/folder' : ''}
+                              />
+                              {p.type === 'folder' ? (
+                                <button
+                                  className="btn sm"
+                                  onClick={() => {
+                                    void window.api.workflows.pickDir().then((d) => {
+                                      if (d) setP(d)
+                                    })
+                                  }}
+                                >
+                                  Browse
+                                </button>
+                              ) : null}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                    {s.kind !== 'workflow' && (
+                      <input
+                        className="input se-instr"
+                        value={s.prompt}
+                        onChange={(e) => setStep(i, { prompt: e.target.value })}
+                        placeholder={
+                          s.kind === 'expert'
+                            ? 'Instruction for the expert…'
+                            : s.kind === 'tool'
+                              ? 'What to do with your MCP tools…'
+                              : s.kind === 'email'
+                                ? 'Email body / what to write…'
+                                : 'Project goal…'
+                        }
+                      />
+                    )}
                     {s.kind === 'email' && (
                       <div className="se-note">
                         <Icons.mail size={13} /> Sent via the email MCP (Extensions); if none is connected the step leaves a draft — Studio never sends mail itself.
@@ -480,6 +568,11 @@ function ScheduledEditor({
                     {s.kind === 'tool' && (
                       <div className="se-note">
                         <Icons.puzzle size={13} /> Runs as an agent turn that calls your connected MCP tools.
+                      </div>
+                    )}
+                    {s.kind === 'workflow' && (
+                      <div className="se-note">
+                        <Icons.workflow size={13} /> Runs the saved workflow (own run panel + history); its return text feeds the next step.
                       </div>
                     )}
                   </div>

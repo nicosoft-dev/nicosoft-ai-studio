@@ -17,8 +17,9 @@
 // tool or leaves a draft — Studio never sends mail itself.
 
 import { scheduledTaskStore } from './store'
-import type { ScheduledTask, TaskStep } from '../../ipc/contracts'
+import type { ScheduledTask, TaskStep, WorkflowRunEvent } from '../../ipc/contracts'
 import { run } from '../../services/agent.service'
+import * as workflowService from '../../services/workflow/service'
 import type { AgentCallbacks } from '../../services/agent-dispatch'
 import * as projectService from '../../services/project.service'
 import * as rolesService from '../../services/roles.service'
@@ -68,15 +69,20 @@ class SchedulerEngine {
   private timer?: ReturnType<typeof setTimeout>
   private running = new Set<string>() // task ids currently dispatched — dedup so a slow run can't double-fire
   private onFire?: (info: FiredInfo) => void
+  private onWorkflowEvent?: (ev: WorkflowRunEvent) => void
   private unsubscribe?: () => void
   private started = false
   private arming = false // re-entrancy guard so a burst of store changes coalesces into one re-arm
   private rearmQueued = false
 
-  start(onFire?: (info: FiredInfo) => void): void {
+  // onWorkflowEvent: sink for a `workflow` step's live run events — index.ts wires it to the same
+  // `workflow:run:event` broadcast the IPC handler uses, so an open run panel follows a scheduled run
+  // too. Absent (headless harness) the run still executes; events just aren't mirrored anywhere.
+  start(onFire?: (info: FiredInfo) => void, onWorkflowEvent?: (ev: WorkflowRunEvent) => void): void {
     if (this.started) return
     this.started = true
     this.onFire = onFire
+    this.onWorkflowEvent = onWorkflowEvent
     // Re-arm whenever the task set changes (create/delete/setEnabled/update all emit onChange). No polling.
     this.unsubscribe = scheduledTaskStore.onChange(() => this.requestArm())
     this.requestArm()
@@ -180,9 +186,15 @@ class SchedulerEngine {
     // live session + its Preview. Delivery is async (the live agent acts on its own schedule). When the conv is
     // NOT live, fall through to the headless chain below (still on the same convId).
     if (task.convId && sessionBus.hasDelivery(task.convId)) {
-      for (const step of task.steps) {
+      for (const [i, step] of task.steps.entries()) {
         if (step.kind === 'project') {
           await this.runProjectStep(step, '') // agent-independent: must run regardless of liveness
+          continue
+        }
+        if (step.kind === 'workflow') {
+          // A workflow is its own standalone run (hidden conv + run row) — like `project`, it executes
+          // headlessly regardless of the target conversation's liveness; nothing to inject.
+          await this.runWorkflowStep(step, `scheduled task ${task.id} step ${i + 1} (workflow)`)
           continue
         }
         // Deliver into the LIVE session, which already runs under its OWN validated role/endpoint/key. We must
@@ -220,9 +232,28 @@ class SchedulerEngine {
         case 'project':
           prior = await this.runProjectStep(step, prior)
           break
+        case 'workflow':
+          // Params are the workflow's explicit contract — `prior` is NOT injected into them (a saved
+          // script is a pinned path, not a prompt). Its return text becomes the next step's prior.
+          prior = await this.runWorkflowStep(step, where)
+          break
       }
     }
     return convId
+  }
+
+  // A `workflow` step runs the SAVED workflow through the same service gate as every other entry point
+  // (draft/disabled refused by preflight — §9) with trigger='scheduled', awaits the settle, and yields
+  // the script's return text. Approvals inside steps are already headless-safe (coordinatorApproval:
+  // green/yellow auto, red denied + recorded). A failed/stopped run throws so the task's TaskRun records
+  // the reason (fire() swallows it into last_result) instead of silently passing.
+  private async runWorkflowStep(step: TaskStep, where: string): Promise<string> {
+    if (!step.workflowId) throw new Error(`${where}: no workflow selected`)
+    const res = await workflowService.runAndWait(step.workflowId, step.workflowParams ?? {}, 'scheduled', (ev) => this.onWorkflowEvent?.(ev))
+    if (res.status !== 'ok') {
+      throw new Error(`${where}: workflow ${res.status}${res.failDetail ? ` — ${res.failDetail}` : ''}`)
+    }
+    return res.resultText
   }
 
   // expert / tool / email steps all execute as one bypass + cwd-confined agent turn — the kind only changes

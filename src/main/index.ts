@@ -305,10 +305,18 @@ app.whenReady().then(() => {
   // Scheduled-task engine (doc 28): event-armed — fires each task at its exact nextRunAt (re-armed on task
   // changes + after each fire), no per-second scan. On each fire, notify the renderer so the Scheduled page
   // refreshes its Next/Last times live.
-  schedulerEngine.start((info) => {
-    for (const w of BrowserWindow.getAllWindows())
-      w.webContents.send('scheduled:fired', { taskId: info.task.id, convId: info.convId, ok: info.ok })
-  })
+  schedulerEngine.start(
+    (info) => {
+      for (const w of BrowserWindow.getAllWindows())
+        w.webContents.send('scheduled:fired', { taskId: info.task.id, convId: info.convId, ok: info.ok })
+    },
+    // A scheduled `workflow` step's live run events ride the SAME channel the IPC run path broadcasts
+    // on, so an open Workflows view / run panel follows a scheduler-fired run identically.
+    (ev) => {
+      for (const w of BrowserWindow.getAllWindows())
+        if (!w.webContents.isDestroyed()) w.webContents.send('workflow:run:event', ev)
+    }
+  )
   // Any task mutation (incl. a schedule_* tool, which bypasses the IPC handlers + their reload) → tell open
   // Scheduled pages to refresh.
   scheduledTaskStore.onChange(() => {

@@ -21,10 +21,12 @@ import type { WorkflowRow } from '../../repos/workflow.repo'
 import type { WorkflowRunRow } from '../../repos/workflow-run.repo'
 import type {
   WorkflowDto,
+  WorkflowFailReason,
   WorkflowLintDto,
   WorkflowParamDto,
   WorkflowRunDto,
   WorkflowRunEvent,
+  WorkflowRunStatus,
   WorkflowRunTrigger,
 } from '../../ipc/contracts'
 
@@ -327,7 +329,33 @@ export async function run(
 ): Promise<{ runId: string; convId: string }> {
   const row = preflightRun(id, params)
   const executor = await import('./executor')
-  return executor.startRun({ workflow: row, params, trigger, onEvent })
+  // `done` stays in-process (a Promise can't cross IPC) — this is the fire-and-watch surface.
+  const { runId, convId } = executor.startRun({ workflow: row, params, trigger, onEvent })
+  return { runId, convId }
+}
+
+// Run AND await the settle — for in-process callers that consume the outcome: a scheduled `workflow`
+// step (pipes resultText into the next step) and Danny's routing branch (returns it as the turn's
+// reply). Same preflight/gates as run(); throws only on preflight (draft/unknown/bad folder param) or
+// infra failure — a script/step failure settles as status='failed' and is the caller's call to raise.
+export async function runAndWait(
+  id: string,
+  params: Record<string, string | number | boolean>,
+  trigger: WorkflowRunTrigger,
+  onEvent: (ev: WorkflowRunEvent) => void
+): Promise<{
+  runId: string
+  convId: string
+  status: Exclude<WorkflowRunStatus, 'running'>
+  failReason: WorkflowFailReason | null
+  failDetail: string | null
+  resultText: string
+}> {
+  const row = preflightRun(id, params)
+  const executor = await import('./executor')
+  const { runId, convId, done } = executor.startRun({ workflow: row, params, trigger, onEvent })
+  const settled = await done
+  return { runId, convId, ...settled }
 }
 
 export async function stop(runId: string): Promise<boolean> {
