@@ -440,6 +440,7 @@
   "tools.playwright.sourceStudio": "Studio",
   "tools.playwright.installNote": "読み取り専用の状態です。Playwright のインストールはエンジニア役が会話で確認のうえ実行します — Tier 1 のプレビューツールはこれなしで動作します。",
   "tasks.live": "現在",
+  "tasks.workflows": "ワークフロー",
   "tasks.panels": "Studio Lens",
   "tasks.empty": "このチャットにはタスクリストがありません。",
   "tasks.noActive": "進行中のタスクはありません。",

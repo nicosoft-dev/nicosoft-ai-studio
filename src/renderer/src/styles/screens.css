@@ -1433,6 +1433,19 @@
 /* NO inner scroll/max-height — the todo list flows at its natural height; when the whole panel overflows it's
    the ONE outer .ws-panel-body scrollbar that scrolls (内容区域自适应,一根滚动条). */
 .ws-tasks { display: flex; flex-direction: column; gap: 8px; }
+/* running workflows (§6.4 W2④): global mini entries — name · phase · role · x/y · ↑tok, click → run panel */
+.ws-wfruns { margin-bottom: 14px; }
+.ws-wfrun {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; cursor: pointer;
+  border: 1px solid var(--border-1); border-radius: var(--r-sm); background: transparent;
+  padding: 7px 10px; font-size: 12px; color: var(--text-2); min-width: 0;
+}
+.ws-wfrun + .ws-wfrun { margin-top: 6px; }
+.ws-wfrun:hover { background: var(--bg-2); border-color: var(--border-2); color: var(--text-1); }
+.ws-wfrun-name { font-family: var(--mono); font-size: 11.5px; color: var(--text-1); flex-shrink: 0; }
+.ws-wfrun-meta { color: var(--text-4); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-wfrun-tail { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--text-3); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+
 .ws-task { display: flex; align-items: flex-start; gap: 8px; }
 .ws-task-label { flex: 1; min-width: 0; font-size: 12.5px; color: var(--text-2); line-height: 1.4; overflow-wrap: anywhere; word-break: break-word; }
 .ws-task-label.done { color: var(--text-4); }

@@ -440,6 +440,7 @@
   "tools.playwright.sourceStudio": "Studio",
   "tools.playwright.installNote": "Read-only status. Installing Playwright is handled by your engineering expert on request — the Tier 1 preview tools work without it.",
   "tasks.live": "Live",
+  "tasks.workflows": "Workflows",
   "tasks.panels": "Studio Lens",
   "tasks.empty": "No task list for this chat.",
   "tasks.noActive": "No active tasks.",

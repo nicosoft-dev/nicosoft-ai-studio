@@ -440,6 +440,7 @@
   "tools.playwright.sourceStudio": "Studio",
   "tools.playwright.installNote": "읽기 전용 상태입니다. Playwright 설치는 엔지니어 역할이 대화에서 확인 후 진행합니다 — Tier 1 미리보기 도구는 없어도 작동합니다.",
   "tasks.live": "현재",
+  "tasks.workflows": "워크플로",
   "tasks.panels": "Studio Lens",
   "tasks.empty": "이 대화에는 작업 목록이 없습니다.",
   "tasks.noActive": "진행 중인 작업이 없습니다.",

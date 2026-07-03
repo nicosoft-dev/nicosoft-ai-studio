@@ -16,6 +16,7 @@ import { LensCard } from '@/components/lens-card'
 import { useT } from '@/stores/locale'
 import { useConvTodos } from '@/stores/conv-todos'
 import { useConvServices } from '@/stores/conv-services'
+import { useWorkflowRuns } from '@/stores/workflow-runs'
 import { useAllExperts } from '@/lib/all-experts'
 import type { ToolCall } from '@/stores/chat'
 import type { WorkspaceTaskHistory, WorkspacePhase, WorkspaceExamine, WorkspaceService, ServiceInfo } from '@/lib/api'
@@ -37,6 +38,13 @@ function fmtTime(ms: number): string {
   } catch {
     return ''
   }
+}
+
+// Compact token count for the workflow-run mini entries (↑12K style — same rounding as the run panel).
+function fmtTok(n: number): string {
+  if (n >= 1_000_000) return `${parseFloat((n / 1_000_000).toFixed(1))}M`
+  if (n >= 1000) return `${parseFloat((n / 1000).toFixed(1))}K`
+  return String(n)
 }
 
 // Static run duration (start → end) for an EXITED service. Never used for a live service — a ticking
@@ -297,9 +305,36 @@ export function WorkspaceTasks({ activeConv }: { activeConv: string | null }): R
     }))
     .filter((g) => g.panels.length > 0 || g.items.length > 0)
 
+  // — Running workflows (§6.4 W2④) — GLOBAL background work, deliberately independent of activeConv (a
+  // run belongs to no visible conversation). One mini entry per running run: name · phase · current role ·
+  // steps x/y · ↑tokens; click jumps to the run panel via the same window event the launch card uses.
+  const wfRunning = useWorkflowRuns((s) => s.running)
+  const wfEntries = Object.values(wfRunning)
+
   return (
     <div className="ws-panel">
       <div className="ws-panel-body">
+        {wfEntries.length > 0 && (
+          <div className="ws-wfruns">
+            <div className="ws-sub-head">{t('tasks.workflows')}</div>
+            {wfEntries.map((r) => (
+              <button
+                key={r.runId}
+                className="ws-wfrun"
+                title={t('wf.openPanel')}
+                onClick={() => window.dispatchEvent(new CustomEvent('nsai:open-workflow-run', { detail: { workflowId: r.workflowId, runId: r.runId } }))}
+              >
+                <span className="wf-dot run" />
+                <span className="ws-wfrun-name">{r.name || '…'}</span>
+                {r.phase ? <span className="ws-wfrun-meta">{r.phase}</span> : null}
+                {r.role ? <span className="ws-wfrun-meta">{expertsById[r.role]?.name ?? r.role}</span> : null}
+                <span className="ws-wfrun-tail">
+                  {r.steps > 0 ? `${Math.min(r.stepsDone, r.steps)}/${r.steps} · ` : ''}↑{fmtTok(r.inTokens)}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="ws-sub-head">{t('tasks.live')}</div>
         {tasks.length === 0 ? (
           <div className="ws-empty">{t('tasks.empty')}</div>
