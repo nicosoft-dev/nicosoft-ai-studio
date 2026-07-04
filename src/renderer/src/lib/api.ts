@@ -33,3 +33,5 @@ export type SkillInput = Parameters<typeof window.api.skills.add>[0]
 export type SkillSource = SkillDto['source']
 export type PluginDto = Awaited<ReturnType<typeof window.api.plugins.list>>[number]
 export type PlaywrightAvailabilityDto = Awaited<ReturnType<typeof window.api.preview.playwrightAvailability>>
+export type ComputerUseStatusDto = Awaited<ReturnType<typeof window.api.computerUse.status>>
+export type ComputerUsePermissionsDto = NonNullable<ComputerUseStatusDto['permissions']>

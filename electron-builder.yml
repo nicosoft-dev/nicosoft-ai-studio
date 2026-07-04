@@ -48,6 +48,18 @@ mac:
     - zip
   # darkModeSupport keeps the title bar / vibrancy consistent with the dark UI.
   darkModeSupport: true
+  # The native computer-use helper (Swift .app), macOS only. CI builds + self-signs it into
+  # build/computer-use (see .github/workflows/build.yml); this ships it inside the app at
+  # <resources>/computer-use, and Studio copies it to ~/.nsai/computer-use on first enable
+  # (services/computer-use.ts ensureHelperInstalled). mac.extraResources CONCATENATES with the
+  # top-level list, so studio-guide still ships. build/computer-use holds only .gitkeep in a plain
+  # checkout, so a local `dist:mac` without the helper staged packs nothing extra (no error).
+  extraResources:
+    - from: build/computer-use
+      to: computer-use
+      filter:
+        - '**/*'
+        - '!.gitkeep'
 
 win:
   icon: build/icon.ico

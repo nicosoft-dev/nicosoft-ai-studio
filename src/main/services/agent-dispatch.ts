@@ -26,6 +26,7 @@ import { LSPManager } from '../agent/lsp/manager'
 import { createLensHandle } from './lens/agent-lens'
 import { lspTool } from '../agent/tools/lsp'
 import { disposePlaywrightSessionsOwnedBy } from '../agent/tools/playwright-browser'
+import { releaseComputerUse } from './computer-use'
 import type { Tool } from '../agent/tool'
 import type { AgentRunInput, MessageAttachmentDto } from '../ipc/contracts'
 import { persistBase64, resolveImageForLlm, MAX_REPLAY_IMAGES } from '../media/storage'
@@ -204,7 +205,8 @@ async function persistToolResultImages(
   for (const c of block.content) {
     if (c.type === 'image' && c.source?.type === 'base64' && c.source.data) {
       const att = await persistBase64(convId, c.source.data, c.source.media_type || 'image/png')
-      attachments.push(att)
+      // Tag with the producing tool so the renderer can order it right after that tool's card.
+      attachments.push({ ...att, toolUseId: block.tool_use_id })
       redacted.push({ type: 'text', text: '[image displayed to the user]' })
     } else {
       redacted.push(c)
@@ -510,6 +512,9 @@ export async function runAgentLoop(
     void disposePlaywrightSessionsOwnedBy(loop.runId).then((n) => {
       if (n > 0) console.warn(`[agent] reclaimed ${n} unclosed playwright browser session(s) for run ${loop.runId}`)
     })
+    // Drop this run's hold on the computer-use overlay banner — when the last active run releases, the
+    // helper hides the "…is controlling this Mac" banner. Idempotent (a run that never used it is a no-op).
+    releaseComputerUse(loop.runId)
   }
 
   const endedAt = Date.now()

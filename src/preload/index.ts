@@ -114,6 +114,7 @@ import type {
   PreviewStatusDto,
   ConvPreviewStatus,
   PlaywrightAvailabilityDto,
+  ComputerUseStatusDto,
   CompactOutcome,
   GitWorkStatus,
   GitWorkDiff,
@@ -179,6 +180,15 @@ const api = {
     onOpen: (cb: (d: PreviewOpenEvent) => void): (() => void) => agentListen('preview:open', cb),
     onOpenCancel: (cb: (d: PreviewOpenCancelEvent) => void): (() => void) => agentListen('preview:open:cancel', cb),
     onStatus: (cb: (d: ConvPreviewStatus) => void): (() => void) => agentListen('preview:status', cb),
+  },
+
+  // Computer Use (ns_computer_use) — Extensions → Tools card: status probe, the global enable toggle,
+  // and the System Settings privacy-pane deep-links for the two TCC grants (macOS only).
+  computerUse: {
+    status: (): Promise<ComputerUseStatusDto> => ipcRenderer.invoke('computer-use:status'),
+    setEnabled: (enabled: boolean): Promise<ComputerUseStatusDto> => ipcRenderer.invoke('computer-use:set-enabled', enabled),
+    openSettings: (pane: 'accessibility' | 'screenRecording'): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('computer-use:open-settings', pane),
   },
 
   // Workspace Tasks panel: refetch history when a phase/examine is archived.

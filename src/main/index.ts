@@ -11,6 +11,7 @@ import { loadEnabled as loadSkills } from './services/extensions/skill'
 import { schedulerEngine } from './agent/scheduler/engine'
 import { scheduledTaskStore } from './agent/scheduler/store'
 import { disposeAllPlaywrightSessions } from './agent/tools/playwright-browser'
+import { disposeComputerUse, computerUseEnabled, ensureHelperInstalled } from './services/computer-use'
 import { disposeAll as disposeAllTerminals } from './services/workspace/terminal'
 import { disposeAllActiveServices } from './services/active-services'
 import { disposeAllSoloAsync } from './services/solo-async'
@@ -296,6 +297,10 @@ app.whenReady().then(() => {
   initUpdateService() // wire autoUpdater (channel from the build's own version) before any check can run
   // Connect every enabled MCP server (best effort) so their tools are ready when an agent role runs.
   void connectMcpServers().catch(() => {})
+  // If computer use is already enabled, refresh the ~/.nsai/computer-use helper from the copy bundled in
+  // this Studio build (idempotent + version-gated) so a helper fix in a Studio update reaches the user
+  // without re-toggling. No-op unless enabled + macOS + a newer version is bundled.
+  if (computerUseEnabled()) void ensureHelperInstalled().catch(() => {})
   // Register every enabled skill so a role's agent sees it on the first run (sync — DB read only).
   loadSkills()
   createWindow()
@@ -354,4 +359,5 @@ app.on('before-quit', () => {
   monitorService.disposeAll() // stop every Monitor watcher so no probe interval outlives the app
   selfRhythmService.disposeAll() // cancel every pending self-wakeup timer
   fileWatchManager.disposeAll() // close every hook file watcher
+  disposeComputerUse() // drop the computer-use overlay banner + close the helper socket if we held one
 })

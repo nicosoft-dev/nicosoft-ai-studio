@@ -29,6 +29,7 @@ import { LSPManager } from '../agent/lsp/manager'
 import { startServiceTool, stopServiceTool, serviceLogsTool, listServicesTool } from '../agent/tools/service'
 import { lspTool } from '../agent/tools/lsp'
 import { disposePlaywrightSessionsOwnedBy } from '../agent/tools/playwright-browser'
+import { releaseComputerUse } from './computer-use'
 import type { Tool } from '../agent/tool'
 import type { AgentRunInput } from '../ipc/contracts'
 import { manager as skillManager } from './extensions/skill'
@@ -508,6 +509,7 @@ export async function runCollabSession(
     asyncRegistry.dispose() // tree-kill any still-running launch_async op, INCLUDING unawaited ones — a normal quiescent end never aborts the signal, so this is the only cleanup hook
     transcript.end() // close the shared session transcript writer (best-effort; 'error' is swallowed above)
     await Promise.allSettled([...runIdByRole.values()].map((runId) => disposePlaywrightSessionsOwnedBy(runId)))
+    for (const runId of runIdByRole.values()) releaseComputerUse(runId) // drop each expert's overlay-banner hold
     for (const lsp of lspByExpert) lsp.dispose() // tree-kill each expert's language server
   }
 }

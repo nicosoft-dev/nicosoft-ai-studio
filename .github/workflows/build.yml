@@ -105,6 +105,34 @@ jobs:
       # `npm ci` runs postinstall: ensure-electron (repairs the Electron unpack) + rebuild-native
       # (compiles node-pty against Electron's ABI). Both are idempotent.
       - run: npm ci
+      # Build the native computer-use helper (Swift) and stage the signed .app where electron-builder's
+      # mac.extraResources bundles it into Studio (→ <resources>/computer-use). macOS only; Windows has no
+      # helper. SELF-SIGNED for now: a self-signed identity in an isolated temp keychain gives the helper a
+      # real (untrusted) code signature so it can hold TCC grants. The identity is EPHEMERAL per CI run, so
+      # its cert leaf changes each build — Studio's installer only re-copies when the helper VERSION changes
+      # (services/computer-use.ts), so a user's granted permissions survive Studio updates that keep the
+      # helper version fixed. A stable cert (p12 CI secret) or Developer ID is the eventual upgrade.
+      - name: Build computer-use helper (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        working-directory: computer-use/macOS
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/cua-signing.keychain-db"
+          KP="cua-ci-$RANDOM"
+          security create-keychain -p "$KP" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KP" "$KEYCHAIN"
+          # Prepend the temp keychain to the user search list so find-identity/codesign see the cert.
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | sed 's/"//g')
+          export NSAI_CUA_KEYCHAIN="$KEYCHAIN"
+          export LOGIN_KEYCHAIN_PASSWORD="$KP"
+          # Best-effort self-signed identity; package-app.sh falls back to ad-hoc if this doesn't register.
+          ./scripts/make-signing-cert.sh || echo "cert setup failed — package-app.sh will ad-hoc sign"
+          NSAI_CUA_SKIP_INSTALL=1 ./scripts/package-app.sh
+          mkdir -p "$GITHUB_WORKSPACE/build/computer-use"
+          ditto "out/NicoSoft Computer Use.app" "$GITHUB_WORKSPACE/build/computer-use/NicoSoft Computer Use.app"
+          echo "✓ staged helper for bundling:"; ls -la "$GITHUB_WORKSPACE/build/computer-use"
       - name: Package
         shell: bash # uniform across runners (Windows defaults to pwsh) for the `&&` and arg splat
         env:

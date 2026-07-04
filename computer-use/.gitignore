@@ -16,8 +16,12 @@ dist/
 *.app
 *.dSYM
 
-# Dev/build/test scripts — kept local, not versioned
-scripts/
+# Dev/test scripts stay local; the two BUILD scripts are versioned so CI (and any machine) can
+# reproduce the signed .app — see .github/workflows/build.yml. Anchored to macOS/scripts (a bare
+# `scripts/*` has a mid-pattern slash → it would anchor to computer-use/scripts, which doesn't exist).
+macOS/scripts/*
+!macOS/scripts/package-app.sh
+!macOS/scripts/make-signing-cert.sh
 
 # macOS cruft
 .DS_Store

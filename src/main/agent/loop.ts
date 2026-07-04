@@ -429,7 +429,9 @@ export async function* runAgent(
   // EnterPlanMode/ExitPlanMode would otherwise flip the PARENT's plan state / hit the parent's Gate A.
   // studio_lens is denied at EVERY depth (studio-lens §7 Phase 4 P0): a sub-agent / panel reviewer must NOT trigger
   // another panel fan-out (its own fan-out bound, independent of Task nesting). ctx.panel is also nulled below.
-  const subAgentTools = tools.filter((t) => t.name !== 'EnterPlanMode' && t.name !== 'ExitPlanMode' && t.name !== 'studio_lens' && !t.name.startsWith('preview_') && !t.name.startsWith('monitor_') && t.name !== 'schedule_wakeup' && t.name !== 'remember_project_map' && t.name !== 'remember' && t.name !== 'forget' && t.name !== 'recall_memory' && t.name !== 'distill_skill' && t.name !== 'studio_guide')
+  // ns_computer_use is stripped too: like preview_/studio_lens it's a conversation-level surface (one
+  // physical desktop, one overlay banner) — a Task/async child must never race the parent for the mouse.
+  const subAgentTools = tools.filter((t) => t.name !== 'EnterPlanMode' && t.name !== 'ExitPlanMode' && t.name !== 'studio_lens' && !t.name.startsWith('preview_') && !t.name.startsWith('monitor_') && t.name !== 'schedule_wakeup' && t.name !== 'remember_project_map' && t.name !== 'remember' && t.name !== 'forget' && t.name !== 'recall_memory' && t.name !== 'distill_skill' && t.name !== 'studio_guide' && t.name !== 'ns_computer_use')
   const makeSpawnSubAgent =
     (signal: AbortSignal): SpawnSubAgent =>
     async ({ prompt, parentToolId, isolation }) => {

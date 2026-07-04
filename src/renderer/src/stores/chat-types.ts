@@ -24,6 +24,11 @@ export interface ToolCall {
 export type MsgBlock =
   | { kind: 'text'; text: string }
   | { kind: 'tool'; id: string }
+  // An image a tool produced (screenshot / ns_generate_image / chart), slotted into the stream at the
+  // point it arrived so it renders chronologically — after the tool card, before any text the model sends
+  // next — instead of always at the bubble's bottom. The url/name also live in msg.images (the lightbox
+  // gallery); this block is purely the ORDER overlay, mirroring how 'tool' references msg.tools.
+  | { kind: 'image'; url: string; name: string }
   // manual=true → the /compact receipt (user-initiated fold). auto=false WITHOUT manual is the legacy
   // microcompaction note shape, which the renderer still filters out (see chat-segment). pending=true →
   // the fold is still RUNNING: the same line renders as a ticking "Compacting… Ns" (startedAt anchors the

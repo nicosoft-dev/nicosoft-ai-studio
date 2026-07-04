@@ -225,7 +225,27 @@ function RunBody({ msgs, onOpenImage, live }: { msgs: ChatMessage[]; onOpenImage
     // memoized chunks (parse-once). Same component either way (ChunkedMarkdown), so the done transition
     // is a prop flip in place — no remount, no flash.
     const lastLiveIdx = m.streaming ? walk.findLastIndex((x) => x.kind === 'text' || x.kind === 'reasoning') : -1
+    // Images rendered inline via their block, so the trailing bottom-append below only handles leftovers
+    // (user uploads / legacy attachments with no block).
+    const inlineImageUrls = new Set<string>()
+    const gallery = m.images ?? []
     walk.forEach((b, bi) => {
+      if (b.kind === 'image') {
+        flushFold(false)
+        const idx = gallery.findIndex((x) => x.url === b.url)
+        inlineImageUrls.add(b.url)
+        out.push(
+          <div className="msg-images" key={`bimg${m.id}:${bi}`}>
+            <img
+              className="msg-img-thumb"
+              src={b.url}
+              alt={b.name}
+              onClick={() => onOpenImage(gallery.map((x) => ({ url: x.url, name: x.name })), Math.max(0, idx))}
+            />
+          </div>
+        )
+        return
+      }
       if (b.kind === 'text') {
         if (!b.text) return
         flushFold(false)
@@ -271,17 +291,21 @@ function RunBody({ msgs, onOpenImage, live }: { msgs: ChatMessage[]; onOpenImage
       }
       fold.push(tool)
     })
-    if (m.images && m.images.length > 0) {
+    // Bottom append is now a FALLBACK: only images not already placed inline via an image block (user
+    // uploads on an assistant turn, or legacy attachments with no toolUseId). Tool-produced images render
+    // in-sequence above, so this stays empty for a normal generate-image / screenshot turn.
+    const leftover = (m.images ?? []).filter((img) => !inlineImageUrls.has(img.url))
+    if (leftover.length > 0) {
       flushFold(false)
       out.push(
         <div className="msg-images" key={`img${m.id}`}>
-          {m.images.map((img, i) => (
+          {leftover.map((img, i) => (
             <img
               key={i}
               className="msg-img-thumb"
               src={img.url}
               alt={img.name}
-              onClick={() => onOpenImage(m.images!.map((x) => ({ url: x.url, name: x.name })), i)}
+              onClick={() => onOpenImage(gallery.map((x) => ({ url: x.url, name: x.name })), gallery.findIndex((x) => x.url === img.url))}
             />
           ))}
         </div>

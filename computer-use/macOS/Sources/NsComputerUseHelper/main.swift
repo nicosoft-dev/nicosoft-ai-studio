@@ -12,13 +12,14 @@ import Foundation
 signal(SIGPIPE, SIG_IGN)
 
 /// Resolve the socket path: `NSAI_CUA_SOCKET` override, else the fixed
-/// per-user path that keeps the TCC grant stable across launches.
+/// per-user path that keeps the TCC grant stable across launches. The socket
+/// lives beside the installed helper, under ~/.nsai/computer-use/.
 let socketPath: String = {
     let env = ProcessInfo.processInfo.environment["NSAI_CUA_SOCKET"]
     if let env, !env.isEmpty {
         return (env as NSString).expandingTildeInPath
     }
-    return NSHomeDirectory() + "/.nsai/cua/cua.sock"
+    return NSHomeDirectory() + "/.nsai/computer-use/sock/nscu.sock"
 }()
 
 let server = Server(socketPath: socketPath)

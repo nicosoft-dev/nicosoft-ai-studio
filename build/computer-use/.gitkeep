@@ -1,0 +1,2 @@
+# Keeps build/computer-use present so electron-builder mac.extraResources can bundle the
+# CI-built helper .app here. The .app itself is gitignored (built in CI / staged locally).

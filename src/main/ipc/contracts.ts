@@ -290,6 +290,23 @@ export interface PlaywrightAvailabilityDto {
   chromiumPath?: string
   message?: string
 }
+// Computer Use (ns_computer_use) state for the Extensions → Tools card: the global enable flag, helper
+// app install/run state, and the TCC permission snapshot. Permissions are read FROM the running helper
+// (its own TCC identity — Studio can't query another app's grants), so they're null whenever the helper
+// is unreachable, disabled (we don't probe), or the platform isn't macOS.
+export interface ComputerUsePermissionsDto {
+  accessibility: 'granted' | 'denied'
+  screenRecording: 'granted' | 'denied'
+}
+export interface ComputerUseStatusDto {
+  supported: boolean
+  enabled: boolean
+  installed: boolean
+  appPath: string | null
+  running: boolean
+  version: string | null
+  permissions: ComputerUsePermissionsDto | null
+}
 // A generated image surfaced live from an in-flight agent turn, keyed by convId (like ConvUsage). An agent
 // tool (ns_generate_image, code_execution charts, view_image) returned an image; the loop persisted it to
 // the media store (nsai-media:// ref) and broadcasts it here so the renderer attaches it to the streaming
@@ -750,6 +767,10 @@ export interface MessageAttachmentDto {
   name?: string
   mime?: string
   kind?: string // 'image' for pictures persisted to the media store. See main/media/storage.ts.
+  // The tool_use id whose result produced this image (screenshot / ns_generate_image / chart). Lets the
+  // renderer slot the image into the ordered block stream right after that tool — both live and on reload —
+  // instead of dumping every image at the bottom of the bubble. Absent for user-uploaded attachments.
+  toolUseId?: string
 }
 export interface ConversationDto {
   id: string

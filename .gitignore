@@ -171,6 +171,11 @@ build/Release/
 prebuilds/
 *.node
 
+# computer-use helper staged for electron-builder (CI builds the signed .app into here; the .gitkeep keeps
+# the extraResources `from` path present so a local `dist:mac` without the helper staged still packs).
+build/computer-use/*
+!build/computer-use/.gitkeep
+
 # Local SQLite databases (dev / runtime data — never commit user data)
 *.sqlite
 *.sqlite3

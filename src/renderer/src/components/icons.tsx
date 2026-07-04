@@ -296,6 +296,13 @@ export const Icons: Record<string, IconFn> = {
       <path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21" />
     </Icon>
   ),
+  monitor: (p) => (
+    <Icon {...p}>
+      <rect width="20" height="14" x="2" y="3" rx="2" />
+      <line x1="8" x2="16" y1="21" y2="21" />
+      <line x1="12" x2="12" y1="17" y2="21" />
+    </Icon>
+  ),
   sparkle: (p) => (
     <Icon {...p}>
       <path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8" />
@@ -495,6 +502,8 @@ const TOOL_ICON: Record<string, string> = {
   WebFetch: 'globe', WebSearch: 'globe',
   // image generation
   ns_generate_image: 'image',
+  // computer use (native desktop control)
+  ns_computer_use: 'monitor',
   // scheduled tasks
   schedule_create: 'calendarClock', schedule_list: 'calendarClock', schedule_delete: 'calendarClock',
   // planning

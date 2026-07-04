@@ -17,7 +17,7 @@ import { SkillDialog } from '@/components/dialogs/skill-dialog'
 import { PluginDialog } from '@/components/dialogs/plugin-dialog'
 import { useRoleBinding } from '@/lib/use-role-binding'
 import { STUDIO_DATA } from '@/data/studio-data'
-import type { McpServerDto, SkillDto, PluginDto, PlaywrightAvailabilityDto } from '@/lib/api'
+import type { McpServerDto, SkillDto, PluginDto, PlaywrightAvailabilityDto, ComputerUseStatusDto } from '@/lib/api'
 import type { PluginBundle } from '@/types'
 import { toast } from '@/stores/toast'
 import { useT } from '@/stores/locale'
@@ -406,11 +406,129 @@ function PlaywrightCard(): ReactElement {
   );
 }
 
+/* — Computer Use (ns_computer_use) card — the Studio side of the native macOS helper. A GLOBAL toggle
+     (not a per-role grant), a helper "Installed / Available" readout like Playwright, and — since the
+     helper needs two TCC grants Studio can't set programmatically — live permission rows that deep-link
+     into the right System Settings pane. macOS-only: the parent guards the whole card off elsewhere.
+     While enabled but not yet ready it self-polls so a just-granted permission flips the card to ready
+     without the user touching a process they can't see. — */
+function ComputerUseCard(): ReactElement {
+  const t = useT();
+  const [status, setStatus] = useState<ComputerUseStatusDto | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = (): Promise<void> =>
+    window.api.computerUse.status().then(setStatus).catch(() => setStatus(null));
+  useEffect(() => { void refresh(); }, []);
+
+  const enabled = status?.enabled ?? false;
+  const installed = status?.installed ?? false;
+  const running = status?.running ?? false;
+  const perms = status?.permissions ?? null;
+  const axOk = perms?.accessibility === 'granted';
+  const srOk = perms?.screenRecording === 'granted';
+  const ready = enabled && installed && running && axOk && srOk;
+  const needsPerms = enabled && installed && running && (!axOk || !srOk);
+
+  // Poll while enabled-but-not-ready so a permission granted in System Settings is reflected here (the
+  // Screen Recording grant only lands after the helper restarts — the main process does that for us).
+  useEffect(() => {
+    if (!enabled || ready) return;
+    const id = setInterval(() => { void refresh(); }, 2500);
+    return () => clearInterval(id);
+  }, [enabled, ready]);
+
+  const toggle = (): void => {
+    if (busy) return;
+    setBusy(true);
+    void window.api.computerUse
+      .setEnabled(!enabled)
+      .then(setStatus)
+      .catch(() => toast.error(t('tools.updateFailed')))
+      .finally(() => setBusy(false));
+  };
+  const openSettings = (pane: 'accessibility' | 'screenRecording'): void => {
+    void window.api.computerUse.openSettings(pane).then(() => {
+      // Nudge a refresh shortly after they return; the poll loop covers the rest.
+      setTimeout(() => { void refresh(); }, 1500);
+    });
+  };
+
+  const overall = !enabled ? 'off' : !installed ? 'notInstalled' : ready ? 'ready' : needsPerms ? 'needsPerms' : 'starting';
+  const statusLabel =
+    overall === 'ready' ? t('tools.computerUse.ready')
+      : overall === 'needsPerms' ? t('tools.computerUse.needsPermission')
+        : overall === 'notInstalled' ? t('tools.computerUse.notInstalled')
+          : overall === 'starting' ? t('tools.computerUse.starting')
+            : t('tools.computerUse.off');
+  const statusClass = overall === 'ready' ? 'available' : overall === 'needsPerms' ? 'missingBrowser' : 'missingPkg';
+
+  return (
+    <div className={"pw-card" + (enabled ? "" : " off")}>
+      <div className="pw-head">
+        <span className="pw-ic"><Icons.monitor size={15} /></span>
+        <span className="pw-title">{t('tools.computerUse.name')}</span>
+        <span className="ext-name mono pw-tools">ns_computer_use</span>
+        <span className={'pw-status ' + statusClass}>{statusLabel}</span>
+        <Switch on={enabled} onClick={toggle} disabled={busy} />
+      </div>
+      <div className="pw-desc">{t('tools.computerUse.desc')}</div>
+
+      <div className="pw-levels">
+        <span className="pw-level">
+          <HealthDot status={installed ? 'healthy' : 'failing'} />
+          <span className="pw-level-label">{t('tools.computerUse.helper')}</span>
+          <span className="pw-level-val">{installed ? t('tools.computerUse.installed') : t('tools.computerUse.notInstalledShort')}</span>
+        </span>
+        <span className="pw-level">
+          <HealthDot status={running ? 'healthy' : enabled ? 'failing' : 'off'} />
+          <span className="pw-level-label">{t('tools.computerUse.process')}</span>
+          <span className="pw-level-val">{running ? t('tools.computerUse.processRunning') : t('tools.computerUse.processStopped')}</span>
+        </span>
+      </div>
+
+      {enabled && installed && running ? (
+        <div className="cu-perms">
+          <div className="cu-perm">
+            <HealthDot status={axOk ? 'healthy' : 'failing'} />
+            <span className="cu-perm-label">{t('tools.computerUse.accessibility')}</span>
+            <span className={"cu-perm-val " + (axOk ? "ok" : "warn")}>{axOk ? t('tools.computerUse.granted') : t('tools.computerUse.denied')}</span>
+            {axOk ? null : (
+              <button className="btn secondary xs cu-open" onClick={() => openSettings('accessibility')}>
+                <Icons.externalLink size={12} /> {t('tools.computerUse.openSettings')}
+              </button>
+            )}
+          </div>
+          <div className="cu-perm">
+            <HealthDot status={srOk ? 'healthy' : 'failing'} />
+            <span className="cu-perm-label">{t('tools.computerUse.screenRecording')}</span>
+            <span className={"cu-perm-val " + (srOk ? "ok" : "warn")}>{srOk ? t('tools.computerUse.granted') : t('tools.computerUse.denied')}</span>
+            {srOk ? null : (
+              <button className="btn secondary xs cu-open" onClick={() => openSettings('screenRecording')}>
+                <Icons.externalLink size={12} /> {t('tools.computerUse.openSettings')}
+              </button>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="pw-note">
+        {overall === 'ready' ? t('tools.computerUse.noteReady')
+          : overall === 'needsPerms' ? t('tools.computerUse.notePermission')
+            : overall === 'notInstalled' ? t('tools.computerUse.noteInstall')
+              : overall === 'off' ? t('tools.computerUse.noteOff')
+                : t('tools.computerUse.noteStarting')}
+      </div>
+    </div>
+  );
+}
+
 function ToolsTab(): ReactElement {
   const t = useT();
   const { EXPERT_BY_ID } = STUDIO_DATA;
   const designer = EXPERT_BY_ID['designer'];
   const b = useRoleBinding(designer);
+  const isMac = window.api.platform === 'darwin';
   const [enabled, setEnabled] = useState(true);
   useEffect(() => {
     void window.api.settings.get<boolean>(TOOLS_ENABLED_KEY).then((v) => { if (v !== null) setEnabled(v); });
@@ -444,6 +562,7 @@ function ToolsTab(): ReactElement {
         </div>
       </div>
       <PlaywrightCard />
+      {isMac ? <ComputerUseCard /> : null}
     </div>
   );
 }

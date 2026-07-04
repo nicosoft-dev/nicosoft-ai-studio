@@ -19,6 +19,8 @@ import { startServiceTool, stopServiceTool, serviceLogsTool, listServicesTool } 
 import { agentSpawnTool, agentSendTool, agentWaitTool, agentCloseTool, agentBatchTool } from '../agent/tools/async-subagent'
 import { playwrightBrowserTool } from '../agent/tools/playwright-browser'
 import { playwrightRequestTool } from '../agent/tools/playwright-request'
+import { computerUseTool } from '../agent/tools/computer-use'
+import { computerUseToolAvailable } from './computer-use'
 import { PREVIEW_TOOLS } from '../agent/tools/preview'
 import { monitorStartTool, monitorStopTool } from '../agent/tools/monitor'
 import { scheduleWakeupTool } from '../agent/tools/schedule-wakeup'
@@ -127,6 +129,13 @@ export const COORDINATOR_INVESTIGATION_TOOLS = [globTool, readTool, grepTool, ta
 // rules forbid). App-DB only, read-only classified.
 export const MEMORY_TOOLS = [rememberTool, forgetTool, recallMemoryTool] as unknown as Tool[]
 
+// ns_computer_use (computer-use P0.5) — a GLOBALLY-toggled tool (Extensions → Tools), not a per-role
+// grant: when enabled + macOS + the helper app is installed, every agent role gets it. It drives the
+// user's real desktop through the native helper (services/computer-use). Like studio_lens/preview it's a
+// conversation-level surface (one physical desktop, one overlay banner), so sub-agents have it stripped
+// in loop.ts — a Task/async child must not race the parent for the mouse.
+export const COMPUTER_USE_TOOLS = [computerUseTool] as unknown as Tool[]
+
 // distill_skill (skill distillation §3.2) — same tier as MEMORY_TOOLS: every agent role plus
 // coordinator-direct, alongside the Skill tool's injection point below (a role that can LOAD skills can
 // also propose them). Output is a per-role DRAFT gated by the user in Extensions → Skills. Sub-agents
@@ -150,6 +159,9 @@ export function toolsForAgentRole(roleId: string): Tool[] {
   const visualize = AGENT_ROLE_IDS.has(roleId) ? VISUALIZE_TOOLS : []
   const preview = AGENT_ROLE_IDS.has(roleId) ? PREVIEW_AGENT_TOOLS : []
   const monitor = AGENT_ROLE_IDS.has(roleId) ? MONITOR_TOOLS : []
+  // ns_computer_use: global toggle + macOS + helper installed (computerUseToolAvailable). Every agent role;
+  // coordinator-direct (not an agent role) is excluded by construction — desktop control is a doer's job.
+  const computerUse = AGENT_ROLE_IDS.has(roleId) && computerUseToolAvailable() ? COMPUTER_USE_TOOLS : []
   // workflow_status (§7.5 batch C): the read-only run window — the ONLY standing workflow tool a role
   // has (launching stays behind the per-turn review closure, so watching ≠ starting).
   const wfStatus = AGENT_ROLE_IDS.has(roleId) ? [workflowStatusTool as unknown as Tool] : []
@@ -159,5 +171,5 @@ export function toolsForAgentRole(roleId: string): Tool[] {
   // studio_guide — the product-manual read (studio-guide-product-manual): same tier as the memory tools —
   // every agent role plus coordinator-direct (Danny is the front door for "what can Studio do?"), sub-agents
   // stripped in loop.ts. Pairs with the standing STUDIO_GUIDE_INDEX prompt section (buildAgentSystem).
-  return [...core, ...PLAN_TOOLS, askUserQuestionTool as unknown as Tool, rememberProjectMapTool as unknown as Tool, studioGuideTool as unknown as Tool, ...MEMORY_TOOLS, ...DISTILL_TOOLS, ...panel, ...visualize, ...preview, ...monitor, ...wfStatus, ...mcpManager.toolsForRole(roleId), ...(skill ? [skill] : [])]
+  return [...core, ...PLAN_TOOLS, askUserQuestionTool as unknown as Tool, rememberProjectMapTool as unknown as Tool, studioGuideTool as unknown as Tool, ...MEMORY_TOOLS, ...DISTILL_TOOLS, ...panel, ...visualize, ...preview, ...monitor, ...computerUse, ...wfStatus, ...mcpManager.toolsForRole(roleId), ...(skill ? [skill] : [])]
 }

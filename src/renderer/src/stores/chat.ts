@@ -72,6 +72,11 @@ export const useChat = create<ChatState>((set, get) => {
         msgs.push(cur)
       }
       cur.images = [...(cur.images ?? []), image]
+      // Slot an image block into the ordered stream at the CURRENT tail — the image arrived during the
+      // tool_results drain, so this lands right after the tool card and before any text the next turn
+      // streams, fixing the "image always at the bottom, DONE above it" ordering. msg.images stays as the
+      // flat lightbox gallery; the block is the position overlay (same split as tool ↔ msg.tools).
+      cur.blocks = [...(cur.blocks ?? []), { kind: 'image', url: image.url, name: image.name }]
       return { byConversation: { ...s.byConversation, [convId]: msgs } }
     })
   }
@@ -741,6 +746,17 @@ export const useChat = create<ChatState>((set, get) => {
         if (run?.tools.length) {
           blocks = run.blocks.length ? [...run.blocks] : []
           if (m.content.trim() && !blocks.some((b) => b.kind === 'text')) blocks.push({ kind: 'text', text: m.content })
+          // Slot each tool-produced image back into the stream after its originating tool card, matching the
+          // live appendImage ordering (images are redacted to text in the transcript, so they only survive as
+          // message attachments — reposition them here by the toolUseId persisted on each). Legacy attachments
+          // with no toolUseId fall through to the trailing bottom-append in the renderer.
+          for (const a of m.attachments) {
+            if ((a.kind && a.kind !== 'image') || !a.toolUseId) continue
+            let at = blocks.findIndex((b) => b.kind === 'tool' && b.id === a.toolUseId)
+            if (at < 0) continue
+            while (blocks[at + 1]?.kind === 'image') at++ // keep multiple images from one tool in order
+            blocks.splice(at + 1, 0, { kind: 'image', url: a.url, name: a.name ?? 'image' })
+          }
         }
         return {
           id: m.id,
