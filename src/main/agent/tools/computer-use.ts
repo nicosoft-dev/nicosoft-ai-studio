@@ -21,7 +21,7 @@ import {
 } from '../../services/computer-use'
 import type { ImageBlock, TextBlock, ToolResultBlock } from '../types'
 
-const READ_ACTIONS = new Set(['screenshot', 'ui_tree', 'frontmost_window', 'list_apps', 'wait'])
+const READ_ACTIONS = new Set(['screenshot', 'ui_tree', 'frontmost_window', 'list_apps', 'wait', 'start_capture', 'next_capture', 'stop_capture'])
 // Vision models are fed at most ~1568px on the long edge; anything larger is pure upload waste.
 const MAX_IMAGE_LONG_EDGE = 1568
 
@@ -29,7 +29,7 @@ const coordinatePair = z.array(z.number()).min(2).max(2)
 
 const inputSchema = z.object({
   action: z
-    .enum(['screenshot', 'click', 'type', 'key', 'scroll', 'move', 'drag', 'wait', 'secondary', 'ui_tree', 'frontmost_window', 'list_apps'])
+    .enum(['screenshot', 'start_capture', 'next_capture', 'stop_capture', 'click', 'type', 'key', 'scroll', 'move', 'drag', 'wait', 'secondary', 'ui_tree', 'frontmost_window', 'list_apps'])
     .describe('what to do on the Mac'),
   coordinate: coordinatePair.optional().describe('click/move/scroll target [x, y] in pixels of the LATEST screenshot'),
   index: z.number().int().optional().describe('click/secondary: element index from the latest ui_tree — preferred over coordinate (layout-robust)'),
@@ -45,7 +45,10 @@ const inputSchema = z.object({
   duration: z.number().optional().describe('wait: seconds to pause (max 30)'),
   actionName: z.string().optional().describe('secondary: the accessibility action to invoke, from the element\'s actions list (e.g. "AXShowMenu")'),
   pid: z.number().int().optional().describe('ui_tree: target app pid from list_apps (default: frontmost app)'),
-  display: z.number().int().optional().describe('screenshot: display index (default: main display)'),
+  display: z.number().int().optional().describe('screenshot/start_capture: display index (default: main display)'),
+  fps: z.number().int().min(1).max(60).optional().describe('start_capture: frames per second to capture (default 10)'),
+  after: z.number().int().optional().describe('next_capture: block until a frame NEWER than this frameIndex arrives (pass the last frameIndex you saw to wait for the next change; omit for the latest frame right now)'),
+  timeoutMs: z.number().int().optional().describe('next_capture: max milliseconds to wait for a newer frame before returning the current one (default 1000)'),
 })
 
 type Input = z.infer<typeof inputSchema>
@@ -152,15 +155,49 @@ async function doScreenshot(input: Input, ctx: { signal: AbortSignal }): Promise
   }
 }
 
+// One frame from the warm streaming session. Same downscale + coordinate mapping as a screenshot (the
+// stream captures at full display resolution), so clicks addressed against a frame land correctly, and
+// the returned frameIndex lets the model pass `after` next time to block until the picture actually
+// changes (a fresh frame is only produced when the screen updates).
+async function doNextCapture(input: Input, ctx: { signal: AbortSignal }): Promise<Out> {
+  const params: Record<string, unknown> = {}
+  if (input.after !== undefined) params.after = input.after
+  if (input.timeoutMs !== undefined) params.timeoutMs = input.timeoutMs
+  const frame = await callComputerUse<{ frameIndex: number; base64: string; mime: string; width: number; height: number; scale: number }>(
+    'next_capture',
+    params,
+    { timeoutMs: (input.timeoutMs ?? 1000) + 10_000, signal: ctx.signal },
+  )
+  mapping = computeScreenshotMapping(frame.width, frame.height, frame.scale)
+  const source = nativeImage.createFromBuffer(Buffer.from(frame.base64, 'base64'))
+  const needsResize = mapping.imageWidth !== frame.width || mapping.imageHeight !== frame.height
+  const sized = needsResize ? source.resize({ width: mapping.imageWidth, height: mapping.imageHeight, quality: 'good' }) : source
+  const jpeg = sized.toJPEG(80)
+  return {
+    kind: 'screenshot',
+    text: `Frame #${frame.frameIndex} — ${mapping.imageWidth}x${mapping.imageHeight}. To wait for the NEXT change, call next_capture with after=${frame.frameIndex}. Coordinates for click/move/scroll/drag are [x, y] pixels in THIS image. Call stop_capture when you no longer need to watch.`,
+    image: { mime: 'image/jpeg', base64: jpeg.toString('base64') },
+  }
+}
+
 export const computerUseTool = buildTool<typeof inputSchema, Out>({
   name: COMPUTER_USE_TOOL_NAME,
   inputSchema,
   prompt: () =>
-    'See and control this Mac — native apps and anything on screen, not just the browser. ' +
-    'Workflow: take a screenshot to see the screen; call ui_tree to list the frontmost app\'s interactive elements, then click by element `index` (robust) or by screenshot-pixel `coordinate` (fallback); ' +
-    'screenshot again to verify the result before moving on. ' +
-    '`type` inserts literal text in any language (works with any input method); `key` presses xdotool-style combos ("Return", "super+a", "ctrl+Tab"); `secondary` invokes a named accessibility action from an element\'s actions list; `list_apps` + ui_tree(pid) reach apps that are not frontmost. ' +
-    'Actions land on the user\'s REAL desktop and a banner tells them so — act deliberately: one action per call, verify between steps, and ask the user before anything destructive or hard to reverse (sending messages, deleting, submitting forms, closing unsaved work).',
+    'See and control this Mac — native apps and anything on screen, not just the browser. This is full ' +
+    'desktop control: you can drive Finder, System Settings, Mail, Notes, menus, dialogs, third-party apps, ' +
+    'and multi-app workflows.\n\n' +
+    'SEE the screen (pick the right tool for the situation):\n' +
+    '• `screenshot` — one still frame of the whole display. Your default for a static screen: look, act, look again.\n' +
+    '• `ui_tree` — the frontmost app\'s interactive elements as an indexed list (role, label, value, frame, actions). ' +
+    'Read this before clicking so you can target by `index` (layout-robust) instead of guessing pixels. Pass `pid` (from `list_apps`) to read an app that is NOT frontmost.\n' +
+    '• `frontmost_window` — which app/window is in front. `list_apps` — every running app + its pid.\n' +
+    '• STREAMING for things that MOVE or take time — `start_capture` opens a warm, continuous capture; `next_capture` returns the latest frame and, if you pass `after=<the last frameIndex>`, BLOCKS until the picture actually changes (so you watch an animation, a progress bar, a video, a spinner, a live download, a page loading, a game, or any state you\'re waiting on — one call per meaningful change instead of hammering screenshot); `stop_capture` ends it. Use streaming whenever you need to observe change over time or wait for something to finish; it is far better than a screenshot loop for that. Always `stop_capture` when done watching.\n\n' +
+    'ACT (targets are [x, y] pixels of the LATEST image you received, OR a ui_tree `index`):\n' +
+    '• `click` (by `index` — preferred — or `coordinate`; `button`, `clickCount` for double/triple), `move`, `drag` (`start`→`end`), `scroll` (`direction`, `amount`).\n' +
+    '• `type` inserts literal text in ANY language / emoji, input-method-independent. `key` presses xdotool-style combos ("Return", "super+a", "ctrl+Tab", "Escape", "super+space"). `secondary` invokes a named accessibility action from an element\'s `actions` list (e.g. "AXShowMenu"). `wait` pauses.\n\n' +
+    'DECIDE for yourself which tool fits — a still screenshot for a static screen, ui_tree for precise clicking, or streaming to watch something change. Chain them freely to accomplish the goal.\n\n' +
+    'SAFETY: actions land on the user\'s REAL desktop and an on-screen banner tells them so. Verify with a fresh capture between steps, take the frontmost window into account (don\'t type into the wrong app), and ask the user before anything destructive or hard to reverse — sending a message, deleting, submitting a form, a purchase, or closing unsaved work.',
   isReadOnly: (input) => READ_ACTIONS.has(input.action),
   isConcurrencySafe: () => false, // one physical desktop — never interleave
   async call(input, ctx) {
@@ -169,6 +206,19 @@ export const computerUseTool = buildTool<typeof inputSchema, Out>({
     switch (input.action) {
       case 'screenshot':
         return { data: await doScreenshot(input, ctx) }
+      case 'start_capture': {
+        const p: Record<string, unknown> = {}
+        if (input.display !== undefined) p.display = input.display
+        if (input.fps !== undefined) p.fps = input.fps
+        const r = await callComputerUse<{ ok: boolean; fps: number; width: number; height: number; scale: number }>('start_capture', p, { timeoutMs: 15_000, signal: ctx.signal })
+        return { data: { kind: 'text', text: `Streaming started at ${r.fps} fps. Call next_capture to pull the latest frame; pass after=<the last frameIndex> to block until the screen changes. Call stop_capture when done.` } }
+      }
+      case 'next_capture':
+        return { data: await doNextCapture(input, ctx) }
+      case 'stop_capture': {
+        await callComputerUse('stop_capture', {}, { timeoutMs: 5_000, signal: ctx.signal })
+        return { data: { kind: 'text', text: 'Streaming stopped.' } }
+      }
       case 'ui_tree': {
         const tree = await callComputerUse<{ token: number; pid: number; count: number; elements: HelperElement[] }>(
           'ui_tree',

@@ -399,12 +399,15 @@ export function releaseComputerUse(runId: string | undefined): void {
   if (!activeRuns.delete(runId ?? 'default')) return
   if (activeRuns.size > 0 || !client.connected()) return
   void client.call('set_active', { active: false }, { timeoutMs: 1_500 }).catch(() => undefined)
+  // Tear down any warm streaming session the run left open, so an SCStream never outlives its run.
+  void client.call('stop_capture', {}, { timeoutMs: 1_500 }).catch(() => undefined)
 }
 
-// App-quit backstop (main/index.ts before-quit): drop the banner if we were mid-run.
+// App-quit backstop (main/index.ts before-quit): drop the banner + stop any stream if we were mid-run.
 export function disposeComputerUse(): void {
   activeRuns.clear()
   if (!client.connected()) return
   void client.call('set_active', { active: false }, { timeoutMs: 500 }).catch(() => undefined)
+  void client.call('stop_capture', {}, { timeoutMs: 500 }).catch(() => undefined)
   client.disconnect()
 }
