@@ -62,12 +62,7 @@ final class ScreenStreamer: NSObject, SCStreamOutput, SCStreamDelegate {
                 "start capture failed (grant Screen Recording): \(error.localizedDescription)")
         }
 
-        condition.lock()
-        self.stream = stream
-        self.latestImage = nil
-        self.frameIndex = 0
-        self.isRunning = true
-        condition.unlock()
+        publishStarted(stream)
         Log.info("stream capture started (\(display.pixelWidth)x\(display.pixelHeight) @ \(fps)fps)")
     }
 
@@ -76,15 +71,39 @@ final class ScreenStreamer: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     private func stopIfRunning() async {
-        let running: SCStream?
+        // The lock-protected state reset happens synchronously in takeRunningStream(); the async
+        // stopCapture() runs only AFTER the lock is released. NSCondition.lock/unlock must never be
+        // called from an async context — that's a hard error under the Swift 6 language mode.
+        if let running = takeRunningStream() { try? await running.stopCapture() }
+    }
+
+    // MARK: - Synchronous state mutation
+    //
+    // NSCondition.lock/unlock are blocking and unavailable from async contexts (Swift 6). The two async
+    // entry points (start / stopIfRunning) therefore mutate the shared state through these synchronous
+    // helpers, so the lock is only ever taken on a normal thread — the sync delegate callbacks and the
+    // blocking waitForFrame() poll do the same.
+
+    /// Publish the just-started stream and reset frame state under the lock.
+    private func publishStarted(_ stream: SCStream) {
         condition.lock()
-        running = stream
+        self.stream = stream
+        self.latestImage = nil
+        self.frameIndex = 0
+        self.isRunning = true
+        condition.unlock()
+    }
+
+    /// Atomically clear running state, wake any waiters, and return the stream to stop (if any).
+    private func takeRunningStream() -> SCStream? {
+        condition.lock()
+        let running = stream
         stream = nil
         isRunning = false
         latestImage = nil
         condition.broadcast() // wake any waiters so they don't hang
         condition.unlock()
-        if let running { try? await running.stopCapture() }
+        return running
     }
 
     /// The most recent frame and its index, or nil if none has arrived yet.
