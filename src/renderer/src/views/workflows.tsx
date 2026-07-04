@@ -646,9 +646,39 @@ function WorkflowEditor({
     return () => clearTimeout(h)
   }, [script])
 
+  // §3.1 双向同步, live: while you type in a FORM field it is the source of truth — every keystroke lands
+  // in the SCRIPT via a debounced rewriteMeta, so the script pane visibly follows; lint-derived values
+  // flow back into a field only while it is NOT focused (script-pane edits refresh the form without
+  // clobbering an in-progress keystroke or the caret). Rewrites run through a sequential queue against
+  // the LATEST script text: a name edit chased by a description edit can't base itself on stale text,
+  // and if the pane moved while a rewrite was in flight the patch re-applies once on the fresh text.
+  const scriptRef = useRef(script)
+  scriptRef.current = script
+  const metaSeq = useRef<Promise<void>>(Promise.resolve())
   const commitMeta = (patch: { name?: string; description?: string; cwd?: string | null; params?: ParamDef[] }): void => {
-    void window.api.workflows.rewriteMeta(script, patch).then((next) => { if (next !== script) { setScript(next); setDirty(true) } })
+    metaSeq.current = metaSeq.current
+      .then(async () => {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const base = scriptRef.current
+          const next = await window.api.workflows.rewriteMeta(base, patch)
+          if (base !== scriptRef.current) continue // the pane moved mid-rewrite — re-apply on the fresh text
+          if (next !== base) { scriptRef.current = next; setScript(next); setDirty(true) }
+          return
+        }
+      })
+      .catch(() => {})
   }
+  const [nameField, setNameField] = useState('')
+  const [descField, setDescField] = useState('')
+  const nameRef = useRef<HTMLInputElement>(null)
+  const descRef = useRef<HTMLInputElement>(null)
+  const nameTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const descTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => {
+    if (document.activeElement !== nameRef.current) setNameField(lint?.name ?? '')
+    if (document.activeElement !== descRef.current) setDescField(lint?.description ?? '')
+  }, [lint?.name, lint?.description])
+  useEffect(() => () => { clearTimeout(nameTimer.current); clearTimeout(descTimer.current) }, [])
   const edit = (next: string): void => { setScript(next); setDirty(true) }
 
   const insertAtCursor = (snippet: string): void => {
@@ -731,11 +761,33 @@ function WorkflowEditor({
           <div className="wf-fields">
             <label className="wf-field">
               <span className="wf-lab">Name</span>
-              <input className="wf-input mono" defaultValue={lint?.name ?? ''} key={`n-${lint?.name ?? ''}`} onBlur={(e) => { if (e.target.value !== lint?.name) commitMeta({ name: e.target.value }) }} />
+              <input
+                className="wf-input mono"
+                ref={nameRef}
+                value={nameField}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setNameField(v)
+                  clearTimeout(nameTimer.current)
+                  nameTimer.current = setTimeout(() => commitMeta({ name: v }), 250)
+                }}
+                onBlur={() => { clearTimeout(nameTimer.current); if (nameField !== (lint?.name ?? '')) commitMeta({ name: nameField }) }}
+              />
             </label>
             <label className="wf-field">
               <span className="wf-lab">Description <span className="hint">hand-written; empty → the list shows the role chain</span></span>
-              <input className="wf-input" defaultValue={lint?.description ?? ''} key={`d-${lint?.description ?? ''}`} onBlur={(e) => { if (e.target.value !== lint?.description) commitMeta({ description: e.target.value }) }} />
+              <input
+                className="wf-input"
+                ref={descRef}
+                value={descField}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setDescField(v)
+                  clearTimeout(descTimer.current)
+                  descTimer.current = setTimeout(() => commitMeta({ description: v }), 250)
+                }}
+                onBlur={() => { clearTimeout(descTimer.current); if (descField !== (lint?.description ?? '')) commitMeta({ description: descField }) }}
+              />
             </label>
             <label className="wf-field">
               <span className="wf-lab">Working folder <span className="hint">default cwd for every run; a folder param overrides per run</span></span>
@@ -805,11 +857,17 @@ function WorkflowEditor({
 
 function ParamsTable({ params, onCommit }: { params: ParamDef[]; onCommit: (p: ParamDef[]) => void }): ReactElement {
   const [draft, setDraft] = useState<ParamDef[]>(params)
-  useEffect(() => setDraft(params), [params])
+  const wrapRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    // Lint rebuilds `params` identity on every pass (a debounced name/description rewrite landing
+    // included) — resetting the draft is only safe while no cell here is focused, or it clobbers a
+    // row mid-typing and drops the caret.
+    if (!wrapRef.current?.contains(document.activeElement)) setDraft(params)
+  }, [params])
   const set = (i: number, patch: Partial<ParamDef>): void => setDraft((d) => d.map((p, j) => (j === i ? { ...p, ...patch } : p)))
   const commit = (next?: ParamDef[]): void => onCommit((next ?? draft).filter((p) => p.name.trim()))
   return (
-    <div className="wf-params-wrap">
+    <div className="wf-params-wrap" ref={wrapRef}>
       <span className="wf-lab">Params <span className="hint">⇄ meta.params — the run form renders these</span></span>
       <div className="wf-params">
         <div className="hd"><span>name</span><span>type</span><span>default</span><span>label</span><span /></div>

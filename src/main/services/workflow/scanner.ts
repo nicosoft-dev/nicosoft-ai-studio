@@ -143,8 +143,9 @@ export function scan(src: string): WorkflowScanDto {
   const body = parsed.ast.body as Ast[]
 
   // meta discipline: parseScript enforces first-statement + pure literal + name/description; the scanner
-  // adds the .nsw format anchor on top (missing / newer-than-supported → reject).
-  const meta = parseScript(src)
+  // adds the .nsw format anchor on top (missing / newer-than-supported → reject). Empty description is
+  // legal for a workflow ('' → the list shows the role chain) — only lens/skill scripts require it.
+  const meta = parseScript(src, { allowEmptyDescription: true })
   if ('error' in meta) {
     violations.push({ line: 1, message: meta.error, category: 'allowListedCalls' })
   } else {

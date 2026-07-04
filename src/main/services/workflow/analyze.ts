@@ -119,7 +119,7 @@ function readParams(raw: unknown, issues: WorkflowShape['issues']): WorkflowPara
 // Analyze a full workflow script. knownRoles, when provided, is the set of role ids a step may target
 // (enabled agent-loop roles) — agent() calls outside it become lint issues.
 export function analyze(src: string, knownRoles?: ReadonlySet<string>): AnalyzeResult {
-  const parsed = parseScript(src)
+  const parsed = parseScript(src, { allowEmptyDescription: true }) // workflow contract: '' → list shows the role chain
   if ('error' in parsed) return { ok: false, error: parsed.error }
   const full = parseFull(src)
   if ('error' in full) return { ok: false, error: full.error }

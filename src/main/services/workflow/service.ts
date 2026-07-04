@@ -236,7 +236,7 @@ function serializeMeta(meta: Record<string, unknown>): string {
 }
 
 export function rewriteMeta(script: string, patch: MetaPatch): string {
-  const parsed = parseScript(script)
+  const parsed = parseScript(script, { allowEmptyDescription: true }) // a field patch must land on a ''-description script too
   if ('error' in parsed) return script
   const full = parseFull(script)
   if ('error' in full) return script

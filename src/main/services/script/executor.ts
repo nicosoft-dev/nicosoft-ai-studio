@@ -187,11 +187,17 @@ function literalObject(node: Ast): Record<string, unknown> {
   return out
 }
 
-// Required meta fields. name + description are mandatory non-empty strings (name shows in
-// the permission dialog / run list, description is the one-liner). phases/whenToUse are optional.
-function validateMetaFields(meta: Record<string, unknown>): string | null {
+// Required meta fields. name is a mandatory non-empty string everywhere (it shows in the permission
+// dialog / run list). description must be a string: lens/skill scripts require it non-empty (it IS
+// their one-line surface), while a WORKFLOW may leave it '' — the editor's documented contract is
+// "empty → the list shows the role chain", so the workflow callers pass allowEmptyDescription.
+export interface ParseScriptOptions {
+  allowEmptyDescription?: boolean
+}
+function validateMetaFields(meta: Record<string, unknown>, opts: ParseScriptOptions): string | null {
   if (typeof meta.name !== 'string' || !meta.name.trim()) return 'meta.name must be a non-empty string'
-  if (typeof meta.description !== 'string' || !meta.description.trim()) return 'meta.description must be a non-empty string'
+  if (typeof meta.description !== 'string') return 'meta.description must be a string'
+  if (!opts.allowEmptyDescription && !meta.description.trim()) return 'meta.description must be a non-empty string'
   return null
 }
 
@@ -199,7 +205,7 @@ function validateMetaFields(meta: Record<string, unknown>): string | null {
 // declaration sliced off. Validates the header: acorn parse as a module
 // (so `export` is legal) with top-level await/return allowed, first statement must be the meta export,
 // then strip it to get the executable body.
-export function parseScript(src: string): ParseResult {
+export function parseScript(src: string, opts: ParseScriptOptions = {}): ParseResult {
   let ast: Ast
   try {
     ast = parse(src, {
@@ -228,7 +234,7 @@ export function parseScript(src: string): ParseResult {
   } catch (e) {
     return { error: `meta must be a pure literal: ${e instanceof Error ? e.message : String(e)}` }
   }
-  const fieldError = validateMetaFields(raw)
+  const fieldError = validateMetaFields(raw, opts)
   if (fieldError) return { error: fieldError }
   // Strip the meta declaration: everything after its end, with a leading `;`/blank line trimmed.
   const scriptBody = src.slice(first.end).replace(/^[;\s]*\n/, '').trimStart()
