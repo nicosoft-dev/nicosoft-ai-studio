@@ -296,7 +296,10 @@ const boundsWithin = (marks: readonly number[], start: number, end: number): num
 const EMPTY_BOUNDS: readonly number[] = []
 export function ChunkedMarkdown({ text, live }: { text: string; live: boolean }): ReactElement {
   const { visible, marks } = useTypewriter(text, live)
-  const { chunks, end } = useMemo(() => splitChunks(visible), [visible])
+  // final:false while live — cuts are then append-only (chunking.ts stability invariant), so a
+  // completed chunk can never be pulled back into the tail mid-stream (the loose-list flicker).
+  // `live` must stay a dep: at settle `visible` can be the identical string while final flips true.
+  const { chunks, end } = useMemo(() => splitChunks(visible, { final: !live }), [visible, live])
   const tail = visible.slice(end)
   return (
     <>
