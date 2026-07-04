@@ -8,9 +8,11 @@ import { z } from 'zod'
 import { buildTool } from '../tool'
 import type { ToolResultBlock } from '../types'
 import { scheduledTaskStore } from '../scheduler/store'
+import * as workflowService from '../../services/workflow/service'
 import type { ScheduledTask } from '../../ipc/contracts'
 
 function stepLabel(s: ScheduledTask['steps'][number]): string {
+  if (s.kind === 'workflow') return s.workflowId ? (workflowService.get(s.workflowId)?.name ?? 'workflow') : 'workflow'
   return s.kind === 'expert' ? (s.roleId ?? 'expert') : s.kind
 }
 
@@ -39,14 +41,15 @@ export const scheduleCreateTool = buildTool({
       .array(
         z.object({
           kind: z
-            .enum(['expert', 'tool', 'email', 'project'])
+            .enum(['expert', 'tool', 'email', 'project', 'workflow'])
             .describe(
-              'expert = run a role; tool = use an MCP tool; email = send via an email MCP (or draft if none connected); project = create/advance a Project'
+              'expert = run a role; tool = use an MCP tool; email = send via an email MCP (or draft if none connected); project = create/advance a Project; workflow = run an existing SAVED workflow (by name — this schedules it, it does not define one)'
             ),
           prompt: z
             .string()
+            .optional()
             .describe(
-              "What this step does. Each step also receives the previous step's output, so later steps build on earlier ones."
+              "What this step does — required for every kind EXCEPT workflow (the saved script is the instruction). Each step also receives the previous step's output, so later steps build on earlier ones."
             ),
           role: z
             .string()
@@ -56,11 +59,13 @@ export const scheduleCreateTool = buildTool({
           subject: z.string().optional().describe('email: subject line'),
           action: z.enum(['create', 'advance']).optional().describe('project: create a new project or advance one'),
           projectId: z.string().optional().describe('project (advance): the target project id'),
+          workflow: z.string().optional().describe('workflow: the saved workflow by its EXACT name (must be enabled — drafts cannot be scheduled)'),
+          params: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional().describe('workflow: run parameters (omitted params use their defaults)'),
         })
       )
       .min(1)
       .describe(
-        'Ordered step chain. One step for a simple task; multiple steps hand work across roles/kinds (e.g. analyst computes → email step sends the result). Each step runs and its output feeds the next.'
+        'Ordered step chain. One step for a simple task; multiple steps hand work across roles/kinds (e.g. analyst computes → email step sends the result; a workflow step pipes its return text onward). Each step runs and its output feeds the next.'
       ),
     cwd: z
       .string()
@@ -79,17 +84,33 @@ export const scheduleCreateTool = buildTool({
     'Create a scheduled task that fires later. "schedule" is an interval (5m/2h/1d), a one-shot datetime, or ' +
     'a 5-field cron (local time). "steps" is an ordered chain: each step runs as an agent turn by its "role" ' +
     'inside "cwd" (full permission there), and its output is piped into the next step — so one task can hand ' +
-    'work across roles. Keep it session-only (durable:false) unless the user wants it to survive restarts. ' +
-    'Email/send is NOT built in: a step that should email must go through an email MCP tool or leave a draft. ' +
-    'Use for "remind me / run X every / at <time> do Y".',
+    'work across roles. A "workflow" step runs an existing SAVED workflow by name (enabled only — never a ' +
+    'draft; the run is checked again at fire time) and pipes its return text onward — use it when the user ' +
+    'wants a saved workflow on a schedule. Keep it session-only (durable:false) unless the user wants it to ' +
+    'survive restarts. Email/send is NOT built in: a step that should email must go through an email MCP ' +
+    'tool or leave a draft. Use for "remind me / run X every / at <time> do Y / run <workflow> every morning".',
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
   async call(input, ctx) {
-    const task = scheduledTaskStore.create(
-      {
-        name: input.name,
-        schedule: input.schedule,
-        steps: input.steps.map((s) => ({
+    // §7.5 "whoever launches, checks" — creating a workflow schedule IS the launch decision, made by the
+    // role in its own turn, so the CREATE-time gate is the strict one: resolve the name against ENABLED
+    // workflows only (a draft cannot be scheduled — same red line as every entry point) and run the SAME
+    // mechanical preflight the run itself enforces (params/folder/gates), refusing the task on failure.
+    // Fire time re-checks mechanically (engine → preflightRun), so a workflow disabled later fails honestly.
+    const steps = await Promise.all(
+      input.steps.map(async (s) => {
+        if (s.kind === 'workflow') {
+          if (!s.workflow) throw new Error('a workflow step needs "workflow" (the saved workflow\'s exact name)')
+          const w = workflowService.list().find((x) => x.name === s.workflow && x.enabled)
+          if (!w) {
+            const enabled = workflowService.list().filter((x) => x.enabled).map((x) => x.name)
+            throw new Error(`no ENABLED workflow named "${s.workflow}"${enabled.length ? ` — available: ${enabled.join(', ')}` : ' — none are enabled'}`)
+          }
+          workflowService.preflightRun(w.id, s.params ?? {}) // throws with the concrete reason → the task is refused
+          return { kind: s.kind, prompt: '', workflowId: w.id, workflowParams: s.params }
+        }
+        if (!s.prompt) throw new Error(`a ${s.kind} step needs a prompt`)
+        return {
           kind: s.kind,
           prompt: s.prompt,
           roleId: s.role,
@@ -97,7 +118,14 @@ export const scheduleCreateTool = buildTool({
           subject: s.subject,
           action: s.action,
           projectId: s.projectId,
-        })),
+        }
+      })
+    )
+    const task = scheduledTaskStore.create(
+      {
+        name: input.name,
+        schedule: input.schedule,
+        steps,
         cwd: input.cwd ?? ctx.cwd,
         durable: input.durable,
         // §7.5 provenance: the creating role + its conversation — a workflow step fired by this task
@@ -107,7 +135,7 @@ export const scheduleCreateTool = buildTool({
       },
       Date.now()
     )
-    const chain = task.steps.map((s) => s.roleId).join(' → ')
+    const chain = task.steps.map(stepLabel).join(' → ')
     return {
       data:
         `Scheduled "${task.name}" (${task.id}) — next run ${new Date(task.nextRunAt).toLocaleString()} ` +
