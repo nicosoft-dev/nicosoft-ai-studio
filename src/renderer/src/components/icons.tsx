@@ -405,11 +405,14 @@ export const Icons: Record<string, IconFn> = {
     </Icon>
   ),
   workflow: (p) => (
+    // five nodes on a pentagon ring (user-requested 5-corner shape); edges trimmed to the circle borders
     <Icon {...p}>
-      <circle cx="5.5" cy="6" r="2.4" />
-      <circle cx="18.5" cy="6" r="2.4" />
-      <circle cx="12" cy="18" r="2.4" />
-      <path d="M7.5 7.5 10.4 16M16.5 7.5 13.6 16M8 6h8" />
+      <circle cx="12" cy="4.6" r="2" />
+      <circle cx="19.8" cy="10.3" r="2" />
+      <circle cx="16.8" cy="19.4" r="2" />
+      <circle cx="7.2" cy="19.4" r="2" />
+      <circle cx="4.2" cy="10.3" r="2" />
+      <path d="M13.6 5.8 18.2 9.1M19.2 12.2 17.4 17.5M14.8 19.4H9.2M6.6 17.5 4.8 12.2M5.8 9.1 10.4 5.8" />
     </Icon>
   ),
   kanban: (p) => (
