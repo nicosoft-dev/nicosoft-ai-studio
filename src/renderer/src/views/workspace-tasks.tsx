@@ -19,7 +19,7 @@ import { useConvServices } from '@/stores/conv-services'
 import { useWorkflowRuns } from '@/stores/workflow-runs'
 import { useAllExperts } from '@/lib/all-experts'
 import type { ToolCall } from '@/stores/chat'
-import type { WorkspaceTaskHistory, WorkspacePhase, WorkspaceExamine, WorkspaceService, ServiceInfo } from '@/lib/api'
+import type { WorkspaceTaskHistory, WorkspacePhase, WorkspaceExamine, WorkspaceService, WorkspaceWorkflowRun, ServiceInfo } from '@/lib/api'
 
 const TASK: Record<string, { cls: string; labelKey: string }> = {
   pending: { cls: 'todo', labelKey: 'tasks.statusTodo' },
@@ -30,7 +30,7 @@ interface WsTask {
   content: string
   status: string
 }
-const EMPTY: WorkspaceTaskHistory = { phases: [], examines: [], services: [] }
+const EMPTY: WorkspaceTaskHistory = { phases: [], examines: [], services: [], workflows: [] }
 
 function fmtTime(ms: number): string {
   try {
@@ -288,20 +288,25 @@ export function WorkspaceTasks({ activeConv }: { activeConv: string | null }): R
   const timeline: (
     | { kind: 'phase'; row: WorkspacePhase }
     | { kind: 'service'; row: WorkspaceService }
+    | { kind: 'workflow'; row: WorkspaceWorkflowRun }
   )[] = [
     ...history.phases.map((p) => ({ kind: 'phase' as const, row: p })),
-    ...history.services.map((s) => ({ kind: 'service' as const, row: s }))
+    ...history.services.map((s) => ({ kind: 'service' as const, row: s })),
+    // §7.5: settled workflow runs launched from THIS conversation — owner is the launching role, so the
+    // per-owner History grouping attributes them like everything else
+    ...history.workflows.map((w) => ({ kind: 'workflow' as const, row: w }))
   ].sort((a, b) => b.row.createdAt - a.row.createdAt)
 
   // Unify History into per-OWNER groups (like the Live section + the studio_lens panel): each owner's done review
   // panels + completed todo phases + exited services under ONE "● name" header, content below. Previously
   // owner-grouped panels were followed by a FLAT, owner-less phase/service list, so a finished phase from one role
   // (Shuri's) visually merged under the previous owner's header (Flynn's). Owner order = first-seen; '' = solo (no header).
-  const histGroups = [...new Set([...donePanels.map(([o]) => o), ...timeline.map((it) => it.row.owner ?? '')])]
+  const ownerOf = (it: (typeof timeline)[number]): string => (it.kind === 'workflow' ? (it.row.initiator ?? '') : (it.row.owner ?? ''))
+  const histGroups = [...new Set([...donePanels.map(([o]) => o), ...timeline.map(ownerOf)])]
     .map((owner) => ({
       owner,
       panels: donePanels.filter(([o]) => o === owner).flatMap(([, pt]) => pt),
-      items: timeline.filter((it) => (it.row.owner ?? '') === owner)
+      items: timeline.filter((it) => ownerOf(it) === owner)
     }))
     .filter((g) => g.panels.length > 0 || g.items.length > 0)
 
@@ -423,8 +428,10 @@ export function WorkspaceTasks({ activeConv }: { activeConv: string | null }): R
                 {g.items.map((it) =>
                   it.kind === 'phase' ? (
                     <PhaseCard key={'p' + it.row.id} phase={it.row} t={t} />
-                  ) : (
+                  ) : it.kind === 'service' ? (
                     <ServiceHistCard key={'s' + it.row.id} svc={it.row} t={t} />
+                  ) : (
+                    <WorkflowHistCard key={'w' + it.row.id} run={it.row} />
                   )
                 )}
               </div>
@@ -522,6 +529,34 @@ function ServiceCard({ svc, convId, t }: { svc: ServiceInfo; convId: string; t: 
           {logs && logs.length ? logs : t('tasks.svcNoLogs')}
         </pre>
       )}
+    </div>
+  )
+}
+
+// A settled workflow run in History (§7.5) — outcome + launcher + duration + Σ; the whole card is the
+// replay entry (the same nsai:open-workflow-run jump the live entries and launch cards use).
+function WorkflowHistCard({ run }: { run: WorkspaceWorkflowRun }): ReactElement {
+  const ok = run.status === 'ok'
+  const kind = run.trigger === 'command' ? '/workflow' : run.trigger
+  return (
+    <div
+      className="ws-hist-card ws-hist-click"
+      title="Open this run"
+      onClick={() => window.dispatchEvent(new CustomEvent('nsai:open-workflow-run', { detail: { workflowId: run.workflowId, runId: run.runId } }))}
+    >
+      <div className="ws-hist-head">
+        <Icons.workflow size={13} />
+        <span className="ws-hist-title">{run.name}</span>
+        <span className={'task-status ' + (ok ? 'done' : run.status === 'failed' ? 'fail' : 'todo')}>
+          {run.status}
+          {run.failReason ? ` · ${run.failReason}` : ''}
+        </span>
+        <span className="ws-hist-time">{fmtDur(run.finishedAt - run.startedAt)}</span>
+      </div>
+      <div className="ws-svc-cmd ws-hist-cmd">
+        via {kind} · ↑{fmtTok(run.inTokens)} ↓{fmtTok(run.outTokens)}
+        {run.failDetail ? ` · ${run.failDetail.slice(0, 60)}` : ''}
+      </div>
     </div>
   )
 }

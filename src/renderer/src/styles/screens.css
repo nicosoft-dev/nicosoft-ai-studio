@@ -1340,6 +1340,9 @@
 .ws-clear { display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border-radius: 6px; background: none; border: 1px solid var(--border-1); color: var(--text-4); font-family: inherit; font-size: 10.5px; text-transform: none; letter-spacing: 0; cursor: pointer; }
 .ws-clear:hover { color: var(--text-2); border-color: var(--border-2); }
 .ws-hist-card { padding: 10px 11px; margin-bottom: 8px; border: 1px solid var(--border-1); border-radius: 9px; background: var(--bg-2); }
+/* §7.5 workflow history card — the whole card is the replay entry */
+.ws-hist-click { cursor: pointer; }
+.ws-hist-click:hover { border-color: var(--border-2); background: var(--bg-3); }
 .ws-hist-head { display: flex; align-items: center; gap: 7px; color: var(--text-3); }
 .ws-hist-title { flex: 1; min-width: 0; font-size: 12px; color: var(--text-2); font-weight: 500; }
 .ws-hist-time { font-size: 10.5px; color: var(--text-4); font-variant-numeric: tabular-nums; white-space: nowrap; }

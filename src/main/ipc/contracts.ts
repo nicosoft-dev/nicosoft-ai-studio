@@ -840,10 +840,29 @@ export interface WorkspaceServiceDto {
   startedAt: number
   exitedAt: number
 }
+// A settled workflow run launched FROM this conversation (§7.5) — the Tasks History's durable record
+// after the live entry leaves; runId is the replay pointer (nsai:open-workflow-run).
+export interface WorkspaceWorkflowRunDto {
+  id: number
+  createdAt: number
+  runId: string
+  workflowId: string
+  name: string
+  status: string // ok | failed | stopped
+  trigger: string
+  initiator: string | null
+  failReason?: string | null
+  failDetail?: string | null
+  inTokens: number
+  outTokens: number
+  startedAt: number
+  finishedAt: number
+}
 export interface WorkspaceTaskHistoryDto {
   phases: WorkspacePhaseDto[]
   examines: WorkspaceExamineDto[]
   services: WorkspaceServiceDto[]
+  workflows: WorkspaceWorkflowRunDto[]
 }
 export interface TasksHistoryChanged {
   convId: string

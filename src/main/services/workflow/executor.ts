@@ -19,6 +19,7 @@
 // elevates permissionMode.
 
 import * as usageRepo from '../../repos/usage.repo'
+import * as workspaceTasks from '../workspace/tasks'
 import { serializeToolResults } from '../../ipc/agent-serialize'
 import * as runRepo from '../../repos/workflow-run.repo'
 import * as convService from '../conversation.service'
@@ -222,6 +223,26 @@ async function executeRun(opts: {
     outTokens: usage.outTokens,
     originConvId,
   })
+  // §7.5: a run launched FROM a conversation leaves a durable Tasks-History record there once it settles
+  // (the live entry leaves the panel on this same event). Same ownership rule as the live section — a
+  // hand launch (no origin) archives nowhere. Best-effort by construction (safeInsert swallows a deleted
+  // conversation), and dedup=runId keeps it idempotent.
+  if (originConvId) {
+    const row = runRepo.getById(runId)
+    workspaceTasks.recordWorkflowRun(originConvId, {
+      runId,
+      workflowId: workflow.id,
+      name: workflow.name,
+      status,
+      trigger: row?.trigger ?? 'manual',
+      initiator: row?.initiator ?? null,
+      failReason,
+      failDetail,
+      inTokens: usage.inTokens,
+      outTokens: usage.outTokens,
+      startedAt: row ? Date.parse(row.startedAt) : Date.now(),
+    })
+  }
   // The script's return value, textified once here: a string returns as-is, other JSON-able values
   // stringify, no/void return reads as empty. Awaiting callers pipe this onward.
   const value = result.ok ? result.value : undefined
