@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, webFrame, type IpcRendererEvent } from 'electron'
 import type {
   EndpointDto,
   EndpointInput,
@@ -134,6 +134,14 @@ const api = {
   // Static platform tag so the renderer can draw its own window controls on Windows/Linux (macOS keeps
   // the native traffic lights).
   platform: process.platform,
+  // Appearance (stores/appearance.ts): UI zoom rides the webContents zoomFactor — per-window state,
+  // re-applied from localStorage on every load. Clamped here too so no caller can zoom out of range.
+  ui: {
+    setZoom: (factor: number): void => {
+      webFrame.setZoomFactor(Math.min(1.5, Math.max(0.8, Number(factor) || 1)))
+    },
+    getZoom: (): number => webFrame.getZoomFactor()
+  },
   minimizeWindow: (): void => ipcRenderer.send('app:minimize'),
   maximizeWindow: (): void => ipcRenderer.send('app:maximize'),
   closeWindow: (): void => ipcRenderer.send('app:close'),

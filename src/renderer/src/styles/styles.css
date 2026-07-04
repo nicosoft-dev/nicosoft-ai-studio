@@ -48,6 +48,9 @@
   /* — Type — */
   --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  /* Chat CONTENT text size (Settings › General; stores/appearance.ts overrides this inline on <html>).
+     Scopes to message bodies only (.seg-body / .md / .code-body) — the rest of the UI scales via zoom. */
+  --chat-font-size: 14px;
 
   /* — Radii — */
   --r-sm: 6px;

@@ -18,11 +18,13 @@ import App from './App'
 import { ErrorBoundary } from './components/error-boundary'
 import { initTheme } from './stores/theme'
 import { initLocale } from './stores/locale'
+import { initAppearance } from './stores/appearance'
 import './stores/conv-todos' // app-lifetime conv:todos subscription — keeps caching each conversation's live TodoWrite list even while the Tasks panel / workspace view is unmounted (or later code-split), so opening the panel mid-run shows current progress immediately
 import './stores/conv-services' // app-lifetime conv:services subscription — same rationale, for the live background-service set so opening the Tasks panel mid-run shows current services immediately
 
 initTheme() // resolve theme + start tracking OS changes (FOUC guard in index.html already set the first frame)
 initLocale() // resolve locale + start tracking OS language changes
+initAppearance() // re-apply persisted zoom (per-webContents, lost on reload) + font/chat-size CSS variables
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

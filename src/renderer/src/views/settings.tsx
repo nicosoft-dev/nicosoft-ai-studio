@@ -21,6 +21,7 @@ import { toast } from '@/stores/toast'
 import { useTheme, type ThemePref } from '@/stores/theme'
 import { useUpdate } from '@/stores/update'
 import { useT, useLocale, LOCALE_OPTIONS, type LocalePref } from '@/stores/locale'
+import { useAppearance, UI_ZOOMS, CHAT_SIZES } from '@/stores/appearance'
 
 // Friendly version display (doc 56 §7.1): a long nightly string like "1.0.1-nightly.20260619223550" shows as
 // "Nightly · 2026-06-19" with the full string in the tooltip; a stable version shows verbatim.
@@ -78,6 +79,97 @@ function LanguageRow(): ReactElement {
       </div>
     </div>
   );
+}
+
+// Appearance rows (General page): UI zoom + chat text size + body/mono fonts — instant, no restart
+// (stores/appearance.ts, the theme pattern). The font dropdowns enumerate the machine's families on
+// first open via queryLocalFonts() — the click IS the required user activation; a denial or an older
+// runtime degrades to Default + the Custom… free-form entry, which needs no permission at all.
+const CUSTOM_FONT = '__custom__'
+function FontRow({ labelKey, value, onPick }: { labelKey: string; value: string; onPick: (family: string) => void }): ReactElement {
+  const t = useT()
+  const [families, setFamilies] = useState<string[] | null>(null)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const enumerate = (): void => {
+    if (families !== null) return
+    const q = (window as unknown as { queryLocalFonts?: () => Promise<{ family: string }[]> }).queryLocalFonts
+    if (!q) { setFamilies([]); return }
+    q.call(window).then((list) => setFamilies([...new Set(list.map((f) => f.family))].sort())).catch(() => setFamilies([]))
+  }
+  const options = [
+    { v: '', l: t('settings.font.default') },
+    // the current pick stays selectable even when enumeration hasn't run / doesn't list it (custom name)
+    ...(value && !(families ?? []).includes(value) ? [{ v: value, l: value }] : []),
+    ...(families ?? []).map((f) => ({ v: f, l: f })),
+    { v: CUSTOM_FONT, l: t('settings.font.custom') }
+  ]
+  return (
+    <div className="set-row">
+      <span className="set-row-label">{t(labelKey)}</span>
+      {/* enumerate on CLICK, not pointerdown — queryLocalFonts needs transient user activation,
+          which Chromium grants at click time (pointerdown is too early and the call rejects) */}
+      <div style={{ width: 228, marginLeft: 'auto' }} onClick={enumerate}>
+        {editing ? (
+          <input
+            className="input"
+            autoFocus
+            placeholder={t('settings.font.customPh')}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { onPick(draft.trim()); setEditing(false) }
+              if (e.key === 'Escape') setEditing(false)
+            }}
+            onBlur={() => { if (draft.trim()) onPick(draft.trim()); setEditing(false) }}
+          />
+        ) : (
+          <Dropdown
+            options={options}
+            value={value}
+            onChange={(v) => { if (v === CUSTOM_FONT) { setDraft(value); setEditing(true) } else onPick(v) }}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
+function AppearanceRows(): ReactElement {
+  const { uiZoom, chatFontSize, sansFont, monoFont, setPrefs } = useAppearance()
+  const t = useT()
+  return (
+    <>
+      <div className="set-row">
+        <span className="set-row-label">{t('settings.font.zoom')}</span>
+        <div style={{ width: 168, marginLeft: 'auto' }}>
+          <Dropdown
+            options={UI_ZOOMS.map((z) => ({ v: String(z), l: `${Math.round(z * 100)}%` }))}
+            value={String(uiZoom)}
+            onChange={(v) => setPrefs({ uiZoom: Number(v) })}
+          />
+        </div>
+      </div>
+      <div className="set-row">
+        <span className="set-row-label">{t('settings.font.chatSize')}</span>
+        <div style={{ width: 168, marginLeft: 'auto' }}>
+          <Dropdown
+            options={CHAT_SIZES.map((s) => ({ v: String(s), l: `${s}px` }))}
+            value={String(chatFontSize)}
+            onChange={(v) => setPrefs({ chatFontSize: Number(v) })}
+          />
+        </div>
+      </div>
+      <FontRow labelKey="settings.font.body" value={sansFont} onPick={(f) => setPrefs({ sansFont: f })} />
+      <FontRow labelKey="settings.font.mono" value={monoFont} onPick={(f) => setPrefs({ monoFont: f })} />
+      <div className="set-row">
+        <span className="set-row-label">{t('settings.font.preview')}</span>
+        <div className="set-font-preview" style={{ fontSize: 'var(--chat-font-size, 14px)' }}>
+          Aa 字体样例 The quick brown fox 0123 · <code>{'mono { } =>'}</code>
+        </div>
+      </div>
+    </>
+  )
 }
 
 function SettingsNav({
@@ -379,6 +471,7 @@ function GenericSettingsPage({ id }: { id: string }): ReactElement {
       <div className="set-list">
         <ThemeRow />
         <LanguageRow />
+        <AppearanceRows />
       </div>
     </div>
   )
