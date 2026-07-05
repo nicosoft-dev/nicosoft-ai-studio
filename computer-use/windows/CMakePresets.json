@@ -1,0 +1,23 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "x64-mt",
+      "displayName": "x64 static-CRT (MSVC /MT, vcpkg)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "C:/develop/workspace/build",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "C:/develop/deps/vcpkg/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static",
+        "VCPKG_HOST_TRIPLET": "x64-windows-static",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "release", "configurePreset": "x64-mt", "configuration": "Release" },
+    { "name": "debug", "configurePreset": "x64-mt", "configuration": "Debug" }
+  ]
+}

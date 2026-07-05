@@ -23,5 +23,12 @@ macOS/scripts/*
 !macOS/scripts/package-app.sh
 !macOS/scripts/make-signing-cert.sh
 
+# Windows helper — same policy: source + CMake/vcpkg manifest are versioned; dev/test
+# scripts stay local (the PowerShell BUILD scripts get versioned when P5 lands them).
+windows/test/
+windows/scripts/*
+!windows/scripts/package-app.ps1
+!windows/scripts/make-signing-cert.ps1
+
 # macOS cruft
 .DS_Store

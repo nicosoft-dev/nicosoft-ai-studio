@@ -1,0 +1,8 @@
+{
+  "name": "ns-computer-use-helper",
+  "version-string": "1.0.1",
+  "description": "NicoSoft Computer Use helper (Windows) — screen capture, input synthesis and UI Automation over a named pipe, newline-delimited JSON-RPC.",
+  "dependencies": [
+    "nlohmann-json"
+  ]
+}
