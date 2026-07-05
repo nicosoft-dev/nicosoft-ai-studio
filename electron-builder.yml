@@ -65,6 +65,18 @@ win:
   icon: build/icon.ico
   target:
     - nsis
+  # The native computer-use helper (C++/MSVC .exe, statically linked /MT so it needs no VC++
+  # redistributable), Windows only. CI builds it into build/computer-use (see build.yml) alongside a
+  # VERSION sidecar; this ships it at <resources>/computer-use, and Studio copies it to
+  # ~/.nsai/computer-use on first enable (services/computer-use.win32.ts). Mirrors mac.extraResources —
+  # same staging dir, each runner stages its own platform's helper. build/computer-use holds only
+  # .gitkeep in a plain checkout, so a local `dist:win` without the helper staged packs nothing extra.
+  extraResources:
+    - from: build/computer-use
+      to: computer-use
+      filter:
+        - '**/*'
+        - '!.gitkeep'
 
 nsis:
   oneClick: false

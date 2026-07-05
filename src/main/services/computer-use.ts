@@ -1,36 +1,21 @@
-// Computer Use (ns_computer_use) — the Studio side of the native macOS helper (NsComputerUseHelper,
-// bundle dev.nicosoft.cuh, installed as "NicoSoft Computer Use.app"). The helper owns the TCC-sensitive
-// work (ScreenCaptureKit screenshots, CGEvent input, AX tree) behind a newline-delimited JSON-RPC
-// protocol on a unix socket; this module is the single client: connection + helper lifecycle (launch via
-// `open` so launchd — not Studio — is the parent, which is what keeps TCC attribution on the helper's
-// own bundle), install/permission status for the Extensions → Tools card, the global enable flag, and
+// Computer Use (ns_computer_use) — the Studio side of the native helper. The helper owns the
+// OS-sensitive work (screenshots, input synthesis, the accessibility/automation tree) behind a
+// newline-delimited JSON-RPC protocol; this module is the single client: connection + helper
+// lifecycle, install/permission status for the Extensions → Tools card, the global enable flag, and
 // the overlay banner refcount across concurrent agent runs. The agent tool (agent/tools/computer-use.ts)
-// and the IPC handler both come through here; nothing else touches the socket.
+// and the IPC handler both come through here; nothing else touches the transport.
+//
+// This layer is platform-neutral. Everything OS-specific — the transport endpoint (unix socket vs
+// named pipe), install/launch/quit, and the banner text — is behind ComputerUsePlatform, implemented
+// by computer-use.darwin.ts / computer-use.win32.ts and selected once in computer-use.platform.ts. So
+// the orchestration below has no if-darwin/if-win32 branching; it asks `platform` instead.
 
-import { execFile } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
 import { createConnection, type Socket } from 'node:net'
-import { promisify } from 'node:util'
 import * as settingsService from './settings.service'
-
-const execFileAsync = promisify(execFile)
-
-// Where the helper lives at runtime. electron-builder bundles the .app into <resources>/computer-use (mac
-// only); Studio copies it here on enable so it holds TCC grants on a stable, Studio-independent path.
-const HELPER_INSTALL_DIR = join(homedir(), '.nsai', 'computer-use')
+import { platform } from './computer-use.platform'
 
 export const COMPUTER_USE_SETTING_KEY = 'tools.computer_use.enabled'
 export const COMPUTER_USE_TOOL_NAME = 'ns_computer_use'
-// What the always-on-top helper banner shows while any Studio run is driving the Mac. Esc on the helper
-// side only hides the banner; the next action re-shows it (the banner is the unconditional "it's
-// happening" signal — stopping the run is Studio's stop button).
-const OVERLAY_LABEL = 'NicoSoft AI Studio is controlling this Mac'
-const HELPER_APP_NAME = 'NicoSoft Computer Use.app'
-// Full-argv pkill pattern (regex; dots match themselves loosely — distinctive enough that false
-// positives are implausible). The bare exec name can't be used: macOS p_comm truncates at 16 chars.
-const HELPER_PKILL_PATTERN = 'NicoSoft Computer Use\\.app/Contents/MacOS/NsComputerUseHelper'
 
 export interface ComputerUsePermissions {
   accessibility: 'granted' | 'denied'
@@ -38,14 +23,15 @@ export interface ComputerUsePermissions {
 }
 
 export interface ComputerUseStatus {
-  supported: boolean // process.platform === 'darwin'
+  supported: boolean // platform.supported (darwin/win32)
   enabled: boolean
   installed: boolean
   appPath: string | null
   running: boolean
   version: string | null
-  // null = unknown: helper unreachable, disabled (we don't probe), or not macOS. Permissions are read
-  // FROM the helper (its own TCC identity) — Studio cannot query another app's grants.
+  // null = unknown: helper unreachable, disabled (we don't probe), or unsupported platform. Permissions
+  // are read FROM the helper (its own identity) — Studio cannot query another app's OS grants. On
+  // Windows the helper reports both granted (no per-app permission model), so the card reads ready.
   permissions: ComputerUsePermissions | null
 }
 
@@ -56,37 +42,9 @@ interface PendingCall {
   cleanup?: () => void
 }
 
-function socketPath(): string {
-  return process.env.NSAI_CUA_SOCKET || join(homedir(), '.nsai', 'computer-use', 'sock', 'nscu.sock')
-}
-
-// The helper installs under ~/.nsai/computer-use (the copy Studio makes on enable). ~/Applications is
-// kept as a legacy fallback for an earlier manual install; /Applications covers a system-wide copy.
+// Preserved public surface: the installed helper path (from the active platform), or null.
 export function installedAppPath(): string | null {
-  for (const dir of [HELPER_INSTALL_DIR, join(homedir(), 'Applications'), '/Applications']) {
-    const p = join(dir, HELPER_APP_NAME)
-    if (existsSync(p)) return p
-  }
-  return null
-}
-
-// The helper .app bundled inside Studio by electron-builder (mac.extraResources → <resources>/computer-use).
-// Absent in dev / e2e (process.resourcesPath points at Electron's own Resources) → returns null, and we
-// fall back to whatever is already installed under ~/.nsai/computer-use (the manually-installed dev copy).
-function bundledAppPath(): string | null {
-  const p = join(process.resourcesPath, 'computer-use', HELPER_APP_NAME)
-  return existsSync(p) ? p : null
-}
-
-// CFBundleShortVersionString from an .app's Info.plist (or null). A light regex read avoids a plutil spawn.
-function appShortVersion(appPath: string): string | null {
-  try {
-    const xml = readFileSync(join(appPath, 'Contents', 'Info.plist'), 'utf8')
-    const m = /<key>CFBundleShortVersionString<\/key>\s*<string>([^<]*)<\/string>/.exec(xml)
-    return m ? m[1].trim() : null
-  } catch {
-    return null
-  }
+  return platform.installedHelperPath()
 }
 
 export function computerUseEnabled(): boolean {
@@ -95,7 +53,7 @@ export function computerUseEnabled(): boolean {
 
 // Kit-build gate (agent-tools.toolsForAgentRole): inject ns_computer_use only where it can actually work.
 export function computerUseToolAvailable(): boolean {
-  return process.platform === 'darwin' && computerUseEnabled() && installedAppPath() !== null
+  return platform.supported && computerUseEnabled() && platform.installedHelperPath() !== null
 }
 
 /* ——— JSON-RPC client (newline-delimited, matches the helper's transport-agnostic message layer) ——— */
@@ -119,7 +77,7 @@ class HelperClient {
     if (this.connected()) return Promise.resolve()
     if (this.connecting) return this.connecting
     this.connecting = new Promise<void>((resolve, reject) => {
-      const socket = createConnection(socketPath())
+      const socket = createConnection(platform.transportPath())
       socket.setEncoding('utf8')
       const onError = (err: Error): void => {
         socket.destroy()
@@ -222,60 +180,39 @@ const client = new HelperClient()
 
 /* ——— Helper lifecycle ——— */
 
-async function launchHelper(appPath: string): Promise<void> {
-  // `open -g` keeps it in the background; going through LaunchServices (not spawning the inner binary)
-  // is REQUIRED — a direct child process could be TCC-attributed to Studio instead of the helper bundle.
-  await execFileAsync('open', ['-g', appPath])
-}
-
-async function quitHelper(): Promise<void> {
-  try {
-    await execFileAsync('pkill', ['-f', HELPER_PKILL_PATTERN])
-  } catch {
-    // pkill exits 1 when nothing matched — already not running.
-  }
-}
-
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
-// Install the helper bundled inside Studio into ~/.nsai/computer-use, per the enable flow ("check if it's
-// there, then copy"). Copies when MISSING, or when the bundled version differs from the installed one so
-// helper fixes ride Studio updates — but NOT for an identical version, so a user's granted TCC permissions
-// survive Studio updates that keep the helper version fixed (the CI cert is ephemeral, so re-copying an
-// identical version would needlessly reset the grant). `ditto` preserves the code signature / symlinks /
-// xattrs a naive recursive copy corrupts. No-op in dev (nothing bundled) — the dev copy is used as-is.
+// Install the helper bundled inside Studio into ~/.nsai/computer-use, per the enable flow ("check if
+// it's there, then copy"). The platform decides WHETHER a copy is needed (version compare) and HOW to
+// copy; here we orchestrate the surrounding release: stop the old process and drop the connection
+// before overwriting the on-disk helper. No-op when unsupported or nothing is bundled (dev).
 export async function ensureHelperInstalled(): Promise<void> {
-  if (process.platform !== 'darwin') return
-  const bundled = bundledAppPath()
-  if (!bundled) return
-  const dest = join(HELPER_INSTALL_DIR, HELPER_APP_NAME)
-  if (existsSync(dest) && appShortVersion(dest) === appShortVersion(bundled)) return // already current
-  await quitHelper() // release the old bundle if a prior version is still running
+  if (!platform.supported) return
+  if (!platform.needsInstall()) return
+  await platform.quit() // release the old binary if a prior version is still running
   await delay(200)
   client.disconnect()
   try {
-    mkdirSync(HELPER_INSTALL_DIR, { recursive: true })
-    rmSync(dest, { recursive: true, force: true })
-    await execFileAsync('ditto', [bundled, dest])
+    await platform.install()
   } catch (err) {
     console.error('[computer-use] failed to install bundled helper:', err instanceof Error ? err.message : err)
   }
 }
 
-// Connect, launching the helper app if allowed and needed. Launch→ready is polled (~5s budget; the
-// helper binds its socket in well under a second on a warm machine).
+// Connect, launching the helper if allowed and needed. Launch→ready is polled (~5s budget; the helper
+// binds its endpoint in well under a second on a warm machine).
 async function ensureHelper(launchIfNeeded: boolean): Promise<HelperClient> {
   if (client.connected()) return client
   try {
     await client.connect()
     return client
   } catch {
-    /* not running (or stale socket) — maybe launch below */
+    /* not running (or stale endpoint) — maybe launch below */
   }
   if (!launchIfNeeded) throw new Error('computer-use helper is not running')
   const appPath = installedAppPath()
-  if (!appPath) throw new Error(`computer-use helper app not installed (looked for "${HELPER_APP_NAME}" in ~/Applications and /Applications)`)
-  await launchHelper(appPath)
+  if (!appPath) throw new Error(`computer-use helper (${platform.helperLabel}) is not installed`)
+  await platform.launch(appPath)
   for (let attempt = 0; attempt < 25; attempt++) {
     await delay(200)
     try {
@@ -288,10 +225,11 @@ async function ensureHelper(launchIfNeeded: boolean): Promise<HelperClient> {
   throw new Error('computer-use helper did not come up after launch')
 }
 
-// The Screen Recording grant only takes effect after the helper process restarts (CGPreflight reads a
+// macOS-only quirk, driven by the permission DATA (so it never runs on Windows, which reports granted):
+// the Screen Recording grant only takes effect after the helper process restarts (CGPreflight reads a
 // stale "denied" until then). While the card polls in the needs-permission state, restart the helper —
-// invisible, it's a background LSUIElement — at most once per cooldown so a just-granted toggle is
-// picked up without the user managing a process they can't see.
+// invisible, it's a background agent — at most once per cooldown so a just-granted toggle is picked up
+// without the user managing a process they can't see.
 let lastScreenRecordingRestart = 0
 const SCREEN_RECORDING_RESTART_COOLDOWN_MS = 12_000
 
@@ -307,7 +245,7 @@ async function refreshPermissions(): Promise<ComputerUsePermissions | null> {
 
 export async function getComputerUseStatus(): Promise<ComputerUseStatus> {
   const enabled = computerUseEnabled()
-  if (process.platform !== 'darwin') {
+  if (!platform.supported) {
     return { supported: false, enabled, installed: false, appPath: null, running: false, version: null, permissions: null }
   }
   const appPath = installedAppPath()
@@ -329,7 +267,7 @@ export async function getComputerUseStatus(): Promise<ComputerUseStatus> {
       ) {
         lastScreenRecordingRestart = Date.now()
         client.disconnect()
-        await quitHelper()
+        await platform.quit()
         await delay(300)
         const relaunched = await ensureHelper(appPath !== null)
         permissions = (await relaunched.call<ComputerUsePermissions>('permission_status', {}, { timeoutMs: 3_000 })) ?? permissions
@@ -343,13 +281,14 @@ export async function getComputerUseStatus(): Promise<ComputerUseStatus> {
 
 export async function setComputerUseEnabled(enabled: boolean): Promise<ComputerUseStatus> {
   settingsService.set(COMPUTER_USE_SETTING_KEY, enabled)
-  if (process.platform === 'darwin') {
+  if (platform.supported) {
     if (enabled) {
       // Copy the bundled helper into ~/.nsai/computer-use if it isn't there (or is a stale version), THEN
       // launch it. This is the user's enable flow: check → copy → enable.
       await ensureHelperInstalled()
-      // First enable: prompt:true nudges the system to show the TCC prompts / pre-highlight the panes
-      // for anything not yet granted, so the user lands directly in the grant flow.
+      // First enable: prompt:true nudges the OS to show any permission prompts / pre-highlight the panes
+      // for anything not yet granted, so the user lands directly in the grant flow. (Windows: no per-app
+      // grants — the helper ignores prompt and reports granted.)
       try {
         const c = await ensureHelper(true)
         await c.call('permission_status', { prompt: true }, { timeoutMs: 5_000 })
@@ -362,8 +301,8 @@ export async function setComputerUseEnabled(enabled: boolean): Promise<ComputerU
         await client.call('set_active', { active: false }, { timeoutMs: 1_500 }).catch(() => undefined)
         client.disconnect()
       }
-      await quitHelper() // the helper exists solely for Studio — no reason to leave it idling
-      await delay(200) // let the process die so the status below doesn't race a half-dead socket
+      await platform.quit() // the helper exists solely for Studio — no reason to leave it idling
+      await delay(200) // let the process die so the status below doesn't race a half-dead endpoint
     }
   }
   return getComputerUseStatus()
@@ -372,10 +311,10 @@ export async function setComputerUseEnabled(enabled: boolean): Promise<ComputerU
 // Lifecycle: the helper's running state follows the persisted enable flag. When enabled, it should be
 // RUNNING — so Studio startup launches it (this fn, called on app ready), toggling enable launches it
 // (setComputerUseEnabled above), and it stays up until the user disables (or Studio quits). This keeps
-// the Tools card's live permission status readable and the tool ready without a cold start. Called at
-// startup; a no-op when disabled — a disabled Studio start leaves the helper stopped, as intended.
+// the Tools card's live status readable and the tool ready without a cold start. Called at startup; a
+// no-op when disabled — a disabled Studio start leaves the helper stopped, as intended.
 export async function startComputerUseIfEnabled(): Promise<void> {
-  if (process.platform !== 'darwin' || !computerUseEnabled()) return
+  if (!platform.supported || !computerUseEnabled()) return
   await ensureHelperInstalled() // version-sync from the bundle first (a Studio update may ship a newer helper)
   try {
     await ensureHelper(true)
@@ -391,14 +330,14 @@ export async function callComputerUse<T>(
   params?: Record<string, unknown>,
   opts?: { timeoutMs?: number; signal?: AbortSignal },
 ): Promise<T> {
-  if (process.platform !== 'darwin') throw new Error('computer use is only available on macOS')
+  if (!platform.supported) throw new Error('computer use is not supported on this platform')
   if (!computerUseEnabled()) throw new Error('computer use is disabled — the user can enable it in Extensions → Tools')
   const c = await ensureHelper(true)
   return c.call<T>(method, params, opts)
 }
 
 /* ——— Overlay banner refcount ———
-   The banner must be up whenever ANY run is driving the Mac and come down when the LAST one ends.
+   The banner must be up whenever ANY run is driving the machine and come down when the LAST one ends.
    mark on every action (idempotent + self-healing after a user Esc), release per runId from the run's
    finally (agent-dispatch / agent-collab) — same reclaim sites as playwright sessions. */
 
@@ -407,14 +346,14 @@ const activeRuns = new Set<string>()
 export function markComputerUseActive(runId: string | undefined): void {
   activeRuns.add(runId ?? 'default')
   if (!client.connected()) return
-  void client.call('set_active', { active: true, label: OVERLAY_LABEL }, { timeoutMs: 1_500 }).catch(() => undefined)
+  void client.call('set_active', { active: true, label: platform.overlayLabel }, { timeoutMs: 1_500 }).catch(() => undefined)
 }
 
 export function releaseComputerUse(runId: string | undefined): void {
   if (!activeRuns.delete(runId ?? 'default')) return
   if (activeRuns.size > 0 || !client.connected()) return
   void client.call('set_active', { active: false }, { timeoutMs: 1_500 }).catch(() => undefined)
-  // Tear down any warm streaming session the run left open, so an SCStream never outlives its run.
+  // Tear down any warm streaming session the run left open, so a capture never outlives its run.
   void client.call('stop_capture', {}, { timeoutMs: 1_500 }).catch(() => undefined)
 }
 

@@ -106,8 +106,9 @@ jobs:
       # (compiles node-pty against Electron's ABI). Both are idempotent.
       - run: npm ci
       # Build the native computer-use helper (Swift) and stage the signed .app where electron-builder's
-      # mac.extraResources bundles it into Studio (→ <resources>/computer-use). macOS only; Windows has no
-      # helper. SELF-SIGNED for now: a self-signed identity in an isolated temp keychain gives the helper a
+      # mac.extraResources bundles it into Studio (→ <resources>/computer-use). macOS only — the Windows
+      # helper (C++/MSVC) builds in the next step. SELF-SIGNED for now: a self-signed identity in an
+      # isolated temp keychain gives the helper a
       # real (untrusted) code signature so it can hold TCC grants. The identity is EPHEMERAL per CI run, so
       # its cert leaf changes each build — Studio's installer only re-copies when the helper VERSION changes
       # (services/computer-use.ts), so a user's granted permissions survive Studio updates that keep the
@@ -133,6 +134,30 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/build/computer-use"
           ditto "out/NicoSoft Computer Use.app" "$GITHUB_WORKSPACE/build/computer-use/NicoSoft Computer Use.app"
           echo "✓ staged helper for bundling:"; ls -la "$GITHUB_WORKSPACE/build/computer-use"
+      # Build the native computer-use helper (C++/MSVC) and stage the .exe where electron-builder's
+      # win.extraResources bundles it into Studio (→ <resources>/computer-use). Windows only. Pure
+      # Win32/COM/WinRT, statically linked /MT so the .exe needs no VC++ redistributable at runtime.
+      # vcpkg (the runner's preinstalled copy) resolves nlohmann-json from the manifest at configure
+      # time. The VERSION sidecar mirrors the macOS Info.plist so Studio's install version-compare
+      # (services/computer-use.win32.ts) knows when to re-copy. The repo's CMakePresets pins absolute
+      # dev-box paths, so CI configures by hand against the runner's own vcpkg + generator.
+      - name: Build computer-use helper (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: computer-use/windows
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static `
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          cmake --build build --config Release
+          $dest = "$env:GITHUB_WORKSPACE\build\computer-use"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          Copy-Item "build\Release\NsComputerUseHelper.exe" "$dest\NsComputerUseHelper.exe"
+          $ver = node -p "require('./vcpkg.json')['version-string']"
+          Set-Content -Path "$dest\VERSION" -Value $ver -NoNewline -Encoding ascii
+          Write-Host "staged helper for bundling:"; Get-ChildItem $dest
       - name: Package
         shell: bash # uniform across runners (Windows defaults to pwsh) for the `&&` and arg splat
         env:

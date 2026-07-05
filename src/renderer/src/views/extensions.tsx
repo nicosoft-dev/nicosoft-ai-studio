@@ -406,14 +406,16 @@ function PlaywrightCard(): ReactElement {
   );
 }
 
-/* — Computer Use (ns_computer_use) card — the Studio side of the native macOS helper. A GLOBAL toggle
-     (not a per-role grant), a helper "Installed / Available" readout like Playwright, and — since the
+/* — Computer Use (ns_computer_use) card — the Studio side of the native helper. A GLOBAL toggle
+     (not a per-role grant) and a helper "Installed / Available" readout like Playwright. On macOS the
      helper needs two TCC grants Studio can't set programmatically — live permission rows that deep-link
-     into the right System Settings pane. macOS-only: the parent guards the whole card off elsewhere.
-     While enabled but not yet ready it self-polls so a just-granted permission flips the card to ready
-     without the user touching a process they can't see. — */
+     into the right System Settings pane; Windows has no per-app permission model, so those rows are
+     hidden there. The parent renders this card on macOS and Windows. While enabled but not yet ready it
+     self-polls so a just-granted permission flips the card to ready without the user touching a process
+     they can't see. — */
 function ComputerUseCard(): ReactElement {
   const t = useT();
+  const isMac = window.api.platform === 'darwin';
   const [status, setStatus] = useState<ComputerUseStatusDto | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -425,8 +427,10 @@ function ComputerUseCard(): ReactElement {
   const installed = status?.installed ?? false;
   const running = status?.running ?? false;
   const perms = status?.permissions ?? null;
-  const axOk = perms?.accessibility === 'granted';
-  const srOk = perms?.screenRecording === 'granted';
+  // TCC grants are a macOS concept; on other platforms (Windows) there is no per-app permission, so
+  // treat both as satisfied — the permission rows below are hidden and readiness rests on running.
+  const axOk = !isMac || perms?.accessibility === 'granted';
+  const srOk = !isMac || perms?.screenRecording === 'granted';
   const ready = enabled && installed && running && axOk && srOk;
   const needsPerms = enabled && installed && running && (!axOk || !srOk);
 
@@ -487,7 +491,7 @@ function ComputerUseCard(): ReactElement {
         </span>
       </div>
 
-      {enabled && installed && running ? (
+      {isMac && enabled && installed && running ? (
         <div className="cu-perms">
           <div className="cu-perm">
             <HealthDot status={axOk ? 'healthy' : 'failing'} />
@@ -529,6 +533,7 @@ function ToolsTab(): ReactElement {
   const designer = EXPERT_BY_ID['designer'];
   const b = useRoleBinding(designer);
   const isMac = window.api.platform === 'darwin';
+  const isWin = window.api.platform === 'win32';
   const [enabled, setEnabled] = useState(true);
   useEffect(() => {
     void window.api.settings.get<boolean>(TOOLS_ENABLED_KEY).then((v) => { if (v !== null) setEnabled(v); });
@@ -562,7 +567,7 @@ function ToolsTab(): ReactElement {
         </div>
       </div>
       <PlaywrightCard />
-      {isMac ? <ComputerUseCard /> : null}
+      {isMac || isWin ? <ComputerUseCard /> : null}
     </div>
   );
 }

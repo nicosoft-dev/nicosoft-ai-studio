@@ -1,4 +1,4 @@
-// ns_computer_use — see and control the user's Mac through the native helper (services/computer-use).
+// ns_computer_use — see and control the user's computer (Mac/PC) through the native helper (services/computer-use).
 // One tool, dispatched by `action` (screenshot / click / type / key / scroll / move / drag / wait /
 // secondary / ui_tree / frontmost_window / list_apps) — the same single polymorphic verb surface the
 // helper's perform_action exposes, so the model has one tool to learn.
@@ -25,12 +25,19 @@ const READ_ACTIONS = new Set(['screenshot', 'ui_tree', 'list_windows', 'frontmos
 // Vision models are fed at most ~1568px on the long edge; anything larger is pure upload waste.
 const MAX_IMAGE_LONG_EDGE = 1568
 
+// Platform-specific desktop vocabulary for the model-facing prompt (the helper is the same tool on both
+// platforms — only the words differ). macOS keeps its original wording verbatim; Windows names its own apps.
+const DESKTOP =
+  process.platform === 'win32'
+    ? { device: 'PC', apps: 'File Explorer, Settings, Mail, Notepad, menus, dialogs, third-party apps' }
+    : { device: 'Mac', apps: 'Finder, System Settings, Mail, Notes, menus, dialogs, third-party apps' }
+
 const coordinatePair = z.array(z.number()).min(2).max(2)
 
 const inputSchema = z.object({
   action: z
     .enum(['screenshot', 'start_capture', 'next_capture', 'stop_capture', 'click', 'type', 'key', 'scroll', 'move', 'drag', 'wait', 'secondary', 'ui_tree', 'list_windows', 'frontmost_window', 'list_apps'])
-    .describe('what to do on the Mac'),
+    .describe(`what to do on the ${DESKTOP.device}`),
   coordinate: coordinatePair.optional().describe('click/move/scroll target [x, y] in pixels of the LATEST screenshot'),
   index: z.number().int().optional().describe('click/type/secondary: element index from the latest ui_tree. For click it targets that element (layout-robust, preferred over coordinate); for type it focus-targets that field (verifies focus, falls back to AX set-value) so text lands in the right place'),
   button: z.enum(['left', 'right', 'middle']).optional().describe('click/drag: mouse button (default left)'),
@@ -185,8 +192,8 @@ export const computerUseTool = buildTool<typeof inputSchema, Out>({
   name: COMPUTER_USE_TOOL_NAME,
   inputSchema,
   prompt: () =>
-    'See and control this Mac — native apps and anything on screen, not just the browser. This is full ' +
-    'desktop control: you can drive Finder, System Settings, Mail, Notes, menus, dialogs, third-party apps, ' +
+    `See and control this ${DESKTOP.device} — native apps and anything on screen, not just the browser. This is full ` +
+    `desktop control: you can drive ${DESKTOP.apps}, ` +
     'and multi-app workflows.\n\n' +
     'SEE the screen (pick the right tool for the situation):\n' +
     '• `screenshot` — one still frame of the whole display. Your default for a static screen: look, act, look again.\n' +
