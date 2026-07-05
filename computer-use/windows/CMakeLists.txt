@@ -37,6 +37,8 @@ add_executable(NsComputerUseHelper
   src/capture/ImageEncoder.cpp
   src/input/InputSynthesizer.cpp
   src/input/KeyCodes.cpp
+  src/accessibility/ElementRegistry.cpp
+  src/accessibility/UiaTree.cpp
 )
 
 target_include_directories(NsComputerUseHelper PRIVATE src)

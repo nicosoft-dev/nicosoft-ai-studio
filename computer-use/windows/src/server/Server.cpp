@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <stdexcept>
 
+#include "accessibility/UiaTree.h"
 #include "capture/ImageEncoder.h"
 #include "capture/ScreenCapture.h"
 #include "input/InputSynthesizer.h"
@@ -57,8 +58,16 @@ Server::Server() : pipeName_(resolvePipeName()) {
   // targeting arrives with UI Automation in a later batch.
   rpc_.on("perform_action", [](const json& p) -> json {
     const std::string action = p.value("action", std::string());
-    const int x = p.value("x", 0);
-    const int y = p.value("y", 0);
+    int x = p.value("x", 0);
+    int y = p.value("y", 0);
+    // Element-index targeting (from ui_tree): resolve to the element's center.
+    if (p.contains("index") && p["index"].is_number_integer()) {
+      int cx = 0, cy = 0;
+      if (!uia::elementCenter(p["index"].get<int>(), cx, cy))
+        throw std::runtime_error("element index not found or off-screen");
+      x = cx;
+      y = cy;
+    }
     if (action == "click") {
       input::click(x, y, p.value("button", std::string("left")), p.value("count", 1));
     } else if (action == "move") {
@@ -80,6 +89,11 @@ Server::Server() : pipeName_(resolvePipeName()) {
     }
     return json{{"ok", true}, {"action", action}};
   });
+
+  // UI Automation: element tree + app/window enumeration.
+  rpc_.on("ui_tree", [](const json& p) -> json { return uia::snapshot(p.value("pid", 0)); });
+  rpc_.on("list_apps", [](const json&) -> json { return uia::listApps(); });
+  rpc_.on("frontmost_window", [](const json&) -> json { return uia::frontmostWindow(); });
 
   listener_ = std::make_unique<NamedPipeListener>(
       pipeName_, [this](const std::string& line) { return rpc_.handleLine(line); });

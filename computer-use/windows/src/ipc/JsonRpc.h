@@ -21,7 +21,9 @@ inline RpcRequest parseRequest(const std::string& line) {
   RpcRequest req;
   req.id = j.contains("id") ? j.at("id") : json(nullptr);
   req.method = j.value("method", std::string{});
-  req.params = j.contains("params") ? j.at("params") : json(nullptr);
+  // Normalize a missing/null params to an empty object so handlers can always
+  // call params.value("key", default) without a type error.
+  req.params = (j.contains("params") && !j.at("params").is_null()) ? j.at("params") : json::object();
   return req;
 }
 
