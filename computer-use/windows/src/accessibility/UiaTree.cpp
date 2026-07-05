@@ -32,6 +32,14 @@ std::string wideToUtf8(const wchar_t* w, int len) {
 }
 std::string bstrToUtf8(BSTR b) { return b ? wideToUtf8(b, (int)SysStringLen(b)) : std::string{}; }
 
+std::wstring utf8ToWide(const std::string& s) {
+  if (s.empty()) return {};
+  int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
+  std::wstring w((size_t)n, L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), w.data(), n);
+  return w;
+}
+
 std::string exeNameForPid(DWORD pid) {
   HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
   if (!h) return {};
@@ -56,25 +64,48 @@ std::string windowTitle(HWND hwnd) {
   return wideToUtf8(title.c_str(), got);
 }
 
-struct FindMain {
+DWORD foregroundPid() {
+  DWORD pid = 0;
+  GetWindowThreadProcessId(GetForegroundWindow(), &pid);
+  return pid;
+}
+
+// Top-level, visible, non-owned, non-tool windows of a process, in z-order.
+struct EnumCtx {
   DWORD pid;
-  HWND hwnd;
+  std::vector<HWND> hwnds;
 };
-BOOL CALLBACK findMainProc(HWND hwnd, LPARAM lp) {
-  auto* fm = reinterpret_cast<FindMain*>(lp);
+BOOL CALLBACK enumProcProc(HWND hwnd, LPARAM lp) {
+  auto* ctx = reinterpret_cast<EnumCtx*>(lp);
   DWORD wpid = 0;
   GetWindowThreadProcessId(hwnd, &wpid);
-  if (wpid == fm->pid && IsWindowVisible(hwnd) && GetWindow(hwnd, GW_OWNER) == nullptr &&
-      GetWindowTextLengthW(hwnd) > 0) {
-    fm->hwnd = hwnd;
-    return FALSE;  // stop
-  }
+  if (wpid != ctx->pid) return TRUE;
+  if (!IsWindowVisible(hwnd) || GetWindow(hwnd, GW_OWNER) != nullptr) return TRUE;
+  if (GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) return TRUE;
+  ctx->hwnds.push_back(hwnd);
   return TRUE;
 }
+std::vector<HWND> enumProcessWindows(DWORD pid) {
+  EnumCtx ctx{pid, {}};
+  EnumWindows(enumProcProc, reinterpret_cast<LPARAM>(&ctx));
+  return ctx.hwnds;
+}
+
 HWND findMainWindow(DWORD pid) {
-  FindMain fm{pid, nullptr};
-  EnumWindows(findMainProc, reinterpret_cast<LPARAM>(&fm));
-  return fm.hwnd;
+  auto wins = enumProcessWindows(pid);
+  HWND best = nullptr;
+  long bestArea = -1;
+  for (HWND h : wins) {
+    if (IsIconic(h)) continue;
+    RECT r{};
+    GetWindowRect(h, &r);
+    long area = (long)(r.right - r.left) * (r.bottom - r.top);
+    if (area > bestArea) {
+      bestArea = area;
+      best = h;
+    }
+  }
+  return best ? best : (wins.empty() ? nullptr : wins.front());
 }
 
 std::string normalizeRole(CONTROLTYPEID ct) {
@@ -119,12 +150,27 @@ ComPtr<IUIAutomation> makeAutomation() {
 
 }  // namespace
 
-json snapshot(int pid) {
+json snapshot(int pid, int windowIndex) {
   ElementRegistry::instance().reset();
 
   ComPtr<IUIAutomation> automation = makeAutomation();
-  HWND hwnd = pid > 0 ? findMainWindow((DWORD)pid) : GetForegroundWindow();
+
+  HWND hwnd = nullptr;
+  int resolvedWindow = -1;
+  if (windowIndex >= 0) {
+    DWORD wpid = pid > 0 ? (DWORD)pid : foregroundPid();
+    auto wins = enumProcessWindows(wpid);
+    if (windowIndex < (int)wins.size()) {
+      hwnd = wins[windowIndex];
+      resolvedWindow = windowIndex;
+    }
+  } else if (pid > 0) {
+    hwnd = findMainWindow((DWORD)pid);
+  } else {
+    hwnd = GetForegroundWindow();
+  }
   if (!hwnd) throw std::runtime_error("no target window");
+  std::string title = windowTitle(hwnd);
 
   ComPtr<IUIAutomationElement> root;
   checkHr(automation->ElementFromHandle(hwnd, &root), "ElementFromHandle failed");
@@ -199,7 +245,10 @@ json snapshot(int pid) {
     elements.push_back(toJson(re));
   }
 
-  return json{{"pid", (int)targetPid}, {"count", (int)elements.size()}, {"elements", std::move(elements)}};
+  json result{{"pid", (int)targetPid}, {"count", (int)elements.size()}, {"elements", std::move(elements)}};
+  if (resolvedWindow >= 0) result["window"] = resolvedWindow;
+  if (!title.empty()) result["windowTitle"] = title;
+  return result;
 }
 
 json frontmostWindow() {
@@ -237,8 +286,7 @@ BOOL CALLBACK enumAppsProc(HWND hwnd, LPARAM lp) {
 json listApps() {
   std::vector<AppWin> wins;
   EnumWindows(enumAppsProc, reinterpret_cast<LPARAM>(&wins));
-  DWORD fg = 0;
-  GetWindowThreadProcessId(GetForegroundWindow(), &fg);
+  DWORD fg = foregroundPid();
 
   std::set<DWORD> seen;
   json arr = json::array();
@@ -251,6 +299,40 @@ json listApps() {
   return arr;
 }
 
+json listWindows(int pid) {
+  DWORD wpid = pid > 0 ? (DWORD)pid : foregroundPid();
+  auto wins = enumProcessWindows(wpid);
+  HWND fg = GetForegroundWindow();
+
+  // main = largest-area non-minimized window (WeChat's big window vs its pop-outs).
+  int mainIdx = -1;
+  long bestArea = -1;
+  for (int i = 0; i < (int)wins.size(); ++i) {
+    if (IsIconic(wins[i])) continue;
+    RECT r{};
+    GetWindowRect(wins[i], &r);
+    long area = (long)(r.right - r.left) * (r.bottom - r.top);
+    if (area > bestArea) {
+      bestArea = area;
+      mainIdx = i;
+    }
+  }
+
+  json arr = json::array();
+  for (int i = 0; i < (int)wins.size(); ++i) {
+    HWND h = wins[i];
+    RECT r{};
+    GetWindowRect(h, &r);
+    arr.push_back(json{{"index", i},
+                       {"title", windowTitle(h)},
+                       {"main", i == mainIdx},
+                       {"focused", h == fg},
+                       {"minimized", (bool)IsIconic(h)},
+                       {"frame", json{{"x", r.left}, {"y", r.top}, {"width", r.right - r.left}, {"height", r.bottom - r.top}}}});
+  }
+  return json{{"pid", (int)wpid}, {"count", (int)arr.size()}, {"windows", std::move(arr)}};
+}
+
 bool elementCenter(int index, int& x, int& y) {
   auto el = ElementRegistry::instance().get(index);
   if (!el) return false;
@@ -260,6 +342,42 @@ bool elementCenter(int index, int& x, int& y) {
   x = (r.left + r.right) / 2;
   y = (r.top + r.bottom) / 2;
   return true;
+}
+
+bool focusElement(int index) {
+  auto el = ElementRegistry::instance().get(index);
+  return el && SUCCEEDED(el->SetFocus());
+}
+
+bool elementHasKeyboardFocus(int index) {
+  auto el = ElementRegistry::instance().get(index);
+  if (!el) return false;
+  BOOL f = FALSE;
+  el->get_CurrentHasKeyboardFocus(&f);
+  return !!f;
+}
+
+bool elementAppIsForeground(int index) {
+  auto el = ElementRegistry::instance().get(index);
+  if (!el) return false;
+  int epid = 0;
+  el->get_CurrentProcessId(&epid);
+  return epid != 0 && (DWORD)epid == foregroundPid();
+}
+
+bool setElementValue(int index, const std::string& utf8) {
+  auto el = ElementRegistry::instance().get(index);
+  if (!el) return false;
+  ComPtr<IUIAutomationValuePattern> vp;
+  if (FAILED(el->GetCurrentPatternAs(UIA_ValuePatternId, IID_PPV_ARGS(&vp))) || !vp) return false;
+  BOOL readOnly = TRUE;
+  vp->get_CurrentIsReadOnly(&readOnly);
+  if (readOnly) return false;
+  std::wstring w = utf8ToWide(utf8);
+  BSTR b = SysAllocString(w.c_str());
+  HRESULT hr = vp->SetValue(b);
+  SysFreeString(b);
+  return SUCCEEDED(hr);
 }
 
 }  // namespace uia

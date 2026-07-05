@@ -58,9 +58,45 @@ Server::Server() : pipeName_(resolvePipeName()) {
   // targeting arrives with UI Automation in a later batch.
   rpc_.on("perform_action", [](const json& p) -> json {
     const std::string action = p.value("action", std::string());
+
+    // Focus/frontmost-aware typing into a specific element (the WeChat fix):
+    // SetFocus, then paste (Ctrl+V) only when the element is focused AND its app
+    // is foreground; otherwise write the value directly via UIA (frontmost-
+    // independent, no window reorder). Mirrors the macOS performType.
+    if ((action == "type" || action == "type_text") && p.contains("index") &&
+        p["index"].is_number_integer()) {
+      const int idx = p["index"].get<int>();
+      const std::string text = p.value("text", std::string());
+      // Decide BEFORE touching focus. Windows UIA SetFocus() yanks the window to
+      // the foreground (unlike macOS AX setFocused), so it must not run before we
+      // check whether the element's app is already foreground.
+      if (uia::elementAppIsForeground(idx)) {
+        // Foreground app: focus the element, then Ctrl+V lands in it.
+        uia::focusElement(idx);
+        Sleep(40);
+        if (uia::elementHasKeyboardFocus(idx)) {
+          input::typeText(text);
+          return json{{"ok", true}, {"method", "paste"}, {"focused", true}, {"length", (int)text.size()}};
+        }
+        if (uia::setElementValue(idx, text)) {
+          return json{{"ok", true}, {"method", "setvalue"}, {"focused", false}, {"length", (int)text.size()}};
+        }
+        input::typeText(text);
+        return json{{"ok", true}, {"method", "paste-unverified"}, {"focused", false}, {"length", (int)text.size()}};
+      }
+      // Background app: write directly via UIA — never Ctrl+V (it would land in
+      // the FOREGROUND app's focused field) and never SetFocus (it would yank
+      // this window to the foreground and reorder windows). This is the WeChat
+      // multi-window fix: text goes to the RIGHT field without stealing focus.
+      if (uia::setElementValue(idx, text)) {
+        return json{{"ok", true}, {"method", "setvalue"}, {"focused", false}, {"length", (int)text.size()}};
+      }
+      throw std::runtime_error("background element has no writable value pattern (cannot type safely)");
+    }
+
     int x = p.value("x", 0);
     int y = p.value("y", 0);
-    // Element-index targeting (from ui_tree): resolve to the element's center.
+    // Element-index targeting for click/move/etc: resolve to the element's center.
     if (p.contains("index") && p["index"].is_number_integer()) {
       int cx = 0, cy = 0;
       if (!uia::elementCenter(p["index"].get<int>(), cx, cy))
@@ -91,7 +127,10 @@ Server::Server() : pipeName_(resolvePipeName()) {
   });
 
   // UI Automation: element tree + app/window enumeration.
-  rpc_.on("ui_tree", [](const json& p) -> json { return uia::snapshot(p.value("pid", 0)); });
+  rpc_.on("ui_tree", [](const json& p) -> json {
+    return uia::snapshot(p.value("pid", 0), p.value("window", -1));
+  });
+  rpc_.on("list_windows", [](const json& p) -> json { return uia::listWindows(p.value("pid", 0)); });
   rpc_.on("list_apps", [](const json&) -> json { return uia::listApps(); });
   rpc_.on("frontmost_window", [](const json&) -> json { return uia::frontmostWindow(); });
 
