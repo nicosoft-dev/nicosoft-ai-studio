@@ -41,7 +41,7 @@ export const useChat = create<ChatState>((set, get) => {
   // §3.2): per delta, ONLY the array and the one message being appended to change identity — every other
   // message keeps its reference, so memoized segments/chunks skip re-rendering. The old inline versions
   // cloned every message per delta, defeating all memoization down the tree on every token.
-  const freshBubble = (): ChatMessage => ({ id: uid(), role: 'assistant', text: '', streaming: true })
+  const freshBubble = (): ChatMessage => ({ id: uid(), createdAt: Date.now(), role: 'assistant', text: '', streaming: true })
 
   // Append a text delta to the last streaming assistant message; start a fresh one if the last isn't
   // streaming. Used by the plain-text chat path only — agent-loop streams are roleId-tagged and route
@@ -68,7 +68,7 @@ export const useChat = create<ChatState>((set, get) => {
       const msgs = (s.byConversation[convId] ?? []).map((m) => ({ ...m }))
       let cur = msgs[msgs.length - 1]
       if (!cur || cur.role !== 'assistant' || !cur.streaming) {
-        cur = { id: uid(), role: 'assistant', text: '', streaming: true }
+        cur = { id: uid(), createdAt: Date.now(), role: 'assistant', text: '', streaming: true }
         msgs.push(cur)
       }
       cur.images = [...(cur.images ?? []), image]
@@ -294,7 +294,7 @@ export const useChat = create<ChatState>((set, get) => {
       set((s) => {
         const msgs = (s.byConversation[d.convId] ?? []).map((m) => ({ ...m }))
         let i = locateSubToolMsgIndex(msgs, d.roleId, ev.parentToolId, ev.toolUseId)
-        if (i < 0 && d.roleId) { msgs.push({ id: uid(), role: 'assistant', text: '', streaming: true, expertId: d.roleId }); i = msgs.length - 1 }
+        if (i < 0 && d.roleId) { msgs.push({ id: uid(), createdAt: Date.now(), role: 'assistant', text: '', streaming: true, expertId: d.roleId }); i = msgs.length - 1 }
         if (i < 0) return s
         if (ev.type === 'sub_tool_start') msgs[i] = applySubToolStart(msgs[i], ev.parentToolId, ev.toolUseId, ev.name, ev.input)
         else if (ev.type === 'sub_tool_done') msgs[i] = applySubToolDone(msgs[i], ev.parentToolId, ev.toolUseId, ev.name, ev.result, ev.isError, ev.input)
@@ -353,7 +353,7 @@ export const useChat = create<ChatState>((set, get) => {
           if (adopt >= 0) {
             msgs[adopt] = { ...msgs[adopt], dispatch: d.dispatch, segmentKind: d.segmentKind ?? null, runId: d.streamId }
           } else {
-            msgs.push({ id: uid(), role: 'assistant', text: '', streaming: true, expertId: d.roleId, dispatch: d.dispatch, segmentKind: d.segmentKind ?? null, runId: d.streamId })
+            msgs.push({ id: uid(), createdAt: Date.now(), role: 'assistant', text: '', streaming: true, expertId: d.roleId, dispatch: d.dispatch, segmentKind: d.segmentKind ?? null, runId: d.streamId })
           }
         }
         return { byConversation: { ...s.byConversation, [meta.convId]: msgs } }
@@ -514,7 +514,7 @@ export const useChat = create<ChatState>((set, get) => {
         // bubble for the role and anchor the card there. A later step:start for the same role REUSES this bubble
         // (onStepStart matches expertId === roleId), so no duplicate segment.
         if (i < 0 && d.roleId) {
-          msgs.push({ id: uid(), role: 'assistant', text: '', streaming: true, expertId: d.roleId, runId: d.streamId })
+          msgs.push({ id: uid(), createdAt: Date.now(), role: 'assistant', text: '', streaming: true, expertId: d.roleId, runId: d.streamId })
           i = msgs.length - 1
         }
         if (i >= 0) msgs[i] = applySubToolStart(msgs[i], d.parentToolId, d.toolUseId, d.name, d.input)
@@ -531,7 +531,7 @@ export const useChat = create<ChatState>((set, get) => {
         // IPC race and landed nothing (or whose role segment isn't in the store yet). Ensure a bubble so the
         // resolved card still surfaces rather than vanishing.
         if (i < 0 && d.roleId) {
-          msgs.push({ id: uid(), role: 'assistant', text: '', streaming: true, expertId: d.roleId, runId: d.streamId })
+          msgs.push({ id: uid(), createdAt: Date.now(), role: 'assistant', text: '', streaming: true, expertId: d.roleId, runId: d.streamId })
           i = msgs.length - 1
         }
         if (i >= 0) msgs[i] = applySubToolDone(msgs[i], d.parentToolId, d.toolUseId, d.name, d.result, d.isError, d.input)
@@ -760,6 +760,7 @@ export const useChat = create<ChatState>((set, get) => {
         }
         return {
           id: m.id,
+          createdAt: Date.parse(m.createdAt) || undefined, // ISO → epoch ms for the hover meta's relative time
           role: m.author === 'user' ? 'user' : 'assistant',
           text: m.content,
           blocks,
@@ -851,7 +852,7 @@ export const useChat = create<ChatState>((set, get) => {
     // reads like what happened (the review turn itself persists no user row: resumeNote semantics).
     insertUserLine: (convId, line) => {
       set((s) => {
-        const msgs = [...(s.byConversation[convId] ?? []), { id: line.id, role: 'user' as const, text: line.text, expertId: null, dispatch: null, segmentKind: null }]
+        const msgs = [...(s.byConversation[convId] ?? []), { id: line.id, createdAt: Date.now(), role: 'user' as const, text: line.text, expertId: null, dispatch: null, segmentKind: null }]
         return { byConversation: { ...s.byConversation, [convId]: msgs } }
       })
     },
@@ -907,8 +908,8 @@ export const useChat = create<ChatState>((set, get) => {
             ...s.byConversation,
             [cid]: [
               ...prev,
-              { id: uid(), role: 'user', text, images: userImages.length ? userImages : undefined },
-              { id: uid(), role: 'assistant', text: '', streaming: true }
+              { id: uid(), createdAt: Date.now(), role: 'user', text, images: userImages.length ? userImages : undefined },
+              { id: uid(), createdAt: Date.now(), role: 'assistant', text: '', streaming: true }
             ]
           },
           streaming: { ...s.streaming, [cid]: true },

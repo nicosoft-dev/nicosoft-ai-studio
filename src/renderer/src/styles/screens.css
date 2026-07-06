@@ -57,6 +57,15 @@
   padding-left: 0; padding-right: 12px; text-align: right;
 }
 
+/* Hover meta under a settled message (Claude-Code style): a copy button + relative time, revealed only on
+   segment hover. Space is reserved (opacity, not display) so hovering never shifts the transcript; user
+   segments inherit the column's flex-end so the row sits bottom-right of the bubble. */
+.seg-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; height: 18px; opacity: 0; transition: opacity 0.12s ease; }
+.segment:hover .seg-actions { opacity: 1; }
+.seg-act-btn { display: inline-flex; align-items: center; justify-content: center; padding: 3px; border-radius: 5px; color: var(--text-4); background: transparent; border: none; cursor: pointer; transition: color 0.1s, background 0.1s; }
+.seg-act-btn:hover { color: var(--text-2); background: var(--bg-3); }
+.seg-act-time { font-size: 11px; color: var(--text-4); font-variant-numeric: tabular-nums; }
+
 .seg-head { display: flex; align-items: center; gap: 9px; margin-bottom: 9px; }
 .seg-head .avatar { font-size: 12px; }
 .seg-head .seg-meta { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }

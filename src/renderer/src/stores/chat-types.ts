@@ -37,6 +37,7 @@ export type MsgBlock =
   | { kind: 'reasoning'; text: string } // the model's VISIBLE thinking (extended thinking / reasoning summary) — rendered as a distinct dim "Thinking" block, interleaved before the turn's tools
 export interface ChatMessage {
   id: string
+  createdAt?: number // epoch ms this message was sent/received — from the DTO on load, Date.now() when created live; drives the hover meta's relative time
   role: 'user' | 'assistant'
   text: string
   blocks?: MsgBlock[] // ordered text+tool sequence for an agent turn; absent on plain-chat / user messages

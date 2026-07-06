@@ -12,12 +12,59 @@ import { ToolRun, OMIT_WHEN_DONE, INLINE_SURFACE } from '@/components/tool-run'
 import { WidgetCard } from '@/components/widget-card'
 import { ChunkedMarkdown } from '@/components/markdown'
 import { WorkflowLaunchCard } from '@/components/workflow-launch-card'
-import { useT } from '@/stores/locale'
+import { Icons } from '@/components/icons'
+import { useT, useLocale } from '@/stores/locale'
 import { isSynthesis, groupRuns, sameChain, segmentFolds } from '@/stores/chat-helpers'
 import type { Expert } from '@/types'
 
 // The segment-identity model (pure, JSX-free — see chat-helpers) re-exported for view-level consumers.
 export { groupRuns, sameChain } from '@/stores/chat-helpers'
+
+// Relative "1 minute ago" for the hover meta — Intl-localized, unit picked by magnitude. Computed at render;
+// the exact local time rides in the title attribute for precision.
+function relativeTime(ms: number, locale: string): string {
+  const diffSec = Math.round((ms - Date.now()) / 1000) // negative = in the past
+  const abs = Math.abs(diffSec)
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' })
+  if (abs < 45) return rtf.format(0, 'second') // "now" / 现在 / たった今
+  if (abs < 3600) return rtf.format(Math.round(diffSec / 60), 'minute')
+  if (abs < 86_400) return rtf.format(Math.round(diffSec / 3600), 'hour')
+  if (abs < 2_592_000) return rtf.format(Math.round(diffSec / 86_400), 'day')
+  if (abs < 31_536_000) return rtf.format(Math.round(diffSec / 2_592_000), 'month')
+  return rtf.format(Math.round(diffSec / 31_536_000), 'year')
+}
+
+// Hover meta under a settled message (Claude-Code style): a copy button + the message's relative time, revealed
+// only on segment hover (CSS). copyText is the message's own text; time comes from its createdAt. Renders
+// nothing when there's neither — a bare system card stays clean.
+function SegActions({ copyText, createdAt }: { copyText: string; createdAt?: number }): ReactElement | null {
+  const t = useT()
+  const locale = useLocale((s) => s.resolved)
+  const [copied, setCopied] = useState(false)
+  const hasText = copyText.trim().length > 0
+  if (!hasText && createdAt === undefined) return null
+  const copy = (): void => {
+    void navigator.clipboard
+      .writeText(copyText)
+      .then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1200)
+      })
+      .catch(() => {})
+  }
+  return (
+    <div className="seg-actions">
+      {hasText ? (
+        <button className="seg-act-btn" onClick={copy} title={t('files.copy')} type="button">
+          {copied ? <Icons.check size={12} /> : <Icons.copy size={12} />}
+        </button>
+      ) : null}
+      {createdAt !== undefined ? (
+        <span className="seg-act-time" title={new Date(createdAt).toLocaleString()}>{relativeTime(createdAt, locale)}</span>
+      ) : null}
+    </div>
+  )
+}
 
 // One compaction line, rendered IN PLACE for both phases of a manual /compact: a ticking
 // "Compacting… Ns" while the fold's summary call runs (pending), then the settled receipt — the store
@@ -444,6 +491,11 @@ export function ChatSegment({
           <ThinkingReadout chars={last.text.length} inputTokens={last.liveInputTokens ?? inputTokens} outputTokens={last.liveOutputTokens ?? outputTokens} cachedTokens={last.liveInputTokens !== undefined ? (last.liveCachedTokens ?? 0) : cachedTokens} activity={last.activityHint ?? segmentActivity(last.tools)} />
         ) : null}
       </div>
+      {/* Hover meta: copy the message + its relative time — only once the segment has settled (while streaming the
+          live readout above owns the footer). Copy is the message's own text (user prompt / assistant answer). */}
+      {!segStreaming ? (
+        <SegActions copyText={isUser ? first.text ?? '' : msgs.map((m) => m.text).filter(Boolean).join('\n\n')} createdAt={first.createdAt} />
+      ) : null}
     </div>
   )
 }
