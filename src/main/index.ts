@@ -25,7 +25,7 @@ import { hookRegistry } from './agent/hooks/registry'
 import { baseHookPayload, hookContextFromAgent } from './agent/hooks/adapter'
 import { registerPluginHooks } from './services/extensions/plugin'
 import { initUpdateService, checkSilently } from './services/update.service'
-import { PREVIEW_PARTITION, markPreviewGuestAllowed } from './services/workspace/preview'
+import { PREVIEW_PARTITION, markPreviewGuestAllowed, sanitizePreviewResponseHeaders } from './services/workspace/preview'
 
 declare const __APP_VERSION__: string
 
@@ -288,7 +288,14 @@ app.whenReady().then(() => {
     .getUserAgent()
     .replace(/\(KHTML, like Gecko\) .*?Chrome\//, '(KHTML, like Gecko) Chrome/')
     .replace(/ Electron\/[\d.]+/, '')
-  session.fromPartition(PREVIEW_PARTITION).setUserAgent(previewBrowserUA)
+  const previewSession = session.fromPartition(PREVIEW_PARTITION)
+  previewSession.setUserAgent(previewBrowserUA)
+  // Let the preview webview embed any site the user navigates to: strip the embedding-blocker response headers
+  // (X-Frame-Options + CSP frame-ancestors) that otherwise fail the load with ERR_BLOCKED_BY_CSP. Trusted,
+  // user-driven embedder; every other CSP protection is preserved. Scoped to the preview partition only.
+  previewSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({ responseHeaders: sanitizePreviewResponseHeaders(details.responseHeaders ?? {}) })
+  })
   registerMediaProtocol() // nsai-media:// → local image files, before the window loads any attachment
   registerIpc()
   registerHookExecutors() // fill the hook engine's executor table (command/prompt/agent/http/mcp_tool)

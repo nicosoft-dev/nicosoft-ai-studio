@@ -16,6 +16,35 @@ export const PREVIEW_PARTITION = 'persist:preview'
 
 const ATTACH_TIMEOUT_MS = 10_000
 
+// A preview target that sends `X-Frame-Options` or a CSP `frame-ancestors` directive forbids being embedded,
+// so Chromium fails the <webview> load with ERR_BLOCKED_BY_CSP. The preview panel is a trusted, user-driven
+// embedder (the user typed/navigated the URL), so on the preview session we strip ONLY those embedding
+// blockers and keep the rest of each CSP (script-src, etc.) intact — the site's other protections still apply.
+// Pure + exported so the e2e pins the exact stripping. Values are Electron's `Record<string, string[]>`.
+export function sanitizePreviewResponseHeaders(headers: Record<string, string[]>): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  for (const [key, values] of Object.entries(headers)) {
+    const lower = key.toLowerCase()
+    if (lower === 'x-frame-options') continue // forbids embedding outright → drop the header
+    if (lower === 'content-security-policy' || lower === 'content-security-policy-report-only') {
+      const cleaned = values.map(stripFrameAncestors).filter((v) => v.trim().length > 0)
+      if (cleaned.length) out[key] = cleaned // a CSP that was ONLY frame-ancestors collapses to empty → dropped
+      continue
+    }
+    out[key] = values
+  }
+  return out
+}
+
+// Remove just the `frame-ancestors …` directive from one CSP header value, preserving every other directive.
+function stripFrameAncestors(csp: string): string {
+  return csp
+    .split(';')
+    .map((d) => d.trim())
+    .filter((d) => d.length > 0 && !/^frame-ancestors\b/i.test(d))
+    .join('; ')
+}
+
 const allowedPreviewGuests = new WeakSet<WebContents>()
 const destroyedListenerInstalled = new WeakSet<WebContents>()
 const previews = new Map<string, WebContents>()
