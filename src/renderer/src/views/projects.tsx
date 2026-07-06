@@ -25,10 +25,12 @@ type TestDto = ProjectDto['tests'][number]
 const PHASE_LABEL: Record<string, string> = { planning: 'Planning', executing: 'Executing', testing: 'Testing', done: 'Done' }
 const phaseTitle = (p: string): string => PHASE_LABEL[p] ?? 'Planning'
 
-// A doer lane's status, derived from its tasks: all done → done, any in-flight → working, else watching.
+// A doer lane's status, derived from its tasks: all done → done, any in-flight → working, any parked (collab
+// wait/idle) → waiting, else watching. 'doing' outranks 'waiting' so a mid-work expert still reads as working.
 function laneStatus(tasks: TaskDto[]): string {
   if (tasks.length > 0 && tasks.every((t) => t.status === 'done')) return 'done'
   if (tasks.some((t) => t.status === 'doing')) return 'working'
+  if (tasks.some((t) => t.status === 'waiting')) return 'waiting'
   return 'watching'
 }
 
@@ -207,9 +209,9 @@ function fmtClock(iso?: string): string {
 }
 
 type LaneStatus = { state: string; label: string }
-type LaneEvent = { id: string; toolName: string; target: string | null; zone?: string; createdAt?: string }
+type LaneEvent = { id: string; toolName: string; target: string | null; zone?: string; mediaUrl?: string | null; createdAt?: string }
 
-/* — one event card on a lane's timeline (READ / WRITE / BASH …); head(icon+tool) / target / foot(ts+tag) — */
+/* — one event card on a lane's timeline (READ / WRITE / BASH …); head(icon+tool) / target / thumb / foot — */
 function EventCard({ ev, running, onClick }: { ev: LaneEvent; running?: boolean; onClick?: () => void }): ReactElement {
   const Ico = Icons[toolIconName(ev.toolName)]
   return (
@@ -220,6 +222,8 @@ function EventCard({ ev, running, onClick }: { ev: LaneEvent; running?: boolean;
         {running ? <span className="wb-run-dot" /> : null}
       </div>
       {ev.target ? <div className="wb-target" title={ev.target}>{ev.target}</div> : null}
+      {/* rich artifact: an image the tool produced (computer-use screenshot / generated image) — nsai-media:// loads directly */}
+      {ev.mediaUrl ? <img className="wb-card-thumb" src={ev.mediaUrl} alt="" loading="lazy" /> : null}
       <div className="wb-card-foot">
         {ev.createdAt ? <span className="wb-ts">{fmtClock(ev.createdAt)}</span> : null}
         {ev.zone === 'yellow' ? <span className="wb-tag auto"><Icons.shield size={9} /> auto-approved</span> : null}
@@ -242,6 +246,7 @@ function EventDetailModal({ ev, onClose }: { ev: LaneEvent; onClose: () => void 
           <button className="icon-btn" onClick={onClose}><Icons.x size={16} /></button>
         </div>
         {ev.target ? <pre className="ev-detail-target">{ev.target}</pre> : <div className="ev-detail-empty">No target recorded for this step.</div>}
+        {ev.mediaUrl ? <img className="ev-detail-media" src={ev.mediaUrl} alt="tool output" /> : null}
         {ev.zone === 'yellow' ? <div className="ev-detail-zone auto"><Icons.shield size={11} /> auto-approved</div> : null}
         {ev.zone === 'red' ? <div className="ev-detail-zone danger"><Icons.alert size={11} /> needed approval</div> : null}
       </div>
@@ -426,6 +431,45 @@ function ProjectTests({ tests }: { tests: TestDto[] }): ReactElement {
               {t.status === 'pending' && <span className="wb-test-dot" />}
             </span>
             <span className="wb-test-title">{t.title}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+type FindingDto = ProjectDto['review'][number]
+
+/* — Review (Lens) strip: defects the team's studio_lens runs surfaced & vetted on this project. Sits
+   between the orchestration lanes and the Test & review strip; mirrors the ProjectTests strip. — */
+function ProjectReview({ review }: { review: FindingDto[] }): ReactElement {
+  const counts = review.reduce((a, f) => ((a[f.verdict] = (a[f.verdict] ?? 0) + 1), a), {} as Record<string, number>)
+  return (
+    <div className="wb-tests wb-review">
+      <div className="wb-tests-head">
+        <span className="wb-section-label">
+          <Icons.compass size={14} /> Review (Lens)
+        </span>
+        <span className="wb-section-sub">defects Lens found &amp; vetted</span>
+        <span className="wb-tests-legend">
+          <span className="wbl fail">{counts.confirmed ?? 0} confirmed</span>
+          <span className="wbl pending">{counts.refuted ?? 0} refuted</span>
+          <span className="wbl pass">{counts.pass ?? 0} clean</span>
+        </span>
+      </div>
+      <div className="wb-tests-strip">
+        {review.map((f, i) => (
+          <div className={'wb-test wb-finding ' + f.verdict} key={i} title={f.feedback}>
+            <span className={'wb-test-icon ' + f.verdict}>
+              {f.verdict === 'confirmed' && <Icons.alert size={12} />}
+              {f.verdict === 'refuted' && <Icons.x size={12} />}
+              {f.verdict === 'pass' && <Icons.check size={12} />}
+            </span>
+            <span className="wb-finding-top">
+              {f.severity && <span className={'wb-sev ' + f.severity}>{f.severity}</span>}
+              <span className="wb-test-title">{f.subject}</span>
+            </span>
+            {f.file && <span className="wb-finding-file">{f.file}</span>}
           </div>
         ))}
       </div>
@@ -667,6 +711,7 @@ function ProjectDetail({
           </div>
         </div>
 
+        {project.review.length > 0 && <ProjectReview review={project.review} />}
         {project.tests.length > 0 && <ProjectTests tests={project.tests} />}
       </div>
 

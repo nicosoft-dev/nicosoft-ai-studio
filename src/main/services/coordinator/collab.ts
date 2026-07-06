@@ -80,8 +80,14 @@ export async function runCollaboration(
     // dispatch path, the solo path (agent.handler), and this seam all speak the identical mapping. The old
     // hand-copied switch here is where sub_tool_* once fell through and collab-only sub-tool cards vanished.
     onExpertStream: (roleId, ev) => forwardLlmEvent(cb, roleId, ev),
-    // An expert's tool image (already persisted + redacted by the shared drain) → surface live.
-    onToolImage: (_roleId, att) => cb.onToolImage?.(att),
+    // An expert's tool image (already persisted + redacted by the shared drain) → surface live in the chat, AND
+    // attach it to the matching project tool-event row by its tool_use id, so the Workbench timeline shows a
+    // thumbnail (Gap D). recordToolEvent already ran for this same tool_use (from the assistant block above), so
+    // the row exists; a match pushes project:updated to refetch the lane.
+    onToolImage: (_roleId, att) => {
+      cb.onToolImage?.(att)
+      if (project && att.toolUseId && collabProject.recordToolMedia(project, att.toolUseId, att.url)) cb.onProjectUpdated?.(project.projectId)
+    },
     onExpertEvent: (roleId, ev) => {
       // Tool-card timeline (doc 19): persist each expert tool call onto the project as it streams, so the
       // Workbench lane shows a live READ/WRITE/BASH timeline. assistant events carry the tool_use blocks.

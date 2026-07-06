@@ -171,6 +171,17 @@ export function updateTaskStatus(id: string, status: ProjectTaskStatus, output?:
   }
 }
 
+// Park an actively-working task (collab wait/idle) → 'waiting', and resume a parked one (collab wake) → 'doing'.
+// Both are guarded by the current status in the WHERE clause so they can only move doing↔waiting — a parked
+// event arriving after a task already finished never resurrects a 'done' (or disturbs a 'todo'). Returns
+// whether a row actually moved, so the caller only broadcasts project:updated on a real change.
+export function parkTask(id: string): boolean {
+  return getDb().prepare(`UPDATE project_tasks SET status = 'waiting' WHERE id = ? AND status = 'doing'`).run(id).changes > 0
+}
+export function resumeTask(id: string): boolean {
+  return getDb().prepare(`UPDATE project_tasks SET status = 'doing' WHERE id = ? AND status = 'waiting'`).run(id).changes > 0
+}
+
 // ---------- project_tests ----------
 export interface ProjectTestRow {
   id: string
@@ -249,6 +260,7 @@ export interface ProjectToolEventRow {
   toolName: string
   target: string | null
   zone: string
+  mediaUrl: string | null // nsai-media:// ref of an image the tool produced (screenshot / generated image), attached from its result
   createdAt: string
 }
 interface ToolEventRaw {
@@ -259,6 +271,7 @@ interface ToolEventRaw {
   tool_name: string
   target: string | null
   zone: string
+  media_url: string | null
   created_at: string
 }
 export interface ToolEventInsert {
@@ -283,7 +296,16 @@ export function insertToolEvent(input: ToolEventInsert): ProjectToolEventRow | n
     )
     .run(id, input.projectId, input.roleId, input.srcId, next.n, input.toolName, input.target, input.zone, now)
   if (res.changes === 0) return null
-  return { id, projectId: input.projectId, roleId: input.roleId, seq: next.n, toolName: input.toolName, target: input.target, zone: input.zone, createdAt: now }
+  return { id, projectId: input.projectId, roleId: input.roleId, seq: next.n, toolName: input.toolName, target: input.target, zone: input.zone, mediaUrl: null, createdAt: now }
+}
+
+// Attach an image a tool produced (screenshot / generated image) to its already-recorded tool-event row, keyed
+// by the tool_use block id (src_id) the image's result carries. Returns whether a row matched — false if the
+// tool_use wasn't recorded on this project (e.g. a non-project run) so the caller can skip the broadcast.
+export function setToolEventMedia(projectId: string, srcId: string, mediaUrl: string): boolean {
+  return getDb()
+    .prepare('UPDATE project_tool_events SET media_url = ? WHERE project_id = ? AND src_id = ?')
+    .run(mediaUrl, projectId, srcId).changes > 0
 }
 
 export function listToolEvents(projectId: string): ProjectToolEventRow[] {
@@ -296,6 +318,7 @@ export function listToolEvents(projectId: string): ProjectToolEventRow[] {
     toolName: r.tool_name,
     target: r.target,
     zone: r.zone,
+    mediaUrl: r.media_url,
     createdAt: r.created_at,
   }))
 }

@@ -152,6 +152,16 @@ export function getById(id: string): ConversationRow | null {
   return row ? mapConversation(row) : null
 }
 
+// Every conversation linked to a project (project_id set on the collab that backs it). Oldest first so the
+// project's derived Review reads in the order work happened. Used by project.service to reverse-look-up the
+// Lens findings a project's collab run recorded (workspace_task_history is keyed by conversation_id).
+export function listByProjectId(projectId: string): ConversationRow[] {
+  const rows = getDb()
+    .prepare('SELECT * FROM conversations WHERE project_id = ? ORDER BY created_at ASC')
+    .all(projectId) as unknown as ConversationRaw[]
+  return rows.map(mapConversation)
+}
+
 export function list(): ConversationRow[] {
   const rows = getDb()
     .prepare('SELECT * FROM conversations ORDER BY updated_at DESC')

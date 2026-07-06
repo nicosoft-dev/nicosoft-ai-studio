@@ -50,6 +50,10 @@ export function runMigrations(db: DatabaseSync): void {
   ensureColumn(db, 'workflow_runs', 'initiator', 'TEXT')
   ensureColumn(db, 'workflow_runs', 'origin_conv_id', 'TEXT')
   ensureColumn(db, 'workflow_runs', 'origin_task_id', 'TEXT')
+  // Project tool-event rich artifacts (Gap D): the nsai-media:// ref of an image a tool produced (computer-use
+  // screenshot / ns_generate_image), attached from its result so the project timeline shows a thumbnail. NULL
+  // on existing rows + non-image tools.
+  ensureColumn(db, 'project_tool_events', 'media_url', 'TEXT')
   migrateShuriToFrontend(db)
 }
 

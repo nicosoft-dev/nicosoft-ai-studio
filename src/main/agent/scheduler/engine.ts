@@ -16,6 +16,7 @@
 // Email/send sink is NOT here yet (doc 28 后续待完成 v2): a step that should email goes through an email MCP
 // tool or leaves a draft — Studio never sends mail itself.
 
+import { BrowserWindow } from 'electron'
 import { scheduledTaskStore } from './store'
 import type { ScheduledTask, TaskStep, WorkflowRunEvent } from '../../ipc/contracts'
 import { run } from '../../services/agent.service'
@@ -297,10 +298,23 @@ class SchedulerEngine {
   private async runProjectStep(step: TaskStep, prior: string): Promise<string> {
     if (step.action === 'advance' && step.projectId) {
       projectService.setPhase(step.projectId, 'executing')
+      this.notifyProjectUpdated(step.projectId) // scheduled advance changed the phase → refresh an open Workbench
       return `Advanced project ${step.projectId} to executing.`
     }
     const p = await projectService.create({ goal: prior || step.prompt, title: step.prompt.slice(0, 60) })
+    this.notifyProjectUpdated(p.id)
     return `Created project "${p.title}" (${p.id}).`
+  }
+
+  // A `project` step writes outside the collab run, so it has no coordinator callback to piggyback on for the
+  // project:updated push — it broadcasts here so an open Workbench refetches the new phase/plan. Best-effort:
+  // a headless / no-window context simply no-ops (mirrors the collab handler's own send).
+  private notifyProjectUpdated(projectId: string): void {
+    try {
+      for (const w of BrowserWindow.getAllWindows()) w.webContents.send('project:updated', { streamId: '', projectId })
+    } catch {
+      /* no windows / headless — non-critical */
+    }
   }
 }
 

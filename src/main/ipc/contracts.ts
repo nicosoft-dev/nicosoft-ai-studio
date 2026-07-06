@@ -1175,7 +1175,7 @@ export interface PluginDto {
 // experts, with a dep graph) + tests. ProjectDto is a VIEW — progress/experts are derived by the service
 // from the task rows, plan/tests are the joined children. The raw rows live in project.repo.
 export type ProjectPhase = 'planning' | 'executing' | 'testing' | 'done'
-export type ProjectTaskStatus = 'todo' | 'doing' | 'done'
+export type ProjectTaskStatus = 'todo' | 'doing' | 'waiting' | 'done' // waiting = the expert parked (collab wait/idle), resumed on wake
 export type ProjectTestStatus = 'pending' | 'pass' | 'fail'
 
 export interface ProjectTaskDto {
@@ -1208,7 +1208,19 @@ export interface ProjectToolEventDto {
   toolName: string
   target: string | null
   zone: 'green' | 'yellow' | 'red'
+  mediaUrl?: string | null // nsai-media:// ref of an image the tool produced (computer-use screenshot / generated image) — renders as a thumbnail
   createdAt: string
+}
+// One Lens finding surfaced in the project's "Review (Lens)" strip — a flattened row per candidate defect,
+// reverse-looked-up from the workspace_task_history examines of the project's conversation(s). verdict maps
+// the source examine verdict: fail→confirmed (a real defect), false-positive/refuted→refuted, pass→clean.
+export interface ProjectFindingDto {
+  subject: string // the candidate defect title, or the lens axis when the finding is untitled
+  verdict: 'confirmed' | 'refuted' | 'pass'
+  severity?: 'high' | 'med' | 'low'
+  file?: string // "path" or "path:line" the defect lives at
+  feedback: string
+  roleId?: string // the expert that ran studio_lens (the examine owner) — groups the row under its lane
 }
 export interface ProjectDto {
   id: string
@@ -1222,6 +1234,7 @@ export interface ProjectDto {
   tests: ProjectTestDto[]
   consults: ProjectConsultDto[] // derived from collab send/assign events, deduped by from→to
   toolEvents: ProjectToolEventDto[] // per-expert tool calls in order — the orchestration timeline
+  review: ProjectFindingDto[] // derived: Lens findings the project's collab recorded, reverse-looked-up by convId
   createdAt: string
   updatedAt: string
 }

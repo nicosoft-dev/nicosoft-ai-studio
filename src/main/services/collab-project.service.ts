@@ -53,11 +53,12 @@ export function completeCollabTasks(project: CollabProject, completedRoles: stri
   }
 }
 
-// Reflect a LIVE collab event on the project's tasks: an expert taking a turn → its task is doing, an
-// expert finishing → done. Called from runCollaboration's onEvent (phase 5c) so an open ProjectDetail
-// shows lanes change in real time. Returns true only when it actually moved a task, so the caller pushes
-// project:updated just for those (send/assign/wait/wake don't move tasks — they drive the consult arrows
-// in 5c-B). Idempotent: completeCollabTasks still does the final sweep + phase advance.
+// Reflect a LIVE collab event on the project's tasks: a turn → doing, done → done, wait/idle → waiting
+// (the expert parked), wake → doing (resumed). Called from runCollaboration's onEvent (phase 5c) so an open
+// ProjectDetail shows lanes change in real time. Returns true only when it actually moved a task/consult, so
+// the caller pushes project:updated just for those (send/assign persist the consult arrows in 5c-B).
+// Idempotent: completeCollabTasks still does the final sweep + phase advance; park/resume are guarded to
+// doing↔waiting so a late park event can't revive a finished task.
 export function applyCollabEvent(project: CollabProject, e: CollabEvent): boolean {
   // consult relationships (5c-B): an expert sending/assigning to a peer → persist the from→to edge so the
   // ProjectDetail draws an arrow. roleId is the sender, e.to the recipient.
@@ -75,6 +76,10 @@ export function applyCollabEvent(project: CollabProject, e: CollabEvent): boolea
     projectService.setTaskStatus(project.projectId, taskId, 'done')
     return true
   }
+  // parked lane state (Gap C): an expert parks itself (wait) or the scheduler idles it (idle) → its lane shows
+  // "waiting"; a wake resumes it → "working". Both return whether a row actually moved (guarded doing↔waiting).
+  if (e.kind === 'wait' || e.kind === 'idle') return projectService.parkTask(project.projectId, taskId)
+  if (e.kind === 'wake') return projectService.resumeTask(project.projectId, taskId)
   return false
 }
 
@@ -105,11 +110,34 @@ export function recordToolEvent(project: CollabProject, roleId: string, toolName
   projectService.addToolEvent(project.projectId, { roleId, srcId, toolName, target: toolTarget(toolName, input), zone })
 }
 
-// A short, human label for a tool card: the file basename / the command head / the search pattern / the URL.
-function toolTarget(name: string, input: unknown): string | null {
+// Attach an image a tool produced (computer-use screenshot / ns_generate_image) to its project tool-event row,
+// keyed by the tool_use id the image's result carries (attachment.toolUseId). The recordToolEvent above ran
+// first for the same tool_use (from the assistant block), so the row exists. Returns whether it matched.
+export function recordToolMedia(project: CollabProject, srcId: string, mediaUrl: string): boolean {
+  return projectService.attachToolEventMedia(project.projectId, srcId, mediaUrl)
+}
+
+// A short, human label for a tool card: the file basename / command head / search pattern / URL, plus the
+// newer tools' most identifying argument (computer-use action, lens paths, image prompt, preview url, memory
+// slug, …) so their cards aren't blank in the project timeline. Icons are already mapped in icons.tsx; this
+// brings the LABELS up to the same parity. Exported so the e2e can pin the mapping per tool.
+export function toolTarget(name: string, input: unknown): string | null {
   const i = (input ?? {}) as Record<string, unknown>
   const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v : null)
   const base = (p: string | null): string | null => (p ? p.split('/').pop() || p : null)
+  const clip = (s: string | null, n = 42): string | null => (s ? (s.length > n ? s.slice(0, n - 1) + '…' : s) : null)
+
+  // Preview family (preview_navigate/click/fill/eval/inspect/screenshot/…): url / selector / js.
+  if (name.startsWith('preview_')) return str(i.url) ?? str(i.selector) ?? clip(str(i.js), 32)
+  // MCP tools carry a `__`-joined dynamic name and no fixed schema — best-effort first non-empty string arg.
+  if (name.includes('__')) {
+    for (const v of Object.values(i)) {
+      const s = str(v)
+      if (s) return clip(s, 32)
+    }
+    return null
+  }
+
   switch (name) {
     case 'Read':
     case 'Write':
@@ -131,7 +159,39 @@ function toolTarget(name: string, input: unknown): string | null {
       return str(i.url)
     case 'WebSearch':
       return str(i.query)
+    // — newer tools (parity with the icons.tsx mapping) —
+    case 'ns_computer_use': {
+      const action = str(i.action)
+      if (!action) return null
+      const coord =
+        Array.isArray(i.coordinate) && i.coordinate.length >= 2 ? `@${i.coordinate[0]},${i.coordinate[1]}` : null
+      const detail =
+        action === 'type'
+          ? clip(str(i.text), 24)
+          : action === 'key'
+            ? str(i.key) ?? (Array.isArray(i.keys) ? i.keys.join('+') : null)
+            : coord
+      return detail ? `${action} ${detail}` : action
+    }
+    case 'studio_lens': {
+      const paths = Array.isArray(i.paths) ? i.paths.filter((p): p is string => typeof p === 'string') : []
+      if (paths.length === 0) return null
+      return paths.length > 1 ? `${base(paths[0])} +${paths.length - 1}` : base(paths[0])
+    }
+    case 'view_image':
+      return base(str(i.path))
+    case 'ns_generate_image':
+      return clip(str(i.prompt))
+    case 'remember':
+      return str(i.name) ?? clip(str(i.description))
+    case 'forget':
+    case 'recall_memory':
+      return str(i.name)
+    case 'remember_project_map':
+      return clip(str(i.map)) ?? 'project map'
     default:
-      return base(str(i.file_path) ?? str(i.path) ?? str(i.command) ?? str(i.pattern) ?? str(i.url) ?? str(i.query))
+      return base(
+        str(i.file_path) ?? str(i.path) ?? str(i.command) ?? str(i.pattern) ?? str(i.url) ?? str(i.query) ?? str(i.prompt) ?? str(i.text),
+      )
   }
 }

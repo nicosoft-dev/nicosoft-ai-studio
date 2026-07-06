@@ -191,6 +191,7 @@ CREATE TABLE IF NOT EXISTS project_tool_events (
   tool_name  TEXT NOT NULL,
   target     TEXT,
   zone       TEXT NOT NULL DEFAULT 'green',         -- green (auto) | yellow (auto+log) | red (needs approval)
+  media_url  TEXT,                                  -- nsai-media:// ref of an image the tool produced (screenshot / generated image)
   created_at TEXT NOT NULL,
   FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
 );
