@@ -445,6 +445,8 @@ const api = {
       ipcRenderer.invoke('conversations:pin', convId, pinned),
     archive: (convId: string, archived: boolean): Promise<void> =>
       ipcRenderer.invoke('conversations:archive', convId, archived),
+    setCwd: (convId: string, cwd: string): Promise<void> =>
+      ipcRenderer.invoke('conversations:setCwd', convId, cwd),
     title: (input: ConversationTitleInput): Promise<string> =>
       ipcRenderer.invoke('conversations:title', input),
     remove: (convId: string): Promise<void> => ipcRenderer.invoke('conversations:remove', convId),

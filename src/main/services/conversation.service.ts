@@ -31,6 +31,7 @@ function toConvDto(r: convRepo.ConversationRow): ConversationDto {
     primaryRoleId: r.primaryRoleId,
     title: r.title,
     projectId: r.projectId,
+    cwd: r.cwd,
     pinned: r.pinned,
     archived: r.archived,
     createdAt: r.createdAt,
@@ -68,7 +69,7 @@ export function list(): ConversationDto[] {
 
 export function create(input: ConversationCreateDto): ConversationDto {
   return toConvDto(
-    convRepo.create({ kind: input.kind, primaryRoleId: input.primaryRoleId, title: input.title })
+    convRepo.create({ kind: input.kind, primaryRoleId: input.primaryRoleId, title: input.title, cwd: input.cwd })
   )
 }
 
@@ -109,6 +110,12 @@ export function setPinned(convId: string, pinned: boolean): void {
 
 export function setArchived(convId: string, archived: boolean): void {
   convRepo.setArchived(convId, archived)
+}
+
+// Set this conversation's own working dir (per-conversation cwd). '' = folder-free (a new conversation's
+// reset state); a path = the folder its experts operate in. Both stop the renderer's legacy per-expert fallback.
+export function setCwd(convId: string, cwd: string): void {
+  convRepo.setCwd(convId, cwd)
 }
 
 // Generate a title for a fresh conversation from the user's first message (small/fast model — see

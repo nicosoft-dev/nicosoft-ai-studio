@@ -481,11 +481,11 @@ export interface RunTranscript {
 export interface CoordinatorRunInputDto {
   convId: string
   prompt: string
-  // Per-role working dirs (the renderer's cwdByExpert). An agent-dispatched expert uses cwdByRole[roleId]
-  // as its loop cwd; unset → it runs cwd-less (doc 19 §14 — real project cwd lands in stage 5).
-  cwdByRole?: Record<string, string>
-  // Per-role permission mode (the renderer's modeByExpert), mirroring cwdByRole. A dispatched / collab
-  // expert honors modeByRole[roleId] (bypass = full auto); unset → 'default'.
+  // The conversation's own working dir (per-conversation) — every agent-dispatched / collab expert operates in
+  // it (collaborators share one project dir). '' / null → cwd-less (doc 19 §14; Read dropped for non-dev roles).
+  cwd?: string | null
+  // Per-role permission mode (the renderer's modeByExpert). A dispatched / collab expert honors
+  // modeByRole[roleId] (bypass = full auto); unset → 'default'.
   modeByRole?: Record<string, AgentPermissionMode>
 }
 // Fired once per turn, after the route decision, before any text streams. `chain` lists the steps
@@ -778,6 +778,7 @@ export interface ConversationDto {
   primaryRoleId: string | null
   title: string | null
   projectId: string | null // set when a collaborate turn linked this chat to a project (doc 19 §1)
+  cwd: string | null // this conversation's own working dir (per-conversation); null = never set → renderer falls back to the legacy per-expert cwd
   pinned: boolean // pinned to the top of History
   archived: boolean // moved to the Archived group
   createdAt: string
@@ -787,6 +788,7 @@ export interface ConversationCreateDto {
   kind: string
   primaryRoleId?: string
   title?: string
+  cwd?: string | null // the folder the new conversation starts in (composer draft); omitted → null (legacy per-expert fallback)
 }
 // Workspace Files panel (design §3). listDir returns name+type only (size/mtime are lazy — fetched per
 // file on view). `root` is the resolved confine root for display, or null when the conversation has no

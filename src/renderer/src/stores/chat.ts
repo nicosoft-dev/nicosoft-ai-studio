@@ -826,7 +826,10 @@ export const useChat = create<ChatState>((set, get) => {
       }))
     },
 
-    newConversation: () => set({ activeConv: null }),
+    newConversation: () => {
+      useWorkspace.getState().setDraftCwd('') // a new conversation starts folder-free — per-conversation cwd reset
+      set({ activeConv: null })
+    },
     // Slot an already-PERSISTED card row (e.g. a /workflow launch card appended via conversations:append)
     // into the live message list. Every delta handler writes to msgs[msgs.length-1] — a streaming tail
     // must stay the tail, so the card lands just before it (chronologically right too: the launch
@@ -866,7 +869,7 @@ export const useChat = create<ChatState>((set, get) => {
         creating = true
         const title = text.trim().slice(0, 60) || 'New conversation'
         try {
-          const conv = await window.api.conversations.create({ kind: 'single', primaryRoleId: expertId, title })
+          const conv = await window.api.conversations.create({ kind: 'single', primaryRoleId: expertId, title, cwd: cwd ?? '' })
           convId = conv.id
           set((s) => ({ activeConv: conv.id, conversations: [conv, ...s.conversations] }))
         } catch {
@@ -944,13 +947,12 @@ export const useChat = create<ChatState>((set, get) => {
             content: text,
             attachments: userImages.map((i) => ({ url: i.url, name: i.name }))
           })
-          // cwdByRole = every expert's working dir (the workspace store's cwdByExpert). A dispatched agent
-          // expert runs in cwdByRole[its roleId]; coordinator's own cwd is irrelevant (it never runs tools).
-          // cwdByRole + modeByRole = every expert's working dir + permission mode (workspace store). A
-          // dispatched / collab expert honors its own mode (bypass = full auto) instead of being forced to
-          // 'default' — previously omitted, so coordinator-routed work ignored the user's bypass selection.
+          // cwd = THIS conversation's own working dir (per-conversation); every dispatched / collab expert
+          // operates in it (collaborators share one project dir). modeByRole stays per-expert (the workspace
+          // store) so a dispatched / collab expert honors its own permission mode (bypass = full auto) instead
+          // of being forced to 'default'.
           const ws = useWorkspace.getState()
-          const { streamId } = await window.api.coordinator.run({ convId: cid, prompt: text, cwdByRole: ws.cwdByExpert, modeByRole: ws.modeByExpert })
+          const { streamId } = await window.api.coordinator.run({ convId: cid, prompt: text, cwd: cwd ?? null, modeByRole: ws.modeByExpert })
           runMeta.set(streamId, { convId: cid, kind: 'coordinator', endpointId, model })
         } catch (e) {
           failSend(e)
@@ -1213,6 +1215,13 @@ export const useChat = create<ChatState>((set, get) => {
     setArchived: async (convId, archived) => {
       await window.api.conversations.archive(convId, archived)
       set((s) => ({ conversations: s.conversations.map((c) => (c.id === convId ? { ...c, archived } : c)) }))
+    },
+
+    // Persist this conversation's own working dir (per-conversation cwd) + reflect it locally so the composer's
+    // PathBar/chip and the Files/Diff panels re-resolve immediately. '' = folder-free.
+    setConvCwd: async (convId, cwd) => {
+      await window.api.conversations.setCwd(convId, cwd)
+      set((s) => ({ conversations: s.conversations.map((c) => (c.id === convId ? { ...c, cwd } : c)) }))
     }
   }
 })

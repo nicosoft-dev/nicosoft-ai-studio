@@ -68,9 +68,20 @@ export function Composer({
   const t = useT()
   const chat = useChat()
   const b = useRoleBinding(expert)
-  const cwd = useWorkspace((s) => s.cwdByExpert[expert.id] ?? '')
   const cwdByExpert = useWorkspace((s) => s.cwdByExpert)
-  const setCwd = useWorkspace((s) => s.setCwd)
+  const draftCwd = useWorkspace((s) => s.draftCwd)
+  const setDraftCwd = useWorkspace((s) => s.setDraftCwd)
+  // Per-conversation cwd (see resolve-cwd): an OPEN conversation owns its cwd (conv.cwd, incl. '' = folder-free);
+  // the GREETING (no conversation yet) uses the transient draft. conv.cwd === null = a legacy conversation → fall
+  // back to the old per-expert cwd so it keeps resolving to the role's folder until the user re-picks.
+  const conv = chat.activeConv ? chat.conversations.find((c) => c.id === chat.activeConv) ?? null : null
+  const cwd = conv ? conv.cwd ?? cwdByExpert[expert.id] ?? '' : draftCwd
+  // Set the operative cwd: an open conversation persists to its OWN row (per-conversation); the greeting updates
+  // the draft that the newly-created conversation inherits on send.
+  const setCwd = (next: string): void => {
+    if (chat.activeConv) void chat.setConvCwd(chat.activeConv, next)
+    else setDraftCwd(next)
+  }
   // A picked folder can vanish from disk afterwards (deleted, volume unmounted). Probe on cwd change +
   // window focus; while missing, the WHOLE chain treats the chat as folder-free — PathBar shows its
   // "choose a folder" state, send() omits the cwd (agent falls back to its scratch workspace), the git
@@ -242,7 +253,6 @@ export function Composer({
   // for a solo conv that IS the PathBar's cwd; for coordinator/collab convs it falls back to the first
   // participating role with a folder. Greeting (no conversation yet) → the composer's own cwd. This
   // expert's entry is overridden with effectiveCwd so a vanished folder hides the chip too.
-  const conv = chat.conversations.find((c) => c.id === activeConv) ?? null
   const gitCwd = conv
     ? resolveConvCwd(conv, { ...cwdByExpert, [expert.id]: effectiveCwd }, messages)
     : effectiveCwd.trim() || null
@@ -280,7 +290,7 @@ export function Composer({
         if (AGENT_ROLE_IDS.has(expert.id)) {
           chat.ensureStreamListeners() // the review turn streams on agent:resume-stream — subscribe before it can fire
           if (!convId) {
-            const conv = await window.api.conversations.create({ kind: 'single', primaryRoleId: expert.id, title: rawCmd.slice(0, 60) })
+            const conv = await window.api.conversations.create({ kind: 'single', primaryRoleId: expert.id, title: rawCmd.slice(0, 60), cwd: effectiveCwd || '' })
             convId = conv.id
             chat.adoptConversation(conv)
           }
@@ -388,7 +398,7 @@ export function Composer({
             chip beside it shows the CC-style working ± + Commit/Push handoff button — only for roles
             whose kit can actually run git (Danny's read-only direct kit can't). */}
         <div className="cmp-path-row">
-          <PathBar cwd={effectiveCwd} onPick={(dir) => setCwd(expert.id, dir)} />
+          <PathBar cwd={effectiveCwd} onPick={(dir) => setCwd(dir)} />
           {agent ? <GitStatusChip cwd={gitCwd} disabled={!ready || streaming || compacting} onAction={sendGitPreset} /> : null}
         </div>
         <div

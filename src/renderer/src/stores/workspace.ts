@@ -6,8 +6,15 @@ import type { AgentMode } from '@/lib/agent-mode'
 // dispatching a multi-agent task shares one workspace). The path bar + mode picker above each composer
 // read/write this role's entries. Persisted to localStorage so they survive reloads.
 interface WorkspaceState {
+  // Legacy per-expert cwd — kept only as the fallback for conversations that predate per-conversation cwd
+  // (conv.cwd === null). New conversations own their cwd on the conversation row; nothing writes here anymore.
   cwdByExpert: Record<string, string>
   setCwd: (expertId: string, cwd: string) => void
+  // The folder a NOT-YET-CREATED conversation (the greeting) will start in — transient, not persisted. Reset to
+  // '' whenever a new conversation begins (new chats start folder-free); on send it becomes the conversation's
+  // own cwd. Per-conversation cwd lives on the conversation row (conv.cwd), not here.
+  draftCwd: string
+  setDraftCwd: (cwd: string) => void
   modeByExpert: Record<string, AgentMode>
   setMode: (expertId: string, mode: AgentMode) => void
   // Files panel: which folders are expanded, keyed by root cwd — so the tree restores its open state when
@@ -42,6 +49,8 @@ export const useWorkspace = create<WorkspaceState>((set) => ({
       persist(LS_KEY, next)
       return { cwdByExpert: next }
     }),
+  draftCwd: '',
+  setDraftCwd: (cwd) => set({ draftCwd: cwd }),
   modeByExpert: load<AgentMode>(MODE_KEY),
   setMode: (expertId, mode) =>
     set((s) => {

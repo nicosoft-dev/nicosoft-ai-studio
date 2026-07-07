@@ -34,13 +34,12 @@ export type RouteDecision =
 export interface CoordinatorRunInput {
   convId: string
   prompt: string
-  // Per-role working dirs (the renderer's cwdByExpert). An agent-dispatched expert uses cwdByRole[roleId]
-  // as its loop cwd; unset → it runs cwd-less (Read dropped for non-dev roles; web/think still work — doc
-  // 19 §14). Real project-scoped cwd lands in stage 5.
-  cwdByRole?: Record<string, string>
-  // Per-role permission mode (the renderer's modeByExpert), mirroring cwdByRole. A dispatched / collab
-  // expert honors modeByRole[roleId] (bypass = full auto, skipping coordinator self-approval); unset →
-  // 'default'. Without this the coordinator path silently forced every dispatched expert to 'default'.
+  // The conversation's own working dir (per-conversation) — every agent-dispatched / collab expert operates in
+  // it (collaborators share one project dir). '' / null → cwd-less (Read dropped for non-dev roles; web/think
+  // still work — doc 19 §14).
+  cwd?: string | null
+  // Per-role permission mode (the renderer's modeByExpert). A dispatched / collab expert honors
+  // modeByRole[roleId] (bypass = full auto, skipping coordinator self-approval); unset → 'default'.
   modeByRole?: Record<string, PermissionMode>
 }
 

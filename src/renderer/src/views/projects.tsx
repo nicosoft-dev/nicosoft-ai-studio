@@ -572,8 +572,7 @@ function ProjectDetail({
     let streamId = ''
     try {
       await window.api.conversations.append(convId, { author: 'user', content: prompt })
-      const cwdByRole = project.cwd ? Object.fromEntries(doers.map((r) => [r, project.cwd as string])) : undefined
-      ;({ streamId } = await window.api.coordinator.run({ convId, prompt, cwdByRole }))
+      ;({ streamId } = await window.api.coordinator.run({ convId, prompt, cwd: project.cwd ?? null }))
     } catch (e) {
       // The run never started — unstick the dock instead of leaving `running` true forever.
       setRunning(false)

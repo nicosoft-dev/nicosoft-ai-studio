@@ -78,7 +78,7 @@ async function runCollabReview(
   // When verification can't run, we still return a note — an UNVERIFIED marker — so the synthesis closes HONESTLY
   // instead of presenting unchecked work as done (matching single/pipeline's explicit unverified beat).
   const UNVERIFIED = 'Independent verification did NOT run for this collaboration (no independent reviewer is bound besides the collaborators, or the verifier could not run). The combined result is UNVERIFIED — do not present it as verified/done; say plainly it was not independently checked.'
-  const cwd = input.cwdByRole?.[roles[0]] // collaborators share the project dir; the verifier git-diffs + builds it
+  const cwd = input.cwd || undefined // the conversation's shared dir; the verifier git-diffs + builds it
   if (!cwd) return { note: UNVERIFIED, inputTokens: 0, outputTokens: 0 } // no project boundary → can't git diff / build
   const implementationText = outputs.map((o) => `### ${displayName(o.role)}\n${o.text}`).join('\n\n')
   const opts: RunStepOptions = {
@@ -183,7 +183,7 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
   // L1 (coordinator dispatch §3): hand route() the coordinator's project folder + the conv id so it can
   // escalate a project-dependent build task to Danny's delegated investigation (routeAsAgent). Same cwd
   // Danny's DIRECT read-only kit uses below; unset (folder-free chat) → route stays on the tier-1 decision.
-  const decision = await route(input.prompt, history, { cwd: input.cwdByRole?.['coordinator'], convId: input.convId }, signal, cb)
+  const decision = await route(input.prompt, history, { cwd: input.cwd || undefined, convId: input.convId }, signal, cb)
   console.log(`[coordinator] route ${JSON.stringify({ mode: decision.mode, role: (decision as { role?: string }).role, roles: (decision as { roles?: string[] }).roles, reason: decision.reason, needsPlan: decision.needsPlan })}`)
   if (signal.aborted) throw new LlmError('network', 'aborted before dispatch')
 
@@ -213,7 +213,7 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
       dispatch: null,
       includeHistory: true,
       isDirect: true,
-      cwd: input.cwdByRole?.['coordinator'], // so Danny's read-only Read/Glob have a project boundary
+      cwd: input.cwd || undefined, // so Danny's read-only Read/Glob have a project boundary
       cb,
       signal
     })
@@ -292,7 +292,7 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
       prompt: input.prompt,
       dispatch: null,
       includeHistory: true,
-      cwd: input.cwdByRole?.[decision.role],
+      cwd: input.cwd || undefined,
       permissionMode: input.modeByRole?.[decision.role],
       cb,
       signal
@@ -375,7 +375,7 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
     if (decision.intro) emitCoordinatorIntro(input.convId, decision.intro, cb)
     const settled = await Promise.all(
       decision.roles.map((roleId) =>
-        runRoleStep({ convId: input.convId, roleId, prompt: buildPanelPrompt(input.prompt, roleId), dispatch: fullChain, includeHistory: false, cwd: input.cwdByRole?.[roleId], permissionMode: input.modeByRole?.[roleId], cb, signal })
+        runRoleStep({ convId: input.convId, roleId, prompt: buildPanelPrompt(input.prompt, roleId), dispatch: fullChain, includeHistory: false, cwd: input.cwd || undefined, permissionMode: input.modeByRole?.[roleId], cb, signal })
           .then((out) => { noteReason(out.reason); return { role: roleId, ...out } })
           .catch(() => null)
       )
@@ -419,7 +419,7 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
         roles.map((roleId) => {
           const prompt = seen.has(roleId) ? buildCritiquePrompt(input.prompt, prev, roleId) : buildPanelPrompt(input.prompt, roleId)
           seen.add(roleId)
-          return runRoleStep({ convId: input.convId, roleId, prompt, dispatch: fullChain, includeHistory: false, cwd: input.cwdByRole?.[roleId], permissionMode: input.modeByRole?.[roleId], cb, signal })
+          return runRoleStep({ convId: input.convId, roleId, prompt, dispatch: fullChain, includeHistory: false, cwd: input.cwd || undefined, permissionMode: input.modeByRole?.[roleId], cb, signal })
             .then((out) => { noteReason(out.reason); return { role: roleId, text: out.text } })
             .catch(() => null)
         })
@@ -465,7 +465,7 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
     // phase 5b: a collaboration is project work — ensure a project backs it (created from the prompt, or
     // reused when the chat was opened inside one), with a task per collaborating expert + the conversation
     // linked. Each expert that produces output marks its task done; the phase advances to done when all are.
-    const project = await collabProject.ensureProjectForCollab(input.convId, input.prompt, decision.roles, input.cwdByRole)
+    const project = await collabProject.ensureProjectForCollab(input.convId, input.prompt, decision.roles, input.cwd)
     const { outputs, reasons } = await runCollaboration(input, decision.roles, fullChain, cb, signal, project)
     if (signal.aborted) throw new LlmError('network', 'aborted mid-collaboration')
     if (outputs.length === 0) throw new LlmError('upstream', 'collaboration produced no output')
@@ -523,7 +523,7 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
       prompt: stepPrompt,
       dispatch: fullChain,
       includeHistory: i === 0,
-      cwd: input.cwdByRole?.[roleId],
+      cwd: input.cwd || undefined,
       permissionMode: input.modeByRole?.[roleId],
       cb,
       signal

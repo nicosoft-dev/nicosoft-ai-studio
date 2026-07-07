@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS conversations (
   primary_role_id TEXT,
   title           TEXT,
   project_id      TEXT,
+  cwd             TEXT,                           -- this conversation's own working dir (per-conversation); NULL = legacy → renderer falls back to the per-expert cwd
   pinned          INTEGER NOT NULL DEFAULT 0,     -- 1 = pinned to the top of History
   archived        INTEGER NOT NULL DEFAULT 0,     -- 1 = moved to the Archived group
   created_at      TEXT NOT NULL,

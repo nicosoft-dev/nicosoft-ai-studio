@@ -34,6 +34,9 @@ export function runMigrations(db: DatabaseSync): void {
   ensureColumn(db, 'projects', 'cwd', 'TEXT')
   ensureColumn(db, 'conversations', 'pinned', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(db, 'conversations', 'archived', 'INTEGER NOT NULL DEFAULT 0')
+  // Per-conversation working dir (replaces the renderer's per-expert cwd for new conversations). NULL on every
+  // existing row → the renderer falls back to the legacy per-expert cwd until the conversation gets its own.
+  ensureColumn(db, 'conversations', 'cwd', 'TEXT')
   // Memory self-learning upgrades: provenance (which conversation a memory was learned from), decay
   // bookkeeping (when recall last selected it), and the extractor's incremental watermark.
   ensureColumn(db, 'memories', 'source_conv_id', 'TEXT')

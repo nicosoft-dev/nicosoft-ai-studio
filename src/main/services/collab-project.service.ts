@@ -24,14 +24,13 @@ export async function ensureProjectForCollab(
   convId: string,
   prompt: string,
   roles: string[],
-  cwdByRole?: Record<string, string>,
+  cwd?: string | null, // the conversation's own dir — collaborators share it (per-conversation cwd)
 ): Promise<CollabProject> {
   const conv = convRepo.getById(convId)
   if (conv?.projectId) return mapOrSeedTasks(conv.projectId, roles)
 
-  const cwd = roles.map((r) => cwdByRole?.[r]).find((c): c is string => !!c) ?? null
   // Blank title → project.service.create generates it from the goal (small model → main model → truncate).
-  const project = await projectService.create({ title: '', goal: prompt, cwd })
+  const project = await projectService.create({ title: '', goal: prompt, cwd: cwd || null })
   const taskByRole: Record<string, string> = {}
   for (const roleId of roles) {
     taskByRole[roleId] = projectService.addTask(project.id, { title: taskTitle(roleId), assigneeRoleId: roleId }).id

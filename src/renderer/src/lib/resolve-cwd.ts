@@ -13,6 +13,10 @@ export function resolveConvCwd(
   messages: { expertId?: string | null }[]
 ): string | null {
   if (!conv) return null
+  // Per-conversation cwd is authoritative once the conversation has one (incl. an explicit '' = folder-free
+  // reset state). conv.cwd === null means a legacy conversation that predates per-conv cwd → fall back to the
+  // per-expert cwd below (so old chats keep resolving to the role's folder until the user re-picks).
+  if (conv.cwd != null) return conv.cwd.trim() || null
   const primary = conv.primaryRoleId ? cwdByExpert[conv.primaryRoleId]?.trim() : ''
   if (primary) return primary
   const seen = new Set<string>()

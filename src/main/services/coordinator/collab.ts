@@ -47,7 +47,7 @@ export async function runCollaboration(
     experts.push({
       roleId,
       initialPrompt: input.prompt,
-      cwd: input.cwdByRole?.[roleId] ?? '',
+      cwd: input.cwd ?? '', // the conversation's shared dir — every collaborator operates in it
       protocol,
       baseUrl: ep.baseUrl,
       apiKey,

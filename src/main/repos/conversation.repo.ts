@@ -11,6 +11,7 @@ export interface ConversationRow {
   primaryRoleId: string | null
   title: string | null
   projectId: string | null
+  cwd: string | null // this conversation's own working dir (per-conversation); null = never set → renderer falls back to the legacy per-expert cwd
   pinned: boolean
   archived: boolean
   createdAt: string
@@ -22,6 +23,7 @@ export interface ConversationCreateInput {
   primaryRoleId?: string
   title?: string
   projectId?: string
+  cwd?: string | null // the folder the new conversation starts in (from the composer's draft); omitted → null (legacy fallback)
 }
 
 export interface MessageRow {
@@ -63,6 +65,7 @@ interface ConversationRaw {
   primary_role_id: string | null
   title: string | null
   project_id: string | null
+  cwd: string | null
   pinned: number
   archived: number
   created_at: string
@@ -94,6 +97,7 @@ function mapConversation(raw: ConversationRaw): ConversationRow {
     primaryRoleId: raw.primary_role_id,
     title: raw.title,
     projectId: raw.project_id,
+    cwd: raw.cwd,
     pinned: raw.pinned === 1,
     archived: raw.archived === 1,
     createdAt: raw.created_at,
@@ -128,21 +132,29 @@ export function create(input: ConversationCreateInput): ConversationRow {
   const now = new Date().toISOString()
   getDb()
     .prepare(
-      `INSERT INTO conversations (id, kind, primary_role_id, title, project_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO conversations (id, kind, primary_role_id, title, project_id, cwd, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(id, input.kind, input.primaryRoleId ?? null, input.title ?? null, input.projectId ?? null, now, now)
+    .run(id, input.kind, input.primaryRoleId ?? null, input.title ?? null, input.projectId ?? null, input.cwd ?? null, now, now)
   return {
     id,
     kind: input.kind,
     primaryRoleId: input.primaryRoleId ?? null,
     title: input.title ?? null,
     projectId: input.projectId ?? null,
+    cwd: input.cwd ?? null,
     pinned: false,
     archived: false,
     createdAt: now,
     updatedAt: now
   }
+}
+
+// Set (or clear) a conversation's own working dir. '' = explicitly folder-free (the reset state a new
+// conversation starts in); a path = per-conversation cwd; both stop the renderer's legacy per-expert fallback.
+export function setCwd(id: string, cwd: string): void {
+  const now = new Date().toISOString()
+  getDb().prepare('UPDATE conversations SET cwd = ?, updated_at = ? WHERE id = ?').run(cwd, now, id)
 }
 
 export function getById(id: string): ConversationRow | null {

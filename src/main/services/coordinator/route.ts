@@ -33,7 +33,7 @@ export { parseRouteDecision, routableWorkflows } from './route-rules'
 const ROUTER_HISTORY_LIMIT = 4 // last N messages handed to the router for context
 
 export interface RouteContext {
-  // The coordinator's project folder (cwdByRole['coordinator']) — the boundary Danny's routing investigation
+  // The coordinator's project folder (the conversation's cwd) — the boundary Danny's routing investigation
   // reads. Absent (folder-free chat) → no investigation and no project memory (§4.5: degrade to tier-1 by task).
   cwd?: string
   // The conversation id — routeAsAgent runs a real agent loop (transcript + session events keyed on it).

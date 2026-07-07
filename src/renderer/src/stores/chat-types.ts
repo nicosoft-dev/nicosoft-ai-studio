@@ -158,4 +158,5 @@ export interface ChatState {
   rename: (convId: string, title: string) => Promise<void>
   setPinned: (convId: string, pinned: boolean) => Promise<void>
   setArchived: (convId: string, archived: boolean) => Promise<void>
+  setConvCwd: (convId: string, cwd: string) => Promise<void>
 }

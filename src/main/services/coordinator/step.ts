@@ -97,7 +97,7 @@ export interface RunStepOptions {
   dispatch: string[] | null
   cb: CoordinatorCallbacks
   signal: AbortSignal
-  // Working dir for an agent-dispatched expert (cwdByRole[roleId]). Ignored by the tool-less synthesis path.
+  // Working dir for an agent-dispatched expert (the conversation's cwd). Ignored by the tool-less synthesis path.
   cwd?: string
   // The user's permission mode for this role (modeByRole[roleId]); threaded to runDispatchedAgent so a
   // dispatched expert honors bypass. Unset → 'default'.
