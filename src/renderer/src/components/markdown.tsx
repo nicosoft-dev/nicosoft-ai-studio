@@ -214,36 +214,51 @@ const BASE_REHYPE = [rehypeRaw, rehypeSanitize]
 const FADE_REHYPE = [rehypeRaw, rehypeSanitize, rehypeNewText]
 const REMARK = [remarkGfm]
 
-export function Markdown({ children, fade = false, streaming = false }: { children: string; fade?: boolean; streaming?: boolean }): ReactElement {
+// The components mapping MUST be module-stable: react-markdown uses these as component TYPES, so a
+// mapping rebuilt per render hands React a brand-new type each time → the whole rendered code subtree
+// unmounts + remounts on every re-render (CodeBlocks re-run Shiki async → visible plain→highlighted
+// flash; the file-viewer flickered on every workspace watcher tick). Two frozen copies carry the only
+// per-call variation (`streaming`) so every render passes identical references.
+type CodeProps = { node?: unknown; className?: string; children?: React.ReactNode }
+function makeMdComponents(streaming: boolean): NonNullable<React.ComponentProps<typeof ReactMarkdown>['components']> {
+  return {
+    // unwrap <pre> — CodeBlock provides its own container (avoids <pre><div>… invalid nesting)
+    pre: ({ children }) => <>{children}</>,
+    code({ node: _node, className, children, ...rest }: CodeProps) {
+      const match = /language-(\w+)/.exec(className || '')
+      const text = String(children)
+      // react-markdown v10 drops the `inline` flag, and a fenced block WITHOUT a language (bare
+      // ```) or an indented block carries no `language-*` class — so className alone can't tell
+      // block from inline. Real inline code is always single-line; anything with a newline is a
+      // block. Treat both as block so directory trees / multi-line snippets keep their line breaks
+      // instead of collapsing onto one line (rendered as inline-code).
+      const isBlock = !!match || text.includes('\n')
+      if (!isBlock) return <code className="inline-code" {...rest}>{children}</code>
+      // No language tag → guess from the content so real code still gets highlighted (a bare
+      // directory tree / prose guesses to 'text' and stays plain).
+      return <CodeBlock lang={match ? match[1] : guessLang(text)} code={text.replace(/\n$/, '')} streaming={streaming} />
+    }
+  }
+}
+const MD_COMPONENTS = makeMdComponents(false)
+const MD_COMPONENTS_STREAMING = makeMdComponents(true)
+
+// memo: children/fade/streaming are primitives, so a parent re-render with unchanged text skips the
+// entire remark/rehype re-parse — the fix for "any ambient re-render re-parses a whole document"
+// (the file viewer re-rendered per drag mousemove + per workspace watcher tick before this).
+export const Markdown = memo(function Markdown({ children, fade = false, streaming = false }: { children: string; fade?: boolean; streaming?: boolean }): ReactElement {
   return (
     <div className="md">
       <ReactMarkdown
         remarkPlugins={REMARK}
         rehypePlugins={fade ? FADE_REHYPE : BASE_REHYPE}
-        components={{
-          // unwrap <pre> — CodeBlock provides its own container (avoids <pre><div>… invalid nesting)
-          pre: ({ children }) => <>{children}</>,
-          code({ node: _node, className, children, ...rest }) {
-            const match = /language-(\w+)/.exec(className || '')
-            const text = String(children)
-            // react-markdown v10 drops the `inline` flag, and a fenced block WITHOUT a language (bare
-            // ```) or an indented block carries no `language-*` class — so className alone can't tell
-            // block from inline. Real inline code is always single-line; anything with a newline is a
-            // block. Treat both as block so directory trees / multi-line snippets keep their line breaks
-            // instead of collapsing onto one line (rendered as inline-code).
-            const isBlock = !!match || text.includes('\n')
-            if (!isBlock) return <code className="inline-code" {...rest}>{children}</code>
-            // No language tag → guess from the content so real code still gets highlighted (a bare
-            // directory tree / prose guesses to 'text' and stays plain).
-            return <CodeBlock lang={match ? match[1] : guessLang(text)} code={text.replace(/\n$/, '')} streaming={streaming} />
-          }
-        }}
+        components={streaming ? MD_COMPONENTS_STREAMING : MD_COMPONENTS}
       >
         {children}
       </ReactMarkdown>
     </div>
   )
-}
+})
 
 const sameNumbers = (a: readonly number[], b: readonly number[]): boolean =>
   a === b || (a.length === b.length && a.every((v, i) => v === b[i]))
