@@ -19,6 +19,7 @@ export interface PluginRow {
 }
 
 export interface PluginCreateInput {
+  id?: string // pre-generated ULID (extension materialization names the on-disk copy after the row id)
   name: string
   description: string
   version: string
@@ -74,7 +75,7 @@ export function getById(id: string): PluginRow | null {
 }
 
 export function create(input: PluginCreateInput): PluginRow {
-  const id = ulid()
+  const id = input.id ?? ulid()
   const createdAt = new Date().toISOString()
   getDb()
     .prepare(

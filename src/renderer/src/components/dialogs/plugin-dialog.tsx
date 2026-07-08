@@ -67,6 +67,7 @@ export function PluginDialog({
         </div>
       </div>
       <div className="scope-note">{t('plugin.note')}</div>
+      <div className="ap-install-note">{t('ext.materializeNote')}</div>
       {err ? (
         <div className="dialog-err">
           <Icons.alert size={14} /> {err}

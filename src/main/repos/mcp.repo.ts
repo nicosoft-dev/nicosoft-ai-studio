@@ -12,6 +12,7 @@ export interface McpServerRow {
   transport: McpTransport
   endpointOrCmd: string
   args: string[]
+  cwd: string | null // stdio spawn dir — set for materialized local-folder servers (extensions/mcp/<id>/)
   scope: McpScope
   enabled: boolean
   toolCount: number
@@ -21,10 +22,12 @@ export interface McpServerRow {
 }
 
 export interface McpServerCreateInput {
+  id?: string // pre-generated ULID (extension materialization names the on-disk copy after the row id)
   name: string
   transport: McpTransport
   endpointOrCmd: string
   args?: string[]
+  cwd?: string | null
   scope?: McpScope
   enabled?: boolean
   ownerPluginId?: string | null
@@ -47,6 +50,7 @@ interface McpServerRaw {
   transport: McpTransport
   endpoint_or_cmd: string
   args: string
+  cwd: string | null
   scope: string
   enabled: number
   tool_count: number
@@ -62,6 +66,7 @@ function mapRow(raw: McpServerRaw): McpServerRow {
     transport: raw.transport,
     endpointOrCmd: raw.endpoint_or_cmd,
     args: parseJson<string[]>(raw.args, []),
+    cwd: raw.cwd,
     scope: parseJson<McpScope>(raw.scope, 'all'),
     enabled: raw.enabled === 1,
     toolCount: raw.tool_count,
@@ -86,12 +91,12 @@ export function getById(id: string): McpServerRow | null {
 }
 
 export function create(input: McpServerCreateInput): McpServerRow {
-  const id = ulid()
+  const id = input.id ?? ulid()
   const createdAt = new Date().toISOString()
   getDb()
     .prepare(
-      `INSERT INTO mcp_servers (id, name, transport, endpoint_or_cmd, args, scope, enabled, tool_count, status, owner_plugin_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'idle', ?, ?)`
+      `INSERT INTO mcp_servers (id, name, transport, endpoint_or_cmd, args, cwd, scope, enabled, tool_count, status, owner_plugin_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'idle', ?, ?)`
     )
     .run(
       id,
@@ -99,6 +104,7 @@ export function create(input: McpServerCreateInput): McpServerRow {
       input.transport,
       input.endpointOrCmd,
       JSON.stringify(input.args ?? []),
+      input.cwd ?? null,
       JSON.stringify(input.scope ?? 'all'),
       (input.enabled ?? true) ? 1 : 0,
       input.ownerPluginId ?? null,

@@ -8,6 +8,7 @@ import type { AgentContext } from './context'
 import { findTool, type Tool } from './tool'
 import { persistLargeResult } from './tool-result-storage'
 import { isSystemSoftwareInstall } from './tools/bash-classifier'
+import { INSTALL_TOOL_NAMES } from './approval'
 import type { ToolResultBlock, ToolUseBlock } from './types'
 import { runHooks } from './hooks/engine'
 import { hookRegistry } from './hooks/registry'
@@ -73,7 +74,7 @@ async function checkPermission(
   ctx: AgentContext,
   toolUseId: string,
   skipPermissionHook = false,
-): Promise<{ allow: boolean; message?: string; updatedInput?: Record<string, unknown> }> {
+): Promise<{ allow: boolean; message?: string; updatedInput?: Record<string, unknown>; userApproved?: boolean }> {
   // Bypass auto-approves every tool EXCEPT two carve-outs:
   //   • A system-software install — bypass runs unattended, so it must never SILENTLY install software on
   //     the user's machine (brew/apt/-g/bare pip/cargo install/…). Deny it with guidance so the agent
@@ -85,6 +86,19 @@ async function checkPermission(
   //     Danny/coordinator can independently review it.
   if (ctx.permissionMode === 'bypass' && tool.name === 'Bash' && isSystemSoftwareInstall(bashCommandOf(input))) {
     return { allow: false, message: BYPASS_INSTALL_DENIED }
+  }
+  //   • Extension installs (install_skill/mcp/plugin) — the same "never silently install" floor as the
+  //     system-software carve-out, applied to Studio's own extensions (extension-install-design §5.2).
+  //     Every install must pass the user's interactive confirmation; bypass has no user watching, so it
+  //     denies with guidance instead of auto-approving. This also covers the deferred-approval replay
+  //     path (approval.service replays with bypass), which must not re-run an install without the dialog.
+  if (ctx.permissionMode === 'bypass' && INSTALL_TOOL_NAMES.has(tool.name)) {
+    return {
+      allow: false,
+      message:
+        'Blocked: extension installs never run unattended — even with approvals bypassed. Ask the user ' +
+        'to request the install in an attended chat, where they review and approve the install confirmation.'
+    }
   }
   if (ctx.permissionMode === 'bypass' && tool.name !== 'ExitPlanMode') return { allow: true }
   if (ctx.permissionMode === 'plan' && !tool.isReadOnly(input, ctx) && tool.name !== 'ExitPlanMode') {
@@ -133,6 +147,11 @@ async function checkPermission(
     allow: decision.allow,
     updatedInput: decision.updatedInput ?? allowedInput,
     message: decision.allow ? undefined : 'User denied permission',
+    // The USER made this decision — and may have rewritten the input through the approval dialog
+    // (install confirmations return the picked folder / secrets token as updatedInput). runOne must NOT
+    // re-run the permission gate on a user-approved rewrite: the user just approved exactly that input,
+    // and a tool whose checkPermissions always asks (install_*) would otherwise re-prompt forever.
+    userApproved: true,
   }
 }
 
@@ -260,9 +279,17 @@ async function runOne(
       }
       const revalid = await tool.validateInput(rewritten, ctx)
       if (!revalid.result) return await finish(errorResult(toolUse.id, `Permission hook produced invalid input: ${revalid.message}`))
-      const repermission = await checkPermission(tool, rewritten, ctx, toolUse.id, true)
-      if (!repermission.allow) return await finish(errorResult(toolUse.id, repermission.message ?? 'Permission denied after hook rewrite'))
-      effectiveInput = repermission.updatedInput ?? rewritten
+      if (decision.userApproved) {
+        // The rewrite came from the USER'S OWN approval dialog (install confirmation: picked folder /
+        // secrets token) — the user is the permission. Schema/value/concurrency gates above still ran;
+        // re-asking here would re-prompt the exact input the user just approved (an infinite ask loop
+        // for always-ask tools). Hook/tool rewrites below keep the re-check — they are not the user.
+        effectiveInput = rewritten
+      } else {
+        const repermission = await checkPermission(tool, rewritten, ctx, toolUse.id, true)
+        if (!repermission.allow) return await finish(errorResult(toolUse.id, repermission.message ?? 'Permission denied after hook rewrite'))
+        effectiveInput = repermission.updatedInput ?? rewritten
+      }
     }
 
     const toolCtx: AgentContext = { ...ctx, currentToolUseId: toolUse.id }

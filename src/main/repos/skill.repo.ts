@@ -25,6 +25,7 @@ export interface SkillRow {
 }
 
 export interface SkillCreateInput {
+  id?: string // pre-generated ULID (extension materialization names the on-disk copy after the row id)
   name: string
   description: string
   whenToUse: string
@@ -101,7 +102,7 @@ export function getById(id: string): SkillRow | null {
 }
 
 export function create(input: SkillCreateInput): SkillRow {
-  const id = ulid()
+  const id = input.id ?? ulid()
   const createdAt = new Date().toISOString()
   getDb()
     .prepare(

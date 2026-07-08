@@ -1058,10 +1058,10 @@ export const useChat = create<ChatState>((set, get) => {
       pingTurnSettled(cid) // a stopped run may have already changed files
     },
 
-    respondPermission: (convId, allow) => {
+    respondPermission: (convId, allow, updatedInput) => {
       const p = get().permission[convId]
       if (!p) return
-      const resp = { permissionId: p.permissionId, allow }
+      const resp = { permissionId: p.permissionId, allow, updatedInput }
       // Route to whichever backend raised it — a coordinator-dispatched expert's prompt lives in a separate
       // pending map than a direct agent run's (see coordinator.handler / agent.handler).
       if (p.source === 'coordinator') void window.api.coordinator.respondPermission(resp)

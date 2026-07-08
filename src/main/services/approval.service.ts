@@ -9,6 +9,7 @@ import { dataDir } from '../db/connection'
 import { join } from 'node:path'
 import { findTool } from '../agent/tool'
 import { CORE_TOOLS } from '../agent/registry'
+import { INSTALL_TOOL_NAMES } from '../agent/approval'
 import type { AgentContext } from '../agent/context'
 import * as pendingRepo from '../repos/pending-approval.repo'
 import type { PendingApprovalRow } from '../repos/pending-approval.repo'
@@ -45,6 +46,12 @@ export async function approve(id: string): Promise<ReplayResult> {
 // approved THIS action — the safety classifier already had its say at request time. Fresh, empty ctx
 // (no read-file cache / todos / collab / services): a standalone one-shot, not part of a live agent loop.
 async function replay(p: PendingApprovalRow): Promise<ReplayResult> {
+  // Extension installs are not replayable unattended by design (extension-install §5.2): the pending
+  // card lacks the install dialog's context (folder review, secret entry, network warning). Fail with
+  // guidance instead of the generic unknown-tool error — the user re-requests it in an attended chat.
+  if (INSTALL_TOOL_NAMES.has(p.toolName)) {
+    return { ok: false, output: 'Extension installs need the interactive install confirmation — ask the expert again in a live chat and approve it there.' }
+  }
   const tool = findTool(CORE_TOOLS, p.toolName)
   if (!tool) return { ok: false, output: `unknown tool: ${p.toolName}` }
   const sessionDir = join(dataDir(), 'sessions', p.convId, 'replay')

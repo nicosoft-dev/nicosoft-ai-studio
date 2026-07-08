@@ -348,6 +348,64 @@ function bundleSummary(bundles: PluginDto["bundles"]): string {
 
 /* ——— Tools (built-in ns_ tools) ——— */
 const TOOLS_ENABLED_KEY = 'tools.generate_image.enabled';
+const AGENT_INSTALL_KEY = 'extensions.agentInstallEnabled';
+const AGENT_INSTALL_SOURCE_KEY = 'extensions.sourceDir';
+
+/* — Agent extension installs (extension-install-design §5): a global OPT-IN switch (default off). When
+     on, every expert gets install_skill / install_mcp / install_plugin — but each call is red-floor and
+     lands in the install confirmation dialog, so the user stays the gate. The optional source directory
+     is where the user drops downloaded extensions for the agent to install from (§5.3 batch mode). — */
+function AgentInstallCard(): ReactElement {
+  const t = useT();
+  const [enabled, setEnabled] = useState(false);
+  const [sourceDir, setSourceDir] = useState('');
+  useEffect(() => {
+    void window.api.settings.get<boolean>(AGENT_INSTALL_KEY).then((v) => { if (v !== null) setEnabled(v); });
+    void window.api.settings.get<string>(AGENT_INSTALL_SOURCE_KEY).then((v) => { if (v) setSourceDir(v); });
+  }, []);
+  const toggle = (): void => {
+    const next = !enabled;
+    setEnabled(next);
+    void window.api.settings.set(AGENT_INSTALL_KEY, next).catch(() => toast.error(t('tools.updateFailed')));
+  };
+  const pickSource = async (): Promise<void> => {
+    const dir = await window.api.extensions.pickDir();
+    if (dir) { setSourceDir(dir); void window.api.settings.set(AGENT_INSTALL_SOURCE_KEY, dir); }
+  };
+  const clearSource = (): void => {
+    setSourceDir('');
+    void window.api.settings.set(AGENT_INSTALL_SOURCE_KEY, '');
+  };
+  return (
+    <div className={'ext-row tool' + (enabled ? '' : ' off')}>
+      <span className="ext-lead"><Icons.download size={16} /></span>
+      <div className="ext-main">
+        <div className="ext-line1">
+          <span className="ext-name">{t('agentInstall.title')}</span>
+          <span className="ext-name mono">install_skill · install_mcp · install_plugin</span>
+        </div>
+        <div className="ext-line2">{t('agentInstall.desc')}</div>
+        {enabled ? (
+          <div className="tool-config">
+            <span className="tool-config-label">{t('agentInstall.sourceDir')}</span>
+            {sourceDir ? (
+              <>
+                <code className="ap-install-path" title={sourceDir}>{sourceDir}</code>
+                <button className="ap-install-pick" onClick={() => void pickSource()}>{t('agentInstall.change')}</button>
+                <button className="ap-install-pick" onClick={clearSource}>{t('agentInstall.clear')}</button>
+              </>
+            ) : (
+              <button className="ap-install-pick" onClick={() => void pickSource()}>{t('agentInstall.choose')}</button>
+            )}
+          </div>
+        ) : null}
+      </div>
+      <div className="ext-right">
+        <Switch on={enabled} onClick={toggle} />
+      </div>
+    </div>
+  );
+}
 
 /* — Playwright (Tier 2) read-only availability (doc-57 §4.2/§4.3). Two independent levels — ① the `playwright`
      package resolves, ② the Chromium browser binary exists — collapse into three overall states
@@ -568,6 +626,7 @@ function ToolsTab(): ReactElement {
       </div>
       <PlaywrightCard />
       {isMac || isWin ? <ComputerUseCard /> : null}
+      <AgentInstallCard />
     </div>
   );
 }

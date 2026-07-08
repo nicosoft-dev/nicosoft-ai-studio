@@ -27,6 +27,9 @@ export function runMigrations(db: DatabaseSync): void {
   ensureColumn(db, 'skills', 'origin_role', 'TEXT')
   ensureColumn(db, 'skills', 'origin_conv_id', 'TEXT')
   ensureColumn(db, 'mcp_servers', 'owner_plugin_id', 'TEXT')
+  // Extension materialization (docs/extension-install-design.md §4): the stdio spawn dir for a
+  // local-folder MCP server copied into extensions/mcp/<id>/. NULL on every existing row.
+  ensureColumn(db, 'mcp_servers', 'cwd', 'TEXT')
   ensureColumn(db, 'plugins', 'version', 'TEXT')
   ensureColumn(db, 'plugins', 'author', 'TEXT')
   ensureColumn(db, 'plugins', 'dir_path', 'TEXT')

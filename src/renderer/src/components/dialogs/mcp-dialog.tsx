@@ -223,6 +223,11 @@ export function McpDialog({
           onChange={(e) => setEndpointOrCmd(e.target.value)}
           placeholder={transport === 'stdio' ? t('mcp.commandPlaceholder') : t('mcp.urlPlaceholder')}
         />
+        {/* Same red network line as the agent-install confirmation (extension-install §5.4) — the two
+            install paths must warn identically for npx-style commands that fetch at connect time. */}
+        {transport === 'stdio' && /(^|\/)(npx|uvx|pipx|bunx)$/.test(endpointOrCmd.trim().split(/\s+/)[0] ?? '') ? (
+          <div className="ap-install-net" style={{ marginTop: 6 }}>{t('ext.mcpNetWarn')}</div>
+        ) : null}
       </div>
       {transport === 'stdio' ? (
         <div>

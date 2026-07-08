@@ -1,6 +1,7 @@
 import * as mcpRepo from '../../repos/mcp.repo'
 import * as keychain from '../../keychain/keychain'
 import { McpManager } from '../../mcp/manager'
+import { hasMcpManifest, materializeDirCopy, newExtensionId, removeMaterialized, writeMcpManifest } from './materialize'
 import type { McpServerConfig } from '../../mcp/types'
 import type { McpServerRow } from '../../repos/mcp.repo'
 import type {
@@ -19,9 +20,12 @@ function setSecrets(id: string, secrets?: Record<string, string>): void {
   else keychain.deleteApiKey(secretKey(id))
 }
 function getSecrets(id: string): Record<string, string> {
-  const raw = keychain.getApiKey(secretKey(id))
-  if (!raw) return {}
+  // Fail-safe read: an unavailable/undecryptable store degrades to "no secrets" (the server just runs
+  // unauthenticated) instead of crashing list()/connect. Consistent with getApiKey's own null-on-
+  // decrypt-failure; the loud path stays on WRITES (setApiKey throws when it can't protect the value).
   try {
+    const raw = keychain.getApiKey(secretKey(id))
+    if (!raw) return {}
     return JSON.parse(raw) as Record<string, string>
   } catch {
     return {}
@@ -31,8 +35,23 @@ function getSecrets(id: string): Record<string, string> {
 function toConfig(row: McpServerRow): McpServerConfig {
   const secrets = getSecrets(row.id)
   return row.transport === 'stdio'
-    ? { type: 'stdio', command: row.endpointOrCmd, args: row.args, env: secrets }
+    ? { type: 'stdio', command: row.endpointOrCmd, args: row.args, env: secrets, cwd: row.cwd ?? undefined }
     : { type: 'http', url: row.endpointOrCmd, headers: secrets }
+}
+
+// Project the row into extensions/mcp/<id>.json (materialize §4.1 — "mcp info lands in .nsai"). Written
+// on add for every new server; on update only when the manifest already exists (existing pre-feature
+// rows are deliberately left alone — design decision 2, no migration).
+function projectManifest(row: McpServerRow): void {
+  writeMcpManifest({
+    id: row.id,
+    name: row.name,
+    transport: row.transport,
+    endpointOrCmd: row.endpointOrCmd,
+    args: row.args,
+    cwd: row.cwd,
+    scope: row.scope
+  })
 }
 
 function toDto(row: McpServerRow): McpServerDto {
@@ -56,16 +75,35 @@ export function list(): McpServerDto[] {
 }
 
 export async function add(input: McpServerInput, ownerPluginId?: string): Promise<McpServerDto> {
-  const row = mcpRepo.create({
-    name: input.name,
-    transport: input.transport,
-    endpointOrCmd: input.endpointOrCmd,
-    args: input.args,
-    scope: input.scope,
-    enabled: input.enabled,
-    ownerPluginId: ownerPluginId ?? null
-  })
+  const id = newExtensionId()
+  // Local-folder stdio server (agent install path): copy the server folder into extensions/mcp/<id>/ and
+  // spawn from the copy (cwd), so relative paths in command/args resolve inside Studio's own payload and
+  // the install survives the user deleting their download. Raw-command (npx …) / remote http servers
+  // have no folder to own — they get the manifest projection only.
+  let cwd: string | null = null
+  if (input.sourceDir) {
+    if (input.transport !== 'stdio') throw new Error('sourceDir applies only to stdio servers')
+    cwd = materializeDirCopy('mcp', id, input.sourceDir)
+  }
+  let row: McpServerRow
+  try {
+    row = mcpRepo.create({
+      id,
+      name: input.name,
+      transport: input.transport,
+      endpointOrCmd: input.endpointOrCmd,
+      args: input.args,
+      cwd,
+      scope: input.scope,
+      enabled: input.enabled,
+      ownerPluginId: ownerPluginId ?? null
+    })
+  } catch (e) {
+    if (cwd) removeMaterialized('mcp', id) // never leave an orphan copy behind a failed insert
+    throw e
+  }
   setSecrets(row.id, input.secrets)
+  projectManifest(row)
   if (row.enabled) await connectOne(row.id)
   return toDto(mcpRepo.getById(row.id) as McpServerRow)
 }
@@ -81,6 +119,7 @@ export async function update(id: string, patch: McpServerInput): Promise<McpServ
   })
   if (!updated) return null
   if (patch.secrets !== undefined) setSecrets(id, patch.secrets)
+  if (hasMcpManifest(id)) projectManifest(updated) // keep the projection in step (new-era rows only)
   // Reconnect to pick up config/secret/scope changes.
   await manager.disconnect(id)
   if (updated.enabled) await connectOne(id)
@@ -92,6 +131,7 @@ export async function remove(id: string): Promise<void> {
   await manager.disconnect(id)
   keychain.deleteApiKey(secretKey(id))
   mcpRepo.remove(id)
+  removeMaterialized('mcp', id) // manifest + any local-folder copy; no-op for legacy rows
 }
 
 // Toggle only the enabled flag, connecting/disconnecting accordingly (plugin enable/disable cascade).

@@ -108,6 +108,7 @@ export function SkillDialog({
               {t('skill.browse')}
             </button>
           </div>
+          <div className="ap-install-note">{t('ext.materializeNote')}</div>
         </div>
       ) : (
         <>

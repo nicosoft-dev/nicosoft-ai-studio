@@ -150,7 +150,9 @@ export interface ChatState {
   stop: () => void
   compactNow: (convId: string) => Promise<void> // manual /compact — awaits the fold, shows the receipt/skip reason
   cancelCompact: (convId: string) => void // Stop button while compacting — aborts the fold (nothing written)
-  respondPermission: (convId: string, allow: boolean) => void
+  // updatedInput: the approval dialog's rewritten tool input (install confirmations: the user-picked
+  // folder + the one-shot secrets token) — threaded back so the tool runs with what the USER approved.
+  respondPermission: (convId: string, allow: boolean, updatedInput?: Record<string, unknown>) => void
   respondQuestion: (convId: string, answer: string) => void
   approveApproval: (convId: string, pendingId: string) => Promise<void>
   rejectApproval: (convId: string, pendingId: string) => void

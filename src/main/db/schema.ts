@@ -227,6 +227,7 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
   transport       TEXT NOT NULL,                  -- stdio | http
   endpoint_or_cmd TEXT NOT NULL,                  -- stdio command | http url
   args            TEXT NOT NULL DEFAULT '[]',     -- JSON string[] (stdio args; http unused)
+  cwd             TEXT,                            -- stdio spawn dir (materialized local-folder servers)
   scope           TEXT NOT NULL DEFAULT '"all"',  -- JSON: "all" | string[]
   enabled         INTEGER NOT NULL DEFAULT 1,
   tool_count      INTEGER NOT NULL DEFAULT 0,

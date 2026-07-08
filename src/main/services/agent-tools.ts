@@ -28,6 +28,7 @@ import { rememberProjectMapTool } from '../agent/tools/remember-project-map'
 import { workflowStatusTool } from '../agent/tools/workflow-status'
 import { rememberTool, forgetTool, recallMemoryTool } from '../agent/tools/memory'
 import { distillSkillTool } from '../agent/tools/distill-skill'
+import { installSkillTool, installMcpTool, installPluginTool } from '../agent/tools/install-extension'
 import { studioGuideTool } from '../agent/tools/studio-guide'
 import type { Tool } from '../agent/tool'
 import { AGENT_ROLE_IDS } from '@shared/roles'
@@ -142,6 +143,13 @@ export const COMPUTER_USE_TOOLS = [computerUseTool] as unknown as Tool[]
 // are stripped in loop.ts (a child's narrow slice is exactly what the distillation gate forbids saving).
 export const DISTILL_TOOLS = [distillSkillTool] as unknown as Tool[]
 
+// install_{skill,mcp,plugin} (extension-install-design §5) — a GLOBALLY-toggled tier like computer-use:
+// when extensions.agentInstallEnabled is on (default OFF, Extensions → Tools), every agent role can
+// PROPOSE an install; the user remains the gate — each call is red-floor (approval.ts) and lands in the
+// interactive install confirmation. Sub-agents are stripped in loop.ts (an install is a conversation-
+// level, user-facing decision — a child must never raise the dialog).
+export const INSTALL_TOOLS = [installSkillTool, installMcpTool, installPluginTool] as unknown as Tool[]
+
 export function toolsForAgentRole(roleId: string): Tool[] {
   let core =
     DEV_ROLES.has(roleId)
@@ -162,6 +170,10 @@ export function toolsForAgentRole(roleId: string): Tool[] {
   // ns_computer_use: global toggle + macOS + helper installed (computerUseToolAvailable). Every agent role;
   // coordinator-direct (not an agent role) is excluded by construction — desktop control is a doer's job.
   const computerUse = AGENT_ROLE_IDS.has(roleId) && computerUseToolAvailable() ? COMPUTER_USE_TOOLS : []
+  // install_{skill,mcp,plugin}: global opt-in toggle (default OFF). When off, the tools are not in ANY
+  // kit — an agent can't even propose an install. The red-floor classifier + install confirmation gate
+  // the calls when on (extension-install-design §5.2).
+  const install = AGENT_ROLE_IDS.has(roleId) && settingsService.get<boolean>('extensions.agentInstallEnabled') === true ? INSTALL_TOOLS : []
   // workflow_status (§7.5 batch C): the read-only run window — the ONLY standing workflow tool a role
   // has (launching stays behind the per-turn review closure, so watching ≠ starting).
   const wfStatus = AGENT_ROLE_IDS.has(roleId) ? [workflowStatusTool as unknown as Tool] : []
@@ -171,5 +183,5 @@ export function toolsForAgentRole(roleId: string): Tool[] {
   // studio_guide — the product-manual read (studio-guide-product-manual): same tier as the memory tools —
   // every agent role plus coordinator-direct (Danny is the front door for "what can Studio do?"), sub-agents
   // stripped in loop.ts. Pairs with the standing STUDIO_GUIDE_INDEX prompt section (buildAgentSystem).
-  return [...core, ...PLAN_TOOLS, askUserQuestionTool as unknown as Tool, rememberProjectMapTool as unknown as Tool, studioGuideTool as unknown as Tool, ...MEMORY_TOOLS, ...DISTILL_TOOLS, ...panel, ...visualize, ...preview, ...monitor, ...computerUse, ...wfStatus, ...mcpManager.toolsForRole(roleId), ...(skill ? [skill] : [])]
+  return [...core, ...PLAN_TOOLS, askUserQuestionTool as unknown as Tool, rememberProjectMapTool as unknown as Tool, studioGuideTool as unknown as Tool, ...MEMORY_TOOLS, ...DISTILL_TOOLS, ...install, ...panel, ...visualize, ...preview, ...monitor, ...computerUse, ...wfStatus, ...mcpManager.toolsForRole(roleId), ...(skill ? [skill] : [])]
 }

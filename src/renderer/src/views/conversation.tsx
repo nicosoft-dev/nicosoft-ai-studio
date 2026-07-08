@@ -251,7 +251,7 @@ export function ChatView({ expert, onOpenSettings, onBackToProject }: { expert: 
       {permission && activeConv ? (
         <ApprovalDialog
           prompt={permission}
-          onAllow={() => chat.respondPermission(activeConv, true)}
+          onAllow={(updatedInput) => chat.respondPermission(activeConv, true, updatedInput)}
           onDeny={() => chat.respondPermission(activeConv, false)}
         />
       ) : null}

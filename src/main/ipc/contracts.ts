@@ -1010,6 +1010,9 @@ export interface McpServerInput {
   scope?: McpScope
   enabled?: boolean
   secrets?: Record<string, string> // env (stdio) or headers (http) — written to keychain, never persisted
+  // Local-folder stdio server: the folder is copied into extensions/mcp/<id>/ and spawned from the copy
+  // (docs/extension-install-design.md §4.1). Ignored for http.
+  sourceDir?: string
 }
 
 export interface McpTestResult {
@@ -1017,6 +1020,25 @@ export interface McpTestResult {
   toolCount?: number
   error?: string
 }
+
+// Install confirmation preview (extension-install-design §5.4): the concrete consequences the dialog
+// shows for a proposed install, parsed MAIN-SIDE from the source (the renderer never reads disk).
+export type InstallPreview =
+  | { ok: false; error: string }
+  | { ok: true; kind: 'skill'; name: string; description: string; whenToUse: string; bodyPreview: string }
+  | { ok: true; kind: 'plugin'; name: string; version: string; skills: string[]; mcpServers: string[]; roles: string[]; hasHooks: boolean }
+  | {
+      ok: true
+      kind: 'mcp'
+      transport: McpTransport
+      command: string
+      args: string[]
+      url: string
+      sourceDir: string
+      sourceDirMissing: boolean
+      netWarning: boolean // remote http / net-fetching command (npx …) — the red line in the dialog
+      secretKeys: string[]
+    }
 
 export type SkillSource = 'imported' | 'builtin' | 'distilled'
 export type SkillScope = 'all' | string[] // 'all', or an explicit list of role ids

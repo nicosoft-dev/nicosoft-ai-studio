@@ -79,7 +79,15 @@ export function keyStatus(endpointId: string): 'ok' | 'missing' | 'unreadable' {
 }
 
 export function deleteApiKey(endpointId: string): void {
-  const map = load()
+  // Deleting from an UNAVAILABLE store (no userData — e.g. the bare-Node test harness) is a no-op:
+  // nothing is stored there, so there is nothing to delete. Writes (setApiKey) still fail loudly —
+  // fail-safe applies to the read/delete direction only, never to "I stored your secret".
+  let map: Record<string, string>
+  try {
+    map = load()
+  } catch {
+    return
+  }
   if (endpointId in map) {
     delete map[endpointId]
     save(map)

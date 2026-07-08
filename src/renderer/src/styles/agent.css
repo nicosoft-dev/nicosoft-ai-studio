@@ -429,6 +429,28 @@
 }
 .ap-deny kbd { background: var(--bg-3); }
 .ap-allow kbd { background: rgba(255, 255, 255, 0.18); }
+.ap-allow:disabled { opacity: 0.45; filter: none; cursor: default; }
+
+/* Install confirmation (extension-install §5.4) — reuses .approval-overlay / .approval-card. */
+.ap-install-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; min-width: 0; }
+.ap-install-label { font-size: 12px; color: var(--text-3); flex: none; }
+.ap-install-path { font-family: var(--mono); font-size: 12px; color: var(--text-2); background: var(--bg-2); border: 1px solid var(--border-1); border-radius: var(--r-sm); padding: 3px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; min-width: 0; }
+.ap-install-missing { font-size: 12px; color: var(--error); }
+.ap-install-pick { flex: none; font-size: 12px; color: var(--accent); padding: 3px 8px; border-radius: var(--r-sm); }
+.ap-install-pick:hover { background: var(--bg-3); }
+.ap-install-error { font-size: 12.5px; color: var(--error); margin-bottom: 10px; }
+.ap-install-body { margin-bottom: 4px; }
+.ap-install-line { font-size: 13px; color: var(--text-1); margin-bottom: 6px; }
+.ap-install-dim { color: var(--text-3); font-size: 12.5px; }
+.ap-install-pre { max-height: 140px; margin-bottom: 10px; }
+.ap-install-list { margin: 0 0 10px; padding-left: 18px; font-size: 12.5px; color: var(--text-2); }
+.ap-install-list li { margin-bottom: 2px; }
+.ap-install-net { font-size: 12.5px; color: var(--error); font-weight: 500; margin-bottom: 10px; }
+.ap-install-secrets { margin-bottom: 8px; }
+.ap-install-secret { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.ap-install-secret code { font-family: var(--mono); font-size: 12px; color: var(--text-2); flex: none; min-width: 120px; }
+.ap-install-secret input { flex: 1; font-size: 12.5px; background: var(--bg-2); border: 1px solid var(--border-1); border-radius: var(--r-sm); padding: 5px 8px; color: var(--text-1); }
+.ap-install-note { font-size: 11.5px; color: var(--text-3); margin: 4px 0 14px; }
 
 /* AskUserQuestion dialog — reuses .approval-overlay / .approval-card; multiple-choice options + Other. */
 .q-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }

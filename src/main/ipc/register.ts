@@ -15,6 +15,7 @@ import { registerTerminalHandlers } from './terminal.handler'
 import { registerMcpHandlers } from './mcp.handler'
 import { registerSkillHandlers } from './skill.handler'
 import { registerPluginHandlers } from './plugin.handler'
+import { registerExtensionInstallHandlers } from './extension-install.handler'
 import { registerApprovalHandlers } from './approval.handler'
 import { registerScheduledHandlers } from './scheduled.handler'
 import { registerMonitorHandlers } from './monitor.handler'
@@ -44,6 +45,7 @@ export function registerIpc(): void {
   registerMcpHandlers()
   registerSkillHandlers()
   registerPluginHandlers()
+  registerExtensionInstallHandlers()
   registerApprovalHandlers()
   registerScheduledHandlers()
   registerMonitorHandlers()

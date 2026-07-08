@@ -76,6 +76,7 @@ import type {
   McpServerDto,
   McpServerInput,
   McpTestResult,
+  InstallPreview,
   SkillDto,
   WorkflowDto,
   WorkflowLintDto,
@@ -499,6 +500,15 @@ const api = {
       ipcRenderer.invoke('skills:update', id, patch),
     remove: (id: string): Promise<void> => ipcRenderer.invoke('skills:remove', id),
     pickDir: (): Promise<string | null> => ipcRenderer.invoke('skills:pickDir')
+  },
+  // Install confirmation support (extension-install-design §5.4): main-side source preview, a neutral
+  // folder picker, and the one-shot secrets stash (values go straight to main; only the token returns).
+  extensions: {
+    previewInstall: (kind: string, payload: Record<string, unknown>): Promise<InstallPreview> =>
+      ipcRenderer.invoke('extensions:previewInstall', kind, payload),
+    pickDir: (): Promise<string | null> => ipcRenderer.invoke('extensions:pickDir'),
+    stashSecrets: (values: Record<string, string>): Promise<string> =>
+      ipcRenderer.invoke('extensions:stashSecrets', values)
   },
   workflows: {
     list: (): Promise<WorkflowDto[]> => ipcRenderer.invoke('workflows:list'),

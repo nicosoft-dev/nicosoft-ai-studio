@@ -431,7 +431,7 @@ export async function* runAgent(
   // another panel fan-out (its own fan-out bound, independent of Task nesting). ctx.panel is also nulled below.
   // ns_computer_use is stripped too: like preview_/studio_lens it's a conversation-level surface (one
   // physical desktop, one overlay banner) — a Task/async child must never race the parent for the mouse.
-  const subAgentTools = tools.filter((t) => t.name !== 'EnterPlanMode' && t.name !== 'ExitPlanMode' && t.name !== 'studio_lens' && !t.name.startsWith('preview_') && !t.name.startsWith('monitor_') && t.name !== 'schedule_wakeup' && t.name !== 'remember_project_map' && t.name !== 'remember' && t.name !== 'forget' && t.name !== 'recall_memory' && t.name !== 'distill_skill' && t.name !== 'studio_guide' && t.name !== 'ns_computer_use')
+  const subAgentTools = tools.filter((t) => t.name !== 'EnterPlanMode' && t.name !== 'ExitPlanMode' && t.name !== 'studio_lens' && !t.name.startsWith('preview_') && !t.name.startsWith('monitor_') && t.name !== 'schedule_wakeup' && t.name !== 'remember_project_map' && t.name !== 'remember' && t.name !== 'forget' && t.name !== 'recall_memory' && t.name !== 'distill_skill' && t.name !== 'studio_guide' && !t.name.startsWith('install_') && t.name !== 'ns_computer_use')
   const makeSpawnSubAgent =
     (signal: AbortSignal): SpawnSubAgent =>
     async ({ prompt, parentToolId, isolation }) => {
@@ -519,7 +519,7 @@ export async function* runAgent(
   // runChild that runs one of a child's turns with the sub-agent tool set — no Task, no nested agent_*
   // (depth 1) — threading the child's persisted readFileState/todos. Sub-agents get subAgents: undefined.
   if (ctx.subAgents instanceof AsyncSubAgentPool) {
-    const asyncChildTools = tools.filter((t) => t.name !== 'Task' && !t.name.startsWith('agent_') && t.name !== 'EnterPlanMode' && t.name !== 'ExitPlanMode' && t.name !== 'studio_lens' && !t.name.startsWith('preview_') && !t.name.startsWith('monitor_') && t.name !== 'schedule_wakeup' && t.name !== 'remember_project_map' && t.name !== 'remember' && t.name !== 'forget' && t.name !== 'recall_memory' && t.name !== 'distill_skill' && t.name !== 'studio_guide')
+    const asyncChildTools = tools.filter((t) => t.name !== 'Task' && !t.name.startsWith('agent_') && t.name !== 'EnterPlanMode' && t.name !== 'ExitPlanMode' && t.name !== 'studio_lens' && !t.name.startsWith('preview_') && !t.name.startsWith('monitor_') && t.name !== 'schedule_wakeup' && t.name !== 'remember_project_map' && t.name !== 'remember' && t.name !== 'forget' && t.name !== 'recall_memory' && t.name !== 'distill_skill' && t.name !== 'studio_guide' && !t.name.startsWith('install_'))
     const asyncWorktrees = new Map<string, ManagedWorktree>()
     const asyncWorktreeNames = new Map<string, string>()
     const asyncCwds = new Map<string, string>()

@@ -3,11 +3,13 @@
 // optional reason line, the tool input as a mono code block, and Deny (ghost, Esc) / Allow (accent,
 // Enter) buttons. Keyboard: Enter approves, Esc denies. Styles in styles/agent.css.
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactElement } from 'react'
 import type { PermissionPrompt } from '@/stores/chat'
 import { STUDIO_DATA } from '@/data/studio-data'
 import { useT } from '@/stores/locale'
+
+type InstallPreview = Awaited<ReturnType<typeof window.api.extensions.previewInstall>>
 
 // Render the tool input as a readable command / path block (full JSON only as a fallback).
 function formatInput(toolName: string, input: unknown): string {
@@ -40,11 +42,16 @@ export function ApprovalDialog({
   onDeny,
 }: {
   prompt: PermissionPrompt
-  onAllow: () => void
+  onAllow: (updatedInput?: Record<string, unknown>) => void
   onDeny: () => void
 }): ReactElement {
   const t = useT()
+  // Extension installs get their own variant with their own keys: Enter must NOT approve one — the
+  // whole point of the dialog is that the user reviews the concrete consequences (and may need to type
+  // secret values / pick a folder) before confirming.
+  const isInstall = prompt.toolName.startsWith('install_')
   useEffect(() => {
+    if (isInstall) return
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Enter') {
         e.preventDefault()
@@ -56,7 +63,9 @@ export function ApprovalDialog({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onAllow, onDeny])
+  }, [onAllow, onDeny, isInstall])
+
+  if (isInstall) return <InstallApproval prompt={prompt} onAllow={onAllow} onDeny={onDeny} />
 
   // ExitPlanMode gets its own variant: the model is presenting a plan for approval, not asking to run a
   // mutating tool. Show the plan (+ optional steps) with Approve / Revise instead of the generic prompt.
@@ -84,7 +93,7 @@ export function ApprovalDialog({
             <button className="ap-deny" onClick={onDeny}>
               {t('ap.revise')} <kbd>Esc</kbd>
             </button>
-            <button className="ap-allow" onClick={onAllow}>
+            <button className="ap-allow" onClick={() => onAllow()}>
               {t('ap.approveRun')} <kbd>↵</kbd>
             </button>
           </div>
@@ -110,8 +119,199 @@ export function ApprovalDialog({
           <button className="ap-deny" onClick={onDeny}>
             {t('ap.deny')} <kbd>Esc</kbd>
           </button>
-          <button className="ap-allow" onClick={onAllow}>
+          <button className="ap-allow" onClick={() => onAllow()}>
             {t('ap.allow')} <kbd>↵</kbd>
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const BoxIcon = (): ReactElement => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+    <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+    <line x1="12" y1="22.08" x2="12" y2="12" />
+  </svg>
+)
+
+// The install confirmation (extension-install-design §5.4) — the ONE gate every agent-proposed install
+// passes. Shows the CONCRETE consequences parsed main-side (skill fields / plugin component list / mcp
+// command + red network warning), lets the user swap or pick the source folder with the native picker,
+// and collects MCP secret VALUES here — they go straight to main (stashSecrets) and only an opaque
+// token rides the approval answer, so the model never sees them. Enter never approves; Esc denies.
+function InstallApproval({
+  prompt,
+  onAllow,
+  onDeny,
+}: {
+  prompt: PermissionPrompt
+  onAllow: (updatedInput?: Record<string, unknown>) => void
+  onDeny: () => void
+}): ReactElement {
+  const t = useT()
+  const input = (prompt.input ?? {}) as Record<string, unknown>
+  const kind = prompt.toolName // install_skill | install_mcp | install_plugin
+  const isMcp = kind === 'install_mcp'
+  const needsDir = kind === 'install_skill' || kind === 'install_plugin'
+  const [dir, setDir] = useState<string>(String((isMcp ? input.source_dir : input.dir_path) ?? ''))
+  const [preview, setPreview] = useState<InstallPreview | null>(null)
+  const [secrets, setSecrets] = useState<Record<string, string>>({})
+  const [busy, setBusy] = useState(false)
+  // sourceDir gate (design §5.3): when the user configured an extensions source directory, an agent-
+  // proposed folder OUTSIDE it must be re-picked by hand with the native picker — the picker click is
+  // the provable user authorization. Inside the source dir (or no source dir set) the prefill stands.
+  const [sourceDir, setSourceDir] = useState<string | null>(null)
+  const [pickedByUser, setPickedByUser] = useState(false)
+  useEffect(() => {
+    void window.api.settings.get<string>('extensions.sourceDir').then((v) => setSourceDir(v || null))
+  }, [])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        onDeny()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onDeny])
+
+  useEffect(() => {
+    let alive = true
+    const payload = isMcp ? { ...input, source_dir: dir } : { ...input, dir_path: dir }
+    void window.api.extensions.previewInstall(kind, payload).then((p) => {
+      if (alive) setPreview(p)
+    })
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- input is stable for a given prompt
+  }, [kind, dir])
+
+  const pick = async (): Promise<void> => {
+    const chosen = await window.api.extensions.pickDir()
+    if (chosen) {
+      setDir(chosen)
+      setPickedByUser(true)
+    }
+  }
+
+  const secretKeys = isMcp && preview?.ok && preview.kind === 'mcp' ? preview.secretKeys : []
+  const insideSourceDir = !sourceDir || !dir || dir === sourceDir || dir.startsWith(sourceDir.endsWith('/') ? sourceDir : sourceDir + '/')
+  const gateBlocked = !!dir && !insideSourceDir && !pickedByUser // outside the source dir + not hand-picked → re-pick
+  const canConfirm =
+    !busy && !gateBlocked && (needsDir ? !!dir && preview?.ok === true : preview?.ok === true && !(preview.kind === 'mcp' && preview.sourceDirMissing))
+
+  const confirm = async (): Promise<void> => {
+    if (!canConfirm) return
+    setBusy(true)
+    try {
+      const updated: Record<string, unknown> = { ...input }
+      if (isMcp) {
+        if (dir) updated.source_dir = dir
+        const values = Object.fromEntries(secretKeys.map((k) => [k, secrets[k] ?? '']).filter(([, v]) => v !== ''))
+        // Secret VALUES go straight to main — the approval answer carries only the one-shot token.
+        if (Object.keys(values).length) updated.secrets_token = await window.api.extensions.stashSecrets(values)
+      } else {
+        updated.dir_path = dir
+      }
+      onAllow(updated)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const roleName = STUDIO_DATA.EXPERT_BY_ID[prompt.roleId ?? 'engineer']?.name ?? prompt.roleId ?? 'Expert'
+  const titleKey = kind === 'install_skill' ? 'ap.install.skillTitle' : kind === 'install_plugin' ? 'ap.install.pluginTitle' : 'ap.install.mcpTitle'
+
+  return (
+    <div className="approval-overlay">
+      <div className="approval-card">
+        <div className="ap-head">
+          <span className="ap-icon">
+            <BoxIcon />
+          </span>
+          <span className="ap-title">
+            {roleName} {t(titleKey)}
+          </span>
+        </div>
+
+        {needsDir ? (
+          <div className="ap-install-row">
+            <span className="ap-install-label">{t('ap.install.source')}</span>
+            {dir ? <code className="ap-install-path" title={dir}>{dir}</code> : <span className="ap-install-missing">{t('ap.install.noFolder')}</span>}
+            <button className="ap-install-pick" onClick={() => void pick()}>
+              {dir ? t('ap.install.change') : t('ap.install.choose')}
+            </button>
+          </div>
+        ) : null}
+
+        {gateBlocked ? <div className="ap-install-error">{t('ap.install.outsideSource')}</div> : null}
+        {preview?.ok === false && dir ? <div className="ap-install-error">{preview.error}</div> : null}
+
+        {preview?.ok && preview.kind === 'skill' ? (
+          <div className="ap-install-body">
+            <div className="ap-install-line"><strong>{preview.name}</strong>{preview.description ? ` — ${preview.description}` : ''}</div>
+            {preview.whenToUse ? <div className="ap-install-line ap-install-dim">{preview.whenToUse}</div> : null}
+            <pre className="ap-input ap-install-pre">{preview.bodyPreview}</pre>
+          </div>
+        ) : null}
+
+        {preview?.ok && preview.kind === 'plugin' ? (
+          <div className="ap-install-body">
+            <div className="ap-install-line"><strong>{preview.name}</strong>{preview.version ? ` v${preview.version}` : ''}</div>
+            <div className="ap-install-line">{t('ap.install.pluginAdds')}</div>
+            <ul className="ap-install-list">
+              {preview.skills.map((s) => <li key={`s-${s}`}>{t('ap.install.itemSkill')}: {s}</li>)}
+              {preview.mcpServers.map((s) => <li key={`m-${s}`}>{t('ap.install.itemMcp')}: {s}</li>)}
+              {preview.roles.map((s) => <li key={`r-${s}`}>{t('ap.install.itemRole')}: {s}</li>)}
+              {preview.hasHooks ? <li>{t('ap.install.itemHooks')}</li> : null}
+            </ul>
+          </div>
+        ) : null}
+
+        {preview?.ok && preview.kind === 'mcp' ? (
+          <div className="ap-install-body">
+            <div className="ap-install-line ap-install-dim">{preview.transport === 'http' ? t('ap.install.mcpUrl') : t('ap.install.mcpCmd')}</div>
+            <pre className="ap-input ap-install-pre">{preview.transport === 'http' ? preview.url : [preview.command, ...preview.args].join(' ')}</pre>
+            {preview.sourceDir ? (
+              <div className="ap-install-row">
+                <span className="ap-install-label">{t('ap.install.source')}</span>
+                <code className="ap-install-path" title={preview.sourceDir}>{preview.sourceDir}</code>
+                {preview.sourceDirMissing ? <span className="ap-install-missing">{t('ap.install.srcMissing')}</span> : null}
+              </div>
+            ) : null}
+            {preview.netWarning ? <div className="ap-install-net">{t('ap.install.netWarn')}</div> : null}
+            {secretKeys.length ? (
+              <div className="ap-install-secrets">
+                <div className="ap-install-line ap-install-dim">{t('ap.install.secrets')}</div>
+                {secretKeys.map((k) => (
+                  <label className="ap-install-secret" key={k}>
+                    <code>{k}</code>
+                    <input
+                      type="password"
+                      value={secrets[k] ?? ''}
+                      onChange={(e) => setSecrets((s) => ({ ...s, [k]: e.target.value }))}
+                      placeholder={t('ap.install.secretValue')}
+                    />
+                  </label>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="ap-install-note">{t('ap.install.materialize')}</div>
+
+        <div className="ap-actions">
+          <button className="ap-deny" onClick={onDeny}>
+            {t('ap.deny')} <kbd>Esc</kbd>
+          </button>
+          <button className="ap-allow" onClick={() => void confirm()} disabled={!canConfirm}>
+            {t('ap.install.confirm')}
           </button>
         </div>
       </div>

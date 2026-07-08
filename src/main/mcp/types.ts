@@ -8,7 +8,10 @@ export const McpStdioConfig = z.object({
   type: z.literal('stdio'),
   command: z.string().min(1),
   args: z.array(z.string()).default([]),
-  env: z.record(z.string(), z.string()).optional()
+  env: z.record(z.string(), z.string()).optional(),
+  // Spawn dir. Set for materialized local-folder servers (extensions/mcp/<id>/) so relative paths in
+  // command/args resolve inside Studio's own copy instead of wherever the app process started.
+  cwd: z.string().optional()
 })
 export const McpHttpConfig = z.object({
   type: z.literal('http'),

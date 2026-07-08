@@ -17,6 +17,7 @@ export async function buildTransport(name: string, config: McpServerConfig): Pro
       command: config.command,
       args: config.args,
       env: { ...getDefaultEnvironment(), ...(config.env ?? {}) },
+      cwd: config.cwd,
       stderr: 'pipe'
     })
   }

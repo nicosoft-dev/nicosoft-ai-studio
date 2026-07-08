@@ -31,8 +31,17 @@ const GREEN_TOOLS = new Set([
 // Allowed but worth surfacing in chat: network reads + spawning a long-running process + sandboxed exec.
 const YELLOW_TOOLS = new Set(['WebFetch', 'WebSearch', 'start_service', 'code_execution', 'service_logs', 'list_services'])
 
+// Extension installs (docs/extension-install-design.md §5.2 rule 2): install_{skill,mcp,plugin} mutate
+// Studio's own capability surface (an MCP install spawns a process; a plugin adds roles), so they are a
+// RED floor — never auto-approved anywhere. Attended chats gate them through the interactive install
+// confirmation (the tool's 'ask' → the renderer's install dialog); unattended runs hard-deny here; and
+// execution.ts carves them out of bypass so even a replay/bypass run can never install silently.
+export const INSTALL_TOOL_NAMES = new Set(['install_skill', 'install_mcp', 'install_plugin'])
+
 export function classifyApproval(toolName: string, input: unknown, cwd: string): ApprovalVerdict {
   if (toolName === 'Bash') return classifyBashCommand(commandOf(input))
+  if (INSTALL_TOOL_NAMES.has(toolName))
+    return { zone: 'red', reason: 'extension install — needs the interactive install confirmation (attended chat)' }
   if (GREEN_TOOLS.has(toolName)) return { zone: 'green', reason: 'cwd-confined / internal' }
   if (YELLOW_TOOLS.has(toolName)) return { zone: 'yellow', reason: 'network read / process / sandboxed exec' }
   // MCP (mcp__server__tool) and any unknown tool: external, intent unknown → fail closed to yellow (logged),

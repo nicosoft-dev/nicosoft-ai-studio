@@ -3,6 +3,7 @@ import { SkillManager } from '../../skills/manager'
 import { loadSkillDir } from '../../skills/loader'
 import * as settingsService from '../settings.service'
 import { normalizeMemoryName as normalizeSlug } from '../memory/agent-memory'
+import { isMaterializedPath, materializeDirCopy, newExtensionId, removeMaterialized, writeSkillMirror } from './materialize'
 import type { SkillRow, SkillUpdatePatch } from '../../repos/skill.repo'
 import type { SkillDto, SkillInput } from '../../ipc/contracts'
 import type { LoadedSkill } from '../../skills/types'
@@ -49,32 +50,61 @@ function register(row: SkillRow): void {
   else manager.remove(row.id)
 }
 
+// Mirror a builtin/distilled skill to extensions/skills/<id>/SKILL.md (materialize decision 3): every
+// skill is visible on disk for backup/sync. The DB body stays the editing + runtime source of truth —
+// dir_path stays NULL so resolveBody keeps reading the DB; the mirror is a pure projection.
+function mirrorRow(row: SkillRow): void {
+  if (row.source === 'imported') return // imported skills' folder copy IS the on-disk form already
+  const fm = [
+    '---',
+    `name: ${row.name}`,
+    `description: ${row.description.replace(/\r?\n/g, ' ')}`,
+    ...(row.whenToUse ? [`when_to_use: ${row.whenToUse.replace(/\r?\n/g, ' ')}`] : []),
+    '---',
+    ''
+  ].join('\n')
+  writeSkillMirror(row.id, fm + (row.body ?? '') + '\n')
+}
+
 export function list(): SkillDto[] {
   return skillRepo.list().map(toDto)
 }
 
 export function add(input: SkillInput, ownerPluginId?: string): SkillDto {
   const row = input.source === 'imported' ? createImported(input, ownerPluginId) : createBuiltin(input, ownerPluginId)
+  mirrorRow(row)
   register(row)
   return toDto(row)
 }
 
-// Imported: parse the folder's SKILL.md (throws on missing file / empty body) and snapshot its fields.
+// Imported: parse the folder's SKILL.md (throws on missing file / empty body), MATERIALIZE the folder
+// into extensions/skills/<id>/ (design §4.3 — the install owns its payload; the user deleting their
+// download no longer breaks the skill), and snapshot its fields. A source already under extensions/
+// (a plugin-owned skill inside the plugin's copy) is referenced in place — never copied twice.
 function createImported(input: SkillInput, ownerPluginId?: string): SkillRow {
   if (!input.dirPath) throw new Error('Imported skill needs a folder path')
-  const parsed = loadSkillDir(input.dirPath)
-  return skillRepo.create({
-    name: input.name?.trim() || parsed.name,
-    description: input.description ?? parsed.description,
-    whenToUse: input.whenToUse ?? parsed.whenToUse,
-    source: 'imported',
-    body: parsed.body,
-    dirPath: input.dirPath,
-    allowedTools: parsed.allowedTools,
-    scope: input.scope ?? 'all',
-    enabled: input.enabled ?? true,
-    ownerPluginId: ownerPluginId ?? null
-  })
+  const parsed = loadSkillDir(input.dirPath) // validate the SOURCE before copying anything
+  const id = newExtensionId()
+  const materialize = !isMaterializedPath(input.dirPath)
+  const dirPath = materialize ? materializeDirCopy('skills', id, input.dirPath) : input.dirPath
+  try {
+    return skillRepo.create({
+      id,
+      name: input.name?.trim() || parsed.name,
+      description: input.description ?? parsed.description,
+      whenToUse: input.whenToUse ?? parsed.whenToUse,
+      source: 'imported',
+      body: parsed.body,
+      dirPath,
+      allowedTools: parsed.allowedTools,
+      scope: input.scope ?? 'all',
+      enabled: input.enabled ?? true,
+      ownerPluginId: ownerPluginId ?? null
+    })
+  } catch (e) {
+    if (materialize) removeMaterialized('skills', id) // never leave an orphan copy behind a failed insert
+    throw e
+  }
 }
 
 // Builtin: author the instructions directly in studio. Name + body are required.
@@ -102,8 +132,15 @@ export function update(id: string, patch: SkillInput): SkillDto | null {
   if (!existing) return null
   let repatch: SkillUpdatePatch
   if (existing.source === 'imported') {
-    // Re-parse the (possibly changed) folder so edits to SKILL.md are picked up on save.
-    const dirPath = patch.dirPath ?? existing.dirPath ?? ''
+    // Re-parse the (possibly changed) folder so edits to SKILL.md are picked up on save. Editing a
+    // materialized skill edits the INTERNAL copy (decision 5): same dirPath → re-read in place. Picking
+    // a NEW external folder is a re-import → re-materialize it into this skill's own extensions/ copy
+    // (the row keeps pointing inside .nsai). Legacy rows (external dirPath, no patch) stay untouched.
+    let dirPath = patch.dirPath ?? existing.dirPath ?? ''
+    if (patch.dirPath && patch.dirPath !== existing.dirPath && !isMaterializedPath(patch.dirPath)) {
+      loadSkillDir(patch.dirPath) // validate the new source before replacing the copy
+      dirPath = materializeDirCopy('skills', existing.id, patch.dirPath)
+    }
     const parsed = dirPath ? loadSkillDir(dirPath) : null
     repatch = {
       name: patch.name ?? parsed?.name,
@@ -127,6 +164,7 @@ export function update(id: string, patch: SkillInput): SkillDto | null {
   }
   const updated = skillRepo.update(id, repatch)
   if (!updated) return null
+  mirrorRow(updated)
   register(updated)
   return toDto(updated)
 }
@@ -175,6 +213,7 @@ export function distillUpsert(input: DistillInput): DistillOutcome {
       body
     })
     if (!updated) throw new Error('Skill update failed')
+    mirrorRow(updated)
     register(updated)
     return { kind: 'updated', name, active: updated.enabled }
   }
@@ -196,6 +235,7 @@ export function distillUpsert(input: DistillInput): DistillOutcome {
     originRole: input.originRole,
     originConvId: input.originConvId
   })
+  mirrorRow(row)
   register(row)
   return { kind: 'created', name, active: row.enabled }
 }
@@ -211,6 +251,9 @@ export function setEnabled(id: string, enabled: boolean): SkillDto | null {
 export function remove(id: string): void {
   manager.remove(id)
   skillRepo.remove(id)
+  // Drop the materialized payload (imported copy / builtin mirror). No-op for legacy external rows and
+  // for plugin-owned skills — their folder lives inside the PLUGIN's copy, removed by plugin uninstall.
+  removeMaterialized('skills', id)
 }
 
 // App boot: register every enabled skill so a role's agent sees it on the first run.

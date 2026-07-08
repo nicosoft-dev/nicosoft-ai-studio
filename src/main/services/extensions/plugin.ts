@@ -2,6 +2,7 @@ import * as pluginRepo from '../../repos/plugin.repo'
 import * as skillService from './skill'
 import * as mcpService from './mcp'
 import * as rolesService from '../roles.service'
+import { materializeDirCopy, newExtensionId, removeMaterialized } from './materialize'
 import { parsePlugin } from '../../plugins/manifest'
 import { flattenHookGroups } from '../../agent/hooks/config'
 import { hookRegistry, type MatchedHook } from '../../agent/hooks/registry'
@@ -71,18 +72,30 @@ export function registerPluginHooks(): void {
   hookRegistry.registerHookSource(pluginHooksFor)
 }
 
-// Install from a directory: parse the manifest, then register each skill/mcp/role as an owned resource
-// (owner_plugin_id = the plugin id). All-or-nothing — any failure rolls back every resource registered
-// so far plus the plugin row, then rethrows so the caller surfaces the reason.
+// Install from a directory: MATERIALIZE the whole plugin folder into extensions/plugins/<id>/ (design
+// §4.3 — the install owns its payload; skills inside it are referenced in place within the copy), parse
+// the manifest FROM THE COPY, then register each skill/mcp/role as an owned resource (owner_plugin_id =
+// the plugin id). All-or-nothing — any failure rolls back every resource registered so far plus the
+// plugin row AND the copy, then rethrows so the caller surfaces the reason.
 export async function install(dirPath: string): Promise<PluginDto> {
-  const parsed = parsePlugin(dirPath) // throws on bad manifest / no components
+  parsePlugin(dirPath) // validate the SOURCE (bad manifest / no components) before copying anything
+  const id = newExtensionId()
+  const matDir = materializeDirCopy('plugins', id, dirPath)
+  let parsed: ReturnType<typeof parsePlugin>
+  try {
+    parsed = parsePlugin(matDir) // re-parse from the copy so every component path points inside it
+  } catch (e) {
+    removeMaterialized('plugins', id)
+    throw e
+  }
   const m = parsed.manifest
   const row = pluginRepo.create({
+    id,
     name: m.name,
     description: m.description ?? '',
     version: m.version ?? '',
     author: m.author ?? '',
-    dirPath,
+    dirPath: matDir,
     bundles: [],
     enabled: true
   })
@@ -120,6 +133,7 @@ export async function install(dirPath: string): Promise<PluginDto> {
       }
     }
     pluginRepo.remove(row.id)
+    removeMaterialized('plugins', id)
     throw e
   }
   return toDto(pluginRepo.update(row.id, { bundles }) as PluginRow)
@@ -139,6 +153,7 @@ export async function uninstall(id: string): Promise<void> {
     }
   }
   pluginRepo.remove(id)
+  removeMaterialized('plugins', id) // drop the copy (owned skills' folders live inside it); legacy no-op
 }
 
 // Enable/disable: cascade onto the plugin's owned skills + MCP servers. Roles aren't toggled — custom

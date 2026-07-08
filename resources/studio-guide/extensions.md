@@ -30,3 +30,14 @@ Bundles that install a whole set at once — skills, MCP servers and roles.
 - **Generate Image** (`ns_generate_image`) — posters, illustrations, avatars and thumbnails; pick its default model; scoped to the Designer by default. The `ns_` prefix marks reusable built-ins any agent can be granted.
 - **Playwright** — a read-only status card for Tier 2 browser automation (package + Chromium browser state). Your engineering expert installs it on request; the Tier 1 preview tools work without it.
 - **Computer use** (`ns_computer_use`, macOS and Windows) — lets any expert see and control your computer: screenshot the screen (or stream it live to watch something change), read on-screen elements, click, type (any language), scroll, and drag across native apps, not just the browser. A global switch turns it on for every expert. It runs through a small native helper ("NicoSoft Computer Use"). On macOS it needs two permissions — Accessibility and Screen Recording — shown on the card (installed/running plus each permission's state) with an "Open settings" shortcut to grant them; Windows needs no per-app permission. While an expert is in control a banner shows on screen; press Esc to stop at any time.
+
+## Agent-assisted installs
+
+Experts can help you install extensions — but only with your hand on the gate.
+
+- Turn it on under Tools → **Agent extension installs** (a global switch, off by default). When on, every expert gains `install_skill`, `install_mcp` and `install_plugin`.
+- Agents **never download anything**. The extension must already be on your disk; the expert can tell you what to download and where to put it, then you point it at the folder. Optionally set an **Extensions source folder** on the card — a directory you drop downloads into so the expert can install from it directly.
+- **Every install pops a confirmation** showing exactly what would happen: a skill's name and instructions, a plugin's full component list (skills / MCP servers / roles), or the exact command an MCP server would run. You can swap the folder with the native picker right there. `npx`-style and remote HTTP MCP servers add a red warning that connecting fetches code from the network. Nothing installs until you press Install — pressing Enter never approves one.
+- MCP secrets are entered in that confirmation and go straight to the OS keychain; the expert only ever sees the key names, never the values.
+- What lands where: installs are copied into `~/.nsai/extensions/` (skills, plugins, and each MCP server's manifest), so the install keeps working even if you delete the original download. Removing the extension removes its copy.
+- Installs never run unattended: scheduled tasks and pipeline-dispatched experts get denied with guidance to ask you in a live chat.
