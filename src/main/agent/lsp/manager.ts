@@ -11,7 +11,9 @@ import { pathToFileURL, fileURLToPath } from 'node:url'
 import { dataDir } from '../../db/connection'
 import type { AskUser, PermissionMode, RequestPermission } from '../context'
 
-const lspRequire = createRequire(__dirname)
+// Anchor module resolution at this file in BOTH runtimes: the packaged main bundle is CJS (__dirname
+// exists), while the e2e harness imports this file as native ESM (only import.meta.url exists).
+const lspRequire = createRequire(typeof __dirname === 'string' ? __dirname : import.meta.url)
 const CACHE_FILE = 'lsp-availability.json'
 
 export interface LspLocation {

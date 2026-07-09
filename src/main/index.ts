@@ -328,6 +328,12 @@ app.whenReady().then(() => {
     (ev) => {
       for (const w of BrowserWindow.getAllWindows())
         if (!w.webContents.isDestroyed()) w.webContents.send('workflow:run:event', ev)
+    },
+    // The fire's own start/step/settle progress (design doc §5) — the workspace Tasks panel's Running
+    // section follows an in-flight scheduled run live and its History refreshes on settle.
+    (ev) => {
+      for (const w of BrowserWindow.getAllWindows())
+        if (!w.webContents.isDestroyed()) w.webContents.send('scheduled:run:event', ev)
     }
   )
   // Any task mutation (incl. a schedule_* tool, which bypasses the IPC handlers + their reload) → tell open

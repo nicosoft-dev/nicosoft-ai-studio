@@ -21,7 +21,9 @@ function fmtTask(t: ScheduledTask): string {
   const kind = t.recurring ? `recurring (${t.cron})` : 'one-shot'
   const chain = t.steps.map(stepLabel).join(' → ')
   const flags = `${t.durable ? ' · durable' : ''}${t.enabled ? '' : ' · disabled'}`
-  return `${t.id}  "${t.name}"  next=${when}  ${kind}${flags}  [${chain}] — ${t.steps[0]?.prompt.slice(0, 50) ?? ''}`
+  // A command step has no meaningful prompt (and durable tasks load from JSON unvalidated), so read it
+  // defensively — `?? ''` after .slice would still call .slice on an undefined prompt.
+  return `${t.id}  "${t.name}"  next=${when}  ${kind}${flags}  [${chain}] — ${(t.steps[0]?.prompt ?? '').slice(0, 50)}`
 }
 
 function stringResult(out: string, toolUseId: string): ToolResultBlock {

@@ -1,11 +1,12 @@
 // Scheduler engine (batch 2 / doc 28 §3.3). Lives in the Electron main process — the natural single daemon
 // (no multi-session lock needed, unlike a multi-session CLI). Event-armed (see arm() below): it fires any
 // due task then arms ONE setTimeout to the earliest future nextRunAt — no per-second scan. A task is a STEP
-// CHAIN (doc 28 §5.3): an ordered list of steps, each an agent run by its own role,
-// permissionMode='bypass' confined to the task's pre-authorized cwd (§5.1). Steps run sequentially in one
-// conversation; each step's final reply is injected into the next step's prompt — a cross-role pipeline
-// (Turing computes → Joan drafts → …). Recurring tasks reschedule, one-shots are removed after running. A task
-// already in flight is skipped (dedup).
+// CHAIN (doc 28 §5.3): an ordered list of steps — agent steps (expert/tool/email) each run by their own
+// role, permissionMode='bypass' confined to the task's pre-authorized cwd (§5.1); agent-FREE steps
+// (project / workflow / command) execute directly, no model, no tokens. Steps run sequentially in one
+// conversation; each step's output is injected into the next step's prompt — a cross-role pipeline
+// (a command gathers data → Turing analyzes → …). Recurring tasks reschedule, one-shots are removed after
+// running. A task already in flight is skipped (dedup).
 //
 // Event-armed, NOT polled: instead of scanning every second, the engine arms ONE setTimeout to the next
 // task's exact nextRunAt and re-arms on any store change (onChange) + after each fire. With no enabled task,
@@ -13,12 +14,17 @@
 // scheduled_tasks.json; it's picked up on the next arm (any task mutation, or within MAX_DELAY) — an
 // acceptable trade vs a 1s readFileSync forever.
 //
+// Every fire also records per-step outcomes (StepRunSummary — which step died and why, command exit codes
+// + output tails) into the TaskRun, and streams ScheduledRunEvents (start/step/settle) so the workspace
+// Tasks panel can show the run live (design doc §3.4/§5).
+//
 // Email/send sink is NOT here yet (doc 28 后续待完成 v2): a step that should email goes through an email MCP
 // tool or leaves a draft — Studio never sends mail itself.
 
 import { BrowserWindow } from 'electron'
 import { scheduledTaskStore } from './store'
-import type { ScheduledTask, TaskStep, WorkflowRunEvent } from '../../ipc/contracts'
+import { runCommandStep, tailCap } from './command-step'
+import type { ScheduledRunEvent, ScheduledTask, StepRunSummary, TaskStep, WorkflowRunEvent } from '../../ipc/contracts'
 import { run } from '../../services/agent.service'
 import * as workflowService from '../../services/workflow/service'
 import type { AgentCallbacks } from '../../services/agent-dispatch'
@@ -46,6 +52,42 @@ const HEADLESS_CB: AgentCallbacks = {
 
 const DEFAULT_EXECUTOR = 'scheduler' // role for non-expert steps (tool/email) and as a fallback executor
 
+const TAIL_CAP = 2048 // persisted per-step output tail (§3.4) — the tail is where errors live
+const tailOf = (s: string): string | undefined => tailCap(s, TAIL_CAP) || undefined
+
+// A user Stop (Tasks panel / stopRun → chain AbortController) throws this to end the chain. It is distinct
+// from a step FAILURE (bad command, thrown role): a stop is intentional, records as 'stopped', outranks a
+// command step's onFailure ('continue' must not swallow a deliberate cancel), and preserves a one-shot
+// (fire()'s finally) so the user can fix and re-run it.
+class ChainStopped extends Error {
+  constructor(where: string) {
+    super(`${where}: stopped`)
+    this.name = 'ChainStopped'
+  }
+}
+
+// What names a step best in run history: role for agent steps (expert falls back to the same DEFAULT_EXECUTOR
+// it actually RUNS under, so the label matches the executor), workflow name, the command's head line.
+function summaryLabel(step: TaskStep): string | undefined {
+  switch (step.kind) {
+    case 'expert':
+    case 'tool':
+    case 'email':
+      return step.roleId ?? DEFAULT_EXECUTOR
+    case 'workflow':
+      return step.workflowId ? (workflowService.get(step.workflowId)?.name ?? 'workflow') : 'workflow'
+    case 'project':
+      return step.action ?? 'create'
+    case 'command': {
+      const head =
+        (step.mode ?? 'shell') === 'program'
+          ? [step.program ?? '', ...(step.args ?? [])].join(' ')
+          : (step.command ?? '').split('\n')[0]
+      return head.trim().slice(0, 80) || undefined
+    }
+  }
+}
+
 // email step → a single agent instruction: send via the connected email MCP, or output a draft if none
 // (Studio never sends mail itself).
 function emailInstruction(step: TaskStep): string {
@@ -56,10 +98,28 @@ function emailInstruction(step: TaskStep): string {
   )
 }
 
+// The instruction a tool/email agent step runs; an expert step just uses its prompt. Shared by the live
+// (inject) and headless (run) paths so the framing never drifts between them.
+function agentInstruction(step: TaskStep): string {
+  return step.kind === 'tool'
+    ? `Use your available MCP tools to do the following.\n\n${step.prompt}`
+    : step.kind === 'email'
+      ? emailInstruction(step)
+      : step.prompt
+}
+
 export interface FiredInfo {
   task: ScheduledTask
   convId?: string // undefined on failure
   ok: boolean
+}
+
+// What a fire settles to — fireNow (the /schedule <id> manual trigger) returns this to the renderer so the
+// command receipt can render the outcome without waiting on broadcast events.
+export interface FireOutcome {
+  ok: boolean
+  convId?: string
+  error?: string
 }
 
 function errorMessage(e: unknown): string {
@@ -69,8 +129,10 @@ function errorMessage(e: unknown): string {
 class SchedulerEngine {
   private timer?: ReturnType<typeof setTimeout>
   private running = new Set<string>() // task ids currently dispatched — dedup so a slow run can't double-fire
+  private controllers = new Map<string, AbortController>() // one abort scope per in-flight fire (Stop button)
   private onFire?: (info: FiredInfo) => void
   private onWorkflowEvent?: (ev: WorkflowRunEvent) => void
+  private onRunEvent?: (ev: ScheduledRunEvent) => void
   private unsubscribe?: () => void
   private started = false
   private arming = false // re-entrancy guard so a burst of store changes coalesces into one re-arm
@@ -78,12 +140,18 @@ class SchedulerEngine {
 
   // onWorkflowEvent: sink for a `workflow` step's live run events — index.ts wires it to the same
   // `workflow:run:event` broadcast the IPC handler uses, so an open run panel follows a scheduled run
-  // too. Absent (headless harness) the run still executes; events just aren't mirrored anywhere.
-  start(onFire?: (info: FiredInfo) => void, onWorkflowEvent?: (ev: WorkflowRunEvent) => void): void {
+  // too. onRunEvent: sink for the fire's own start/step/settle progress (workspace Tasks panel §5).
+  // Absent (headless harness) the run still executes; events just aren't mirrored anywhere.
+  start(
+    onFire?: (info: FiredInfo) => void,
+    onWorkflowEvent?: (ev: WorkflowRunEvent) => void,
+    onRunEvent?: (ev: ScheduledRunEvent) => void,
+  ): void {
     if (this.started) return
     this.started = true
     this.onFire = onFire
     this.onWorkflowEvent = onWorkflowEvent
+    this.onRunEvent = onRunEvent
     // Re-arm whenever the task set changes (create/delete/setEnabled/update all emit onChange). No polling.
     this.unsubscribe = scheduledTaskStore.onChange(() => this.requestArm())
     this.requestArm()
@@ -139,108 +207,209 @@ class SchedulerEngine {
     }
   }
 
-  private async fire(task: ScheduledTask, now: number): Promise<void> {
+  // §4.5 manual trigger (/schedule <id|name> → scheduled:fireNow): the SAME fire path (dedup, per-step
+  // records, events) with the SCHEDULE LEFT ALONE — no reschedule (nextRunAt keeps its slot; an interval
+  // task's phase never shifts because someone ran it early). Two guards are DELIBERATELY skipped on this
+  // path: (1) auto-expiry — a >7-day-old recurring task is removed by the TIMER path as a runaway guard, but
+  // typing its id is explicit human intent that the task is still wanted, so a manual run honors it rather
+  // than deleting it; (2) the enabled check — a DISABLED task may fire (crontab "run now" semantics). A
+  // one-shot deletes only on SUCCESS here (fire()'s finally), not on a failed/stopped test. Returns the
+  // outcome instead of throwing so the /schedule receipt can render it.
+  async fireNow(id: string): Promise<FireOutcome> {
+    const task = scheduledTaskStore.get(id)
+    if (!task) return { ok: false, error: `No scheduled task with id "${id}".` }
+    if (this.running.has(task.id)) return { ok: false, error: `"${task.name}" is already running.` }
+    return this.fire(task, Date.now(), 'manual')
+  }
+
+  // Abort an in-flight fire (Tasks panel Stop): the chain's AbortController reaches the CURRENT step if that
+  // step consumes the signal — an agent step's run() aborts, a command step's process tree is killed. A
+  // workflow/project step in flight does not take a signal, so it runs to completion; the abort is still
+  // honored between steps (runChain checks signal.aborted before each step), so the chain stops promptly
+  // rather than continuing to the next step. Returns false when the task isn't running.
+  stopRun(taskId: string): boolean {
+    const c = this.controllers.get(taskId)
+    if (!c) return false
+    c.abort()
+    return true
+  }
+
+  private async fire(task: ScheduledTask, now: number, trigger: 'schedule' | 'manual' = 'schedule'): Promise<FireOutcome> {
     this.running.add(task.id)
     // Advance the schedule BEFORE running so the next tick can't re-fire a recurring task; a one-shot keeps its
-    // slot and is removed below once it has run (success or failure). reschedule() also enforces the
-    // recurring-task auto-expiry (reference `recurringMaxAgeMs`): if the task is older than the max age it is
-    // removed and returns true — in that case we must NOT run it, just free the slot and re-arm.
-    if (scheduledTaskStore.reschedule(task.id, now)) {
+    // slot and is removed below once it has run. reschedule() also enforces the recurring-task auto-expiry
+    // (reference `recurringMaxAgeMs`): if the task is older than the max age it is removed and returns true —
+    // in that case we must NOT run it, just free the slot and re-arm. A MANUAL fire skips both (§4.5): the
+    // schedule is not consumed and expiry is a timer-path concern. reschedule runs synchronously before the
+    // first await, so a re-entrant arm() can't re-fire the same recurring task.
+    if (trigger === 'schedule' && scheduledTaskStore.reschedule(task.id, now)) {
       console.warn(`[scheduler] expired recurring task ${task.id} ("${task.name}") — older than 7 days, removed`)
       this.running.delete(task.id)
       this.requestArm()
-      return
+      return { ok: false, error: 'expired' }
+    }
+    const controller = new AbortController() // one abort scope for the whole chain (Stop button / stopRun)
+    this.controllers.set(task.id, controller)
+    const startedAt = Date.now()
+    const stepResults: StepRunSummary[] = []
+    let runConvId: string | undefined
+    // §5 anchoring: an agent-created task shows in its creator's conversation; a user-created one in the
+    // conversation the chain runs in (known once the chain resolves it — '' until then, renderer ignores).
+    const emit = (ev: Pick<ScheduledRunEvent, 'phase'> & Partial<ScheduledRunEvent>): void => {
+      this.onRunEvent?.({
+        taskId: task.id,
+        name: task.name,
+        firedAt: now,
+        trigger,
+        anchorConvId: task.creatorConvId ?? runConvId ?? '',
+        runConvId,
+        stepCount: task.steps.length,
+        ...ev,
+      })
     }
     let convId: string | undefined
     let ok = false
+    let stopped = false
+    let errMsg: string | undefined
     try {
-      convId = await this.runChain(task)
+      convId = await this.runChain(
+        task,
+        controller.signal,
+        stepResults,
+        (cid) => {
+          runConvId = cid
+          emit({ phase: 'start' })
+        },
+        (i, kind) => emit({ phase: 'step', stepIndex: i, kind }),
+      )
       ok = true
-      scheduledTaskStore.recordRun(task.id, { firedAt: now, result: 'ok', convId }, now)
+      scheduledTaskStore.recordRun(
+        task.id,
+        { firedAt: now, result: 'ok', convId, durationMs: Date.now() - startedAt, trigger, steps: stepResults },
+        now,
+      )
     } catch (e) {
-      // A failed run must NOT vanish silently — record it so the Scheduled page shows the failure + reason.
-      scheduledTaskStore.recordRun(task.id, { firedAt: now, result: 'error', error: errorMessage(e) }, now)
+      // A failed run must NOT vanish silently — record it (with the step trail + the conversation if the
+      // chain got far enough to have one) so the Scheduled page shows the failure + reason. A user Stop is
+      // recorded as 'stopped' rather than the raw chain error, so history distinguishes cancel from failure.
+      stopped = e instanceof ChainStopped
+      errMsg = stopped ? 'stopped' : errorMessage(e)
+      scheduledTaskStore.recordRun(
+        task.id,
+        { firedAt: now, result: 'error', error: errMsg, convId: runConvId, durationMs: Date.now() - startedAt, trigger, steps: stepResults },
+        now,
+      )
     } finally {
-      if (!task.recurring) scheduledTaskStore.delete(task.id) // one-shot done (ok or error) → remove
+      // Consume a one-shot (remove it) once it has run — but NOT when the user stopped it (preserve so they
+      // can fix + re-run), and for a MANUAL fire only on success (§4.5: a failed /schedule <id> test must not
+      // destroy the pending scheduled run). A timer fire consumes it on completion either way (its moment has
+      // passed — keeping it would leave a dead past-nextRunAt entry).
+      if (!task.recurring && !stopped && (trigger === 'schedule' || ok)) scheduledTaskStore.delete(task.id)
+      this.controllers.delete(task.id)
       this.running.delete(task.id)
+      emit({ phase: 'settle', ok })
       this.requestArm() // run settled (slot freed / one-shot removed / recurring rescheduled) → re-arm for the next occurrence
     }
     this.onFire?.({ task, convId, ok }) // always notify (success or failure) so the page refreshes
+    return { ok, convId: convId ?? runConvId, error: errMsg }
   }
 
   // Run a task's step chain sequentially in one conversation, dispatching each step on its kind (doc 28 §5.3):
-  // expert/tool/email execute as one agent turn (runAgentStep), project hits projectService directly. Each
-  // step's output is piped into the next step's prompt so roles hand off work (Turing computes → Joan drafts).
-  // fire() swallows a throw, so a misconfigured step just stops that task.
-  private async runChain(task: ScheduledTask): Promise<string> {
+  // expert/tool/email execute as one agent turn (runAgentStep — headless — or an injection into a live
+  // session); project/workflow/command execute directly (agent-free — runAgentFreeStep, shared by both the
+  // live and headless paths so they never drift). Each headless step's output pipes into the next step's
+  // prompt (a command gathers → Turing analyzes). Every step records a StepRunSummary (§3.4) BEFORE any throw
+  // so a failed chain still shows its partial trail; a user Stop throws ChainStopped between steps so an
+  // aborted chain ends promptly. fire() swallows the throw.
+  private async runChain(
+    task: ScheduledTask,
+    signal: AbortSignal,
+    results: StepRunSummary[],
+    onConv: (convId: string) => void,
+    onStep: (i: number, kind: TaskStep['kind']) => void,
+  ): Promise<string> {
     const primaryRoleId = task.steps[0]?.roleId ?? DEFAULT_EXECUTOR
     const convId =
       task.convId ?? conversationService.create({ kind: 'chat', primaryRoleId, title: `Scheduled · ${task.name}` }).id
 
     // Self-rhythm reuse (batch 6): if the task is bound to a conversation that has a LIVE session, DELIVER its
-    // steps into that session via the unified bus instead of starting a fresh headless run — which would race
-    // the live run (two runs streaming one conv). Each step keeps the SAME per-kind handling as the headless
-    // path so nothing is silently dropped: agent steps (expert/tool/email) are injected with their own role +
-    // the kind's instruction framing; a `project` step runs its agent-independent side effect directly; each
-    // step's role binding is validated (a misbound role still surfaces an error). The ONE feature not preserved
-    // is sequential output-piping (an injected step can't feed the next) — an accepted tradeoff for reusing the
-    // live session + its Preview. Delivery is async (the live agent acts on its own schedule). When the conv is
-    // NOT live, fall through to the headless chain below (still on the same convId).
-    if (task.convId && sessionBus.hasDelivery(task.convId)) {
-      for (const [i, step] of task.steps.entries()) {
-        if (step.kind === 'project') {
-          await this.runProjectStep(step, '') // agent-independent: must run regardless of liveness
-          continue
-        }
-        if (step.kind === 'workflow') {
-          // A workflow is its own standalone run (hidden conv + run row) — like `project`, it executes
-          // headlessly regardless of the target conversation's liveness; nothing to inject.
-          await this.runWorkflowStep(step, `scheduled task ${task.id} step ${i + 1} (workflow)`, task)
-          continue
-        }
-        // Deliver into the LIVE session, which already runs under its OWN validated role/endpoint/key. We must
-        // NOT re-validate (or use) the step's role binding here: that gate belongs to the headless run() path
-        // below, which actually starts a run under that binding. Validating it here checks a role the injected
-        // note never executes as — and for a tool/email step (no roleId → 'scheduler') it would throw a false
-        // "not bound"/"no api key" mid-loop, AFTER earlier steps were already injected, recording a partially
-        // applied chain as a failure. The roleId still rides along so collab can route the note to the matching
-        // live expert (solo resumes under the conv's original role and ignores it).
-        const text =
-          step.kind === 'tool' ? `Use your available MCP tools to do the following.\n\n${step.prompt}`
-          : step.kind === 'email' ? emailInstruction(step)
-          : step.prompt
-        sessionBus.inject(task.convId, { text, source: `schedule:${task.id}`, priority: 'later', roleId: step.roleId })
-      }
-      return task.convId
-    }
-
-    const controller = new AbortController() // one abort scope for the whole chain
-    let prior = '' // previous step's output — injected into the next step
+    // agent steps into that session via the unified bus instead of starting a fresh headless run — which would
+    // race the live run (two runs streaming one conv). Agent-FREE steps (project/workflow/command) run their
+    // side effect directly regardless of liveness (runAgentFreeStep — the SAME code the headless path uses, so
+    // the two never drift). Agent steps are injected with their own role + the kind's instruction framing; we
+    // must NOT re-validate the step's role binding here (that gate belongs to the headless run() path that
+    // actually starts a run under it — validating a role the injected note never executes as would throw a
+    // false "not bound" mid-chain). The ONE feature not preserved is sequential output-piping (an injected
+    // step can't feed the next). When the conv is NOT live, fall through to the headless chain below.
+    const live = !!task.convId && sessionBus.hasDelivery(task.convId)
+    onConv(live ? task.convId! : convId)
+    let prior = '' // previous step's output — piped into the next step (headless path only)
     for (let i = 0; i < task.steps.length; i++) {
       const step = task.steps[i]
       const where = `scheduled task ${task.id} step ${i + 1} (${step.kind})`
-      const role = step.roleId ?? DEFAULT_EXECUTOR
-      switch (step.kind) {
-        case 'expert':
-          prior = await this.runAgentStep(where, role, step.prompt, prior, task, convId, controller.signal)
-          break
-        case 'tool':
-          prior = await this.runAgentStep(where, role, `Use your available MCP tools to do the following.\n\n${step.prompt}`, prior, task, convId, controller.signal)
-          break
-        case 'email':
-          prior = await this.runAgentStep(where, role, emailInstruction(step), prior, task, convId, controller.signal)
-          break
-        case 'project':
-          prior = await this.runProjectStep(step, prior)
-          break
-        case 'workflow':
-          // Params are the workflow's explicit contract — `prior` is NOT injected into them (a saved
-          // script is a pinned path, not a prompt). Its return text becomes the next step's prior.
-          prior = await this.runWorkflowStep(step, where, task)
-          break
+      if (signal.aborted) throw new ChainStopped(where) // a Stop between steps ends the chain immediately
+      onStep(i, step.kind)
+      const t0 = Date.now()
+      const label = summaryLabel(step)
+      const isAgentKind = step.kind === 'expert' || step.kind === 'tool' || step.kind === 'email'
+
+      if (!isAgentKind) {
+        // project / workflow / command — identical in both paths (live has no prior to pipe).
+        prior = await this.runAgentFreeStep(step, task, where, live ? '' : prior, signal, results, t0, label)
+        continue
+      }
+
+      if (live) {
+        sessionBus.inject(task.convId!, { text: agentInstruction(step), source: `schedule:${task.id}`, priority: 'later', roleId: step.roleId })
+        results.push({ kind: step.kind, label, ok: true, ms: Date.now() - t0, outputTail: 'delivered into the live session' })
+        continue
+      }
+
+      // Headless agent step — its output pipes into the next step. Record the summary before any rethrow.
+      try {
+        prior = await this.runAgentStep(where, step.roleId ?? DEFAULT_EXECUTOR, agentInstruction(step), prior, task, convId, signal)
+        results.push({ kind: step.kind, label, ok: true, ms: Date.now() - t0, outputTail: tailOf(prior) })
+      } catch (e) {
+        results.push({ kind: step.kind, label, ok: false, ms: Date.now() - t0, outputTail: tailOf(errorMessage(e)) })
+        throw e
       }
     }
-    return convId
+    return live ? task.convId! : convId
+  }
+
+  // One agent-free step (project / workflow / command), shared by the live + headless paths so they can
+  // never drift. Records the StepRunSummary before any throw, and returns the output for piping (headless).
+  // A command is the only kind whose failure is a RESULT, not a throw: a user Stop (res.aborted) ends the
+  // chain regardless of onFailure ('continue' must not swallow a deliberate cancel); a non-zero exit / timeout
+  // stops the chain only when onFailure is 'stop' (default), otherwise the output still pipes onward.
+  private async runAgentFreeStep(
+    step: TaskStep,
+    task: ScheduledTask,
+    where: string,
+    prior: string,
+    signal: AbortSignal,
+    results: StepRunSummary[],
+    t0: number,
+    label: string | undefined,
+  ): Promise<string> {
+    if (step.kind === 'command') {
+      const res = await runCommandStep(step, task.cwd, signal)
+      results.push({ kind: step.kind, label, ok: res.ok, exitCode: res.exitCode ?? undefined, ms: Date.now() - t0, outputTail: tailOf(res.output) })
+      if (res.aborted) throw new ChainStopped(where)
+      if (!res.ok && (step.onFailure ?? 'stop') === 'stop') {
+        throw new Error(`${where}: command ${res.timedOut ? 'timed out' : 'failed'}${res.exitCode !== null ? ` (exit ${res.exitCode})` : ''}`)
+      }
+      return res.output
+    }
+    try {
+      // project: create/advance directly. workflow: params are the pinned contract — `prior` is NOT injected.
+      const out = step.kind === 'workflow' ? await this.runWorkflowStep(step, where, task) : await this.runProjectStep(step, prior)
+      results.push({ kind: step.kind, label, ok: true, ms: Date.now() - t0, outputTail: tailOf(out) })
+      return out
+    } catch (e) {
+      results.push({ kind: step.kind, label, ok: false, ms: Date.now() - t0, outputTail: tailOf(errorMessage(e)) })
+      throw e
+    }
   }
 
   // A `workflow` step runs the SAVED workflow through the same service gate as every other entry point

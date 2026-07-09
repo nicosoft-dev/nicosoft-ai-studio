@@ -1304,8 +1304,13 @@ export interface ProjectServiceEvent {
 //   email   — an agent turn that sends via a connected email MCP, or leaves a draft if none (Studio never
 //             sends mail itself); to/subject set the envelope, prompt + prior output the body
 //   project — create a new Project or advance an existing one (projectService) — no agent
+//   command — a direct spawn (shell command or program + args) — no agent, no model, no tokens
 // Every kind's output is captured and piped into the next step's input (cross-role pipeline, doc 28 §5.3).
-export type StepKind = 'expert' | 'tool' | 'email' | 'project' | 'workflow'
+export type StepKind = 'expert' | 'tool' | 'email' | 'project' | 'workflow' | 'command'
+
+// Which shell a command step's `shell` mode runs under. 'auto' = the user's login shell on macOS/Linux
+// (cmd on Windows); an explicit pick that doesn't exist on the current platform falls back to 'auto'.
+export type CommandShell = 'auto' | 'zsh' | 'bash' | 'sh' | 'powershell' | 'cmd'
 
 export interface TaskStep {
   kind: StepKind
@@ -1317,6 +1322,20 @@ export interface TaskStep {
   projectId?: string // project (advance): target project id
   workflowId?: string // workflow: the saved workflow to run (trigger='scheduled'); prompt is unused
   workflowParams?: Record<string, string | number | boolean> // workflow: run parameters (defaults apply for the rest)
+  // command (design doc §3.1) — a raw spawn NOT confined to the working directory (an agent step's tools
+  // are fenced by confineReal; a spawned process can't be — the UI states this honestly). `shell` mode
+  // hands `command` to a LOGIN shell (-lc: an Electron GUI process doesn't inherit the user's PATH; the
+  // login shell re-derives it); `program` mode spawns `program` + `args` verbatim — no shell parsing, so
+  // paths with spaces are safe and there is no injection surface.
+  mode?: 'shell' | 'program' // default 'shell'
+  command?: string // shell mode: the command line (may be multi-line)
+  program?: string // program mode: absolute path of the executable
+  args?: string[] // program mode: arguments, passed verbatim
+  shell?: CommandShell // shell mode: default 'auto'
+  stepCwd?: string // working dir override; default = the task's cwd, else the home dir
+  timeoutSec?: number // default 600; on expiry the whole process TREE is killed
+  onFailure?: 'stop' | 'continue' // non-zero exit: 'stop' (default) aborts the chain, 'continue' carries on
+  env?: Record<string, string> // extra environment variables merged over the inherited ones
 }
 
 export interface ScheduledTask {
@@ -1338,13 +1357,28 @@ export interface ScheduledTask {
   runs?: TaskRun[] // recent fire results, newest first (capped) — drives the Scheduled page's status + history
 }
 
+// One step's outcome inside a TaskRun (design doc §3.4) — makes a mid-chain failure visible (WHICH step
+// died and why, not just one error string) and carries a command step's exit code + output tail. Recorded
+// for every kind so the Scheduled page / Tasks panel can expand a run into its steps.
+export interface StepRunSummary {
+  kind: StepKind
+  label?: string // whatever names the step best: role id, workflow name, command head
+  ok: boolean
+  exitCode?: number // command: the process exit code (absent when the spawn itself failed)
+  ms: number
+  outputTail?: string // last ~2KB of the step's output (command stdout/stderr; other kinds' piped text)
+}
+
 // One past execution of a scheduled task — when it fired and how it went. Powers the Scheduled page's history
 // + the link to the conversation the chain ran in, and makes a silent background failure visible.
 export interface TaskRun {
   firedAt: number
   result: 'ok' | 'error'
-  convId?: string // the conversation the chain ran in (on success)
+  convId?: string // the conversation the chain ran in (recorded even on failure once the chain resolved it)
   error?: string // failure reason (on error)
+  durationMs?: number // wall time of the whole chain
+  trigger?: 'schedule' | 'manual' // manual = fired via /schedule <id> (fireNow); absent/schedule = the timer
+  steps?: StepRunSummary[] // per-step outcomes, in chain order (§3.4); partial when the chain stopped early
 }
 
 export interface CreateTaskInput {
@@ -1365,6 +1399,24 @@ export interface ScheduledFiredEvent {
   taskId: string
   convId?: string // undefined on failure
   ok: boolean
+}
+
+// Live progress of ONE scheduled-task fire (engine → renderer on scheduled:run:event). Drives the workspace
+// Tasks panel's Running section (design doc §5): 'start' registers the run, 'step' advances the step readout,
+// 'settle' closes it. anchorConvId = where the run SHOWS: the creating role's conversation for agent-created
+// tasks (§7.5 precedent), else the conversation the chain runs in.
+export interface ScheduledRunEvent {
+  taskId: string
+  name: string
+  anchorConvId: string
+  runConvId?: string // the conversation the chain executes in (known from 'start' onwards)
+  firedAt: number
+  trigger: 'schedule' | 'manual'
+  phase: 'start' | 'step' | 'settle'
+  stepCount: number // total steps in the chain — supplied on every phase (drives the "k/n" readout)
+  stepIndex?: number // 'step': 0-based index of the step that is STARTING
+  kind?: StepKind // 'step': the starting step's kind
+  ok?: boolean // 'settle'
 }
 
 // A running session Monitor (services/monitor.service.ts) surfaced to the Scheduled page's "Running monitors"

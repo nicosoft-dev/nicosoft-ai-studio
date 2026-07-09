@@ -99,6 +99,7 @@ import type {
   ScheduledTask,
   CreateTaskInput,
   ScheduledFiredEvent,
+  ScheduledRunEvent,
   MonitorInfoDto,
   VerifyProgressEvent,
   VerifyToolEvent,
@@ -406,8 +407,12 @@ const api = {
     setEnabled: (id: string, enabled: boolean): Promise<boolean> =>
       ipcRenderer.invoke('scheduled:setEnabled', id, enabled),
     remove: (id: string): Promise<boolean> => ipcRenderer.invoke('scheduled:delete', id),
+    fireNow: (id: string): Promise<{ ok: boolean; convId?: string; error?: string }> =>
+      ipcRenderer.invoke('scheduled:fireNow', id),
+    stopRun: (id: string): Promise<boolean> => ipcRenderer.invoke('scheduled:stopRun', id),
     onFired: (cb: (d: ScheduledFiredEvent) => void): (() => void) => agentListen('scheduled:fired', cb),
-    onChanged: (cb: () => void): (() => void) => agentListen('scheduled:changed', cb)
+    onChanged: (cb: () => void): (() => void) => agentListen('scheduled:changed', cb),
+    onRunEvent: (cb: (ev: ScheduledRunEvent) => void): (() => void) => agentListen('scheduled:run:event', cb)
   },
 
   monitor: {
