@@ -1067,6 +1067,23 @@
 .rm-type { font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-4); }
 .rm-empty { padding: 8px 9px; font-size: 12px; color: var(--text-4); }
 
+/* SelectMenu (primitives) — the shared custom select: a skinned trigger + the standard .row-menu,
+   portaled to <body>. .sm-float outranks the dialog overlay (z 100); .sm-menu bounds long lists.
+   The trigger base is specificity-0 (:where) so it only neutralizes the button UA styles — the skin
+   class each call site passes (input / wf-cell / asg-filter-sel, earlier in the cascade) keeps full
+   control of font, colors, border and padding. */
+:where(.sel-trigger) {
+  display: inline-flex; align-items: center; justify-content: space-between; gap: 6px;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+  background: none; border: none; padding: 0;
+}
+.sel-trigger:disabled { opacity: 0.55; cursor: default; }
+.sel-trigger .sel-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sel-trigger > svg { flex: 0 0 auto; color: var(--text-4); }
+.sm-float-bg { z-index: 300; }
+.sm-float { z-index: 301; }
+.sm-menu { max-height: 320px; overflow-y: auto; }
+
 /* composer-controls dropdowns open upward (composer sits at the bottom); model menu adds a search box */
 .row-menu.up { top: auto; bottom: calc(100% + 6px); }
 .cc-model-menu { display: flex; flex-direction: column; min-width: 210px; max-height: 320px; }
@@ -2033,7 +2050,6 @@ button.wf-last .wf-arr { color: var(--text-4); font-size: 10px; margin-left: 1px
 .wf-params .rw { border-bottom: 1px solid var(--border-1); }
 .wf-cell { border: none; background: transparent; font-family: var(--mono); font-size: 12px; color: var(--text-1); padding: 3px 4px; border-radius: 4px; min-width: 0; }
 .wf-cell:focus { background: var(--bg-2); outline: 1px solid var(--border-1); }
-select.wf-cell { appearance: auto; }
 .wf-del { background: none; border: none; color: var(--text-4); cursor: pointer; display: flex; justify-content: flex-end; }
 .wf-del:hover { color: var(--error); }
 .wf-param-add { background: none; border: none; color: var(--text-4); font-size: 11.5px; padding: 6px 10px; text-align: left; cursor: pointer; }

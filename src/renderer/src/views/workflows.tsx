@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import { Icons } from '@/components/icons'
-import { Avatar, Switch } from '@/components/primitives'
+import { Avatar, SelectMenu, Switch } from '@/components/primitives'
 import { Modal } from '@/components/modal'
 import { ConfirmDialog } from '@/components/dialogs/confirm-dialog'
 import { RowMenu } from '@/views/extensions'
@@ -887,16 +887,13 @@ function ParamsTable({ params, onCommit }: { params: ParamDef[]; onCommit: (p: P
         {draft.map((p, i) => (
           <div className="rw" key={i}>
             <input className="wf-cell" value={p.name} onChange={(e) => set(i, { name: e.target.value })} onBlur={() => commit()} />
-            <select
+            <SelectMenu
               className="wf-cell"
+              mono
               value={p.type}
-              onChange={(e) => { const d = draft.map((x, j) => (j === i ? { ...x, type: e.target.value as ParamDef['type'] } : x)); setDraft(d); commit(d) }}
-            >
-              <option value="string">string</option>
-              <option value="number">number</option>
-              <option value="boolean">boolean</option>
-              <option value="folder">folder</option>
-            </select>
+              onChange={(v) => { const d = draft.map((x, j) => (j === i ? { ...x, type: v as ParamDef['type'] } : x)); setDraft(d); commit(d) }}
+              options={['string', 'number', 'boolean', 'folder'].map((v) => ({ value: v, label: v }))}
+            />
             <input className="wf-cell" value={p.default === undefined ? '' : String(p.default)} placeholder="—"
               onChange={(e) => set(i, { default: p.type === 'number' ? Number(e.target.value) : p.type === 'boolean' ? e.target.value === 'true' : e.target.value })}
               onBlur={() => commit()} />

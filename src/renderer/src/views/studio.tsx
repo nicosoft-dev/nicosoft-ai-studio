@@ -9,7 +9,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import type { CSSProperties, ReactElement } from 'react'
 import { Icons } from '@/components/icons'
-import { Avatar, AvatarStack, Segmented } from '@/components/primitives'
+import { Avatar, AvatarStack, Segmented, SelectMenu } from '@/components/primitives'
 import { STUDIO_DATA, expertMeta } from '@/data/studio-data'
 import { fmtTokens } from '@/lib/format'
 import { useRoles } from '@/stores/roles'
@@ -448,25 +448,30 @@ function AssignmentsPage({ onOpenConv, onOpenProject }: { onOpenConv: (convId: s
     <div className="timeline-wrap">
       <div className="tl-scroll">
         <div className="asg-filters">
-          <select className="asg-filter-sel" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
-            <option value="all">{t('overview.filter.allRoles')}</option>
-            {roleIds.map((id) => (
-              <option key={id} value={id}>{expertMeta(id).name}</option>
-            ))}
-          </select>
-          <select className="asg-filter-sel" value={projFilter} onChange={(e) => setProjFilter(e.target.value)}>
-            <option value="all">{t('overview.filter.allProjects')}</option>
-            {projIds.map((id) => (
-              <option key={id} value={id}>{projTitle(id) ?? id}</option>
-            ))}
-          </select>
-          <select className="asg-filter-sel" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-            <option value="all">{t('overview.filter.allStatuses')}</option>
-            <option value="in_progress">{t('overview.status.in_progress')}</option>
-            <option value="done">{t('overview.status.done')}</option>
-            <option value="failed">{t('overview.status.failed')}</option>
-            <option value="stopped">{t('overview.status.stopped')}</option>
-          </select>
+          <SelectMenu
+            className="asg-filter-sel"
+            value={roleFilter}
+            onChange={setRoleFilter}
+            options={[{ value: 'all', label: t('overview.filter.allRoles') }, ...roleIds.map((id) => ({ value: id, label: expertMeta(id).name }))]}
+          />
+          <SelectMenu
+            className="asg-filter-sel"
+            value={projFilter}
+            onChange={setProjFilter}
+            options={[{ value: 'all', label: t('overview.filter.allProjects') }, ...projIds.map((id) => ({ value: id, label: projTitle(id) ?? id }))]}
+          />
+          <SelectMenu
+            className="asg-filter-sel"
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={[
+              { value: 'all', label: t('overview.filter.allStatuses') },
+              { value: 'in_progress', label: t('overview.status.in_progress') },
+              { value: 'done', label: t('overview.status.done') },
+              { value: 'failed', label: t('overview.status.failed') },
+              { value: 'stopped', label: t('overview.status.stopped') }
+            ]}
+          />
         </div>
 
         {groups.length === 0 ? (

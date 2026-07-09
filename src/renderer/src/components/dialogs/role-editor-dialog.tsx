@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import type { CSSProperties, ReactElement } from 'react'
 import { Icons } from '@/components/icons'
-import { Avatar } from '@/components/primitives'
+import { Avatar, SelectMenu } from '@/components/primitives'
 import { Modal } from '@/components/modal'
 import { useCustomRoles } from '@/stores/custom-roles'
 import { toast } from '@/stores/toast'
@@ -168,36 +168,38 @@ export function RoleEditorDialog({
       <div style={{ display: 'flex', gap: 14 }}>
         <div style={{ flex: 1 }}>
           <label className="field-label">{tr('roleEditor.endpoint')}</label>
-          <select
+          <SelectMenu
             className="input"
-            style={{ appearance: 'none', WebkitAppearance: 'none', paddingRight: 24 }}
             value={endpointId}
-            onChange={(e) => setEndpointId(e.target.value)}
-          >
-            {endpoints.length === 0 ? <option value="">{tr('roleEditor.noEndpoints')}</option> : null}
-            {endpoints.map((e) => (
-              <option key={e.id} value={e.id} disabled={!e.enabled || e.keyState !== 'ok'}>
-                {e.name} · {e.protocol}{e.keyState !== 'ok' ? tr('roleEditor.noKeySuffix') : !e.enabled ? tr('roleEditor.disabledSuffix') : ''}
-              </option>
-            ))}
-          </select>
+            onChange={setEndpointId}
+            options={[
+              ...(endpoints.length === 0 ? [{ value: '', label: tr('roleEditor.noEndpoints'), disabled: true }] : []),
+              ...endpoints.map((e) => ({
+                value: e.id,
+                label: `${e.name} · ${e.protocol}${e.keyState !== 'ok' ? tr('roleEditor.noKeySuffix') : !e.enabled ? tr('roleEditor.disabledSuffix') : ''}`,
+                disabled: !e.enabled || e.keyState !== 'ok'
+              }))
+            ]}
+          />
         </div>
         <div style={{ flex: 1 }}>
           <label className="field-label">{tr('roleEditor.model')}</label>
-          <select
+          <SelectMenu
             className="input"
-            style={{ appearance: 'none', WebkitAppearance: 'none', paddingRight: 24, fontFamily: 'var(--mono)', fontSize: 12 }}
+            mono
             value={model}
-            onChange={(e) => setModel(e.target.value)}
-          >
-            {(endpoints.find((e) => e.id === endpointId)?.availableModels ?? []).map((m) => {
-              const id = modelIdOf(m)
-              return <option key={id} value={id}>{id}</option>
-            })}
-            {model && !((endpoints.find((e) => e.id === endpointId)?.availableModels ?? []).some((m) => modelIdOf(m) === model)) && (
-              <option value={model}>{model}</option>
-            )}
-          </select>
+            onChange={setModel}
+            options={[
+              ...(endpoints.find((e) => e.id === endpointId)?.availableModels ?? []).map((m) => {
+                const id = modelIdOf(m)
+                return { value: id, label: id }
+              }),
+              // a bound model no longer in the endpoint's list stays selectable (same as the old stale <option>)
+              ...(model && !(endpoints.find((e) => e.id === endpointId)?.availableModels ?? []).some((m) => modelIdOf(m) === model)
+                ? [{ value: model, label: model }]
+                : [])
+            ]}
+          />
         </div>
       </div>
       <div>

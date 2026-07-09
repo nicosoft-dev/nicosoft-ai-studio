@@ -1,8 +1,10 @@
 // Shared primitives — recreated from the prototype's components.jsx.
-import { Fragment } from 'react'
+import { Fragment, useRef, useState } from 'react'
 import type { CSSProperties, ReactElement, ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Icons } from './icons'
 import { STUDIO_DATA } from '@/data/studio-data'
+import { useAnchoredMenu } from '@/lib/use-anchored-menu'
 import type { Expert } from '@/types'
 
 /* — Avatar: monogram in expert identity color — */
@@ -146,5 +148,77 @@ export function Segmented({
         )
       })}
     </div>
+  )
+}
+
+/* — custom select (one source, replaces every native <select>): a native select pops the OS menu —
+   outside the app theme entirely (macOS blue highlight, light chrome in dark mode) — so select-like
+   controls render the same portaled .row-menu the app's other dropdowns use (ModelPicker / context
+   menu visuals: .rm-item rows + a check on the current value). The portal + useAnchoredMenu keep the
+   menu out of overflow-clipping ancestors (dialogs, table rows); .sm-float lifts it above the dialog
+   overlay (z 100 — the base .row-menu z 61 would sink under it). The trigger takes an existing skin
+   class (input / wf-cell / asg-filter-sel), so each call site keeps its current look. — */
+export interface SelectMenuOption {
+  value: string
+  label: string
+  disabled?: boolean
+}
+export function SelectMenu({
+  value,
+  options,
+  onChange,
+  disabled,
+  className,
+  mono
+}: {
+  value: string
+  options: SelectMenuOption[]
+  onChange: (v: string) => void
+  disabled?: boolean
+  className?: string // the trigger's visual skin (e.g. "input", "wf-cell", "asg-filter-sel")
+  mono?: boolean // mono face for the label + options (model ids, param types)
+}): ReactElement {
+  const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const { menuRef, style } = useAnchoredMenu(open, triggerRef, 'down')
+  const current = options.find((o) => o.value === value)
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={'sel-trigger' + (className ? ` ${className}` : '')}
+        disabled={disabled}
+        onClick={() => setOpen((s) => !s)}
+      >
+        <span className={'sel-label' + (mono ? ' cmp-mono' : '')}>{current?.label ?? value}</span>
+        <Icons.chevronDown size={12} />
+      </button>
+      {open
+        ? createPortal(
+            <>
+              <div className="menu-backdrop sm-float-bg" onClick={() => setOpen(false)} />
+              <div ref={menuRef} className="row-menu sm-menu sm-float" style={style} onClick={(e) => e.stopPropagation()}>
+                {options.length === 0 ? <div className="rm-empty">—</div> : null}
+                {options.map((o) => (
+                  <div
+                    key={o.value}
+                    className={'rm-item' + (o.value === value ? ' active' : '') + (o.disabled ? ' disabled' : '')}
+                    onClick={() => {
+                      if (o.disabled) return
+                      onChange(o.value)
+                      setOpen(false)
+                    }}
+                  >
+                    <span className={mono ? 'cmp-mono' : undefined}>{o.label}</span>
+                    {o.value === value ? <Icons.check size={13} /> : null}
+                  </div>
+                ))}
+              </div>
+            </>,
+            document.body
+          )
+        : null}
+    </>
   )
 }
