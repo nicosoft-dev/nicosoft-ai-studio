@@ -27,9 +27,18 @@ You can add custom roles ("New Role" in the sidebar) with their own system promp
 - **Workflows** — save a multi-expert procedure and run it by hand, with `/workflow`, or on a schedule.
 - **Scheduled** — timed tasks and monitors that run in the background and report back.
 
+## The Overview page — assignments
+
+The Overview's Activity tab tracks **assignments**: work items the team received. Whenever you hand an expert real work — add a feature, fix a bug, build something, handle something — an assignment appears the moment the work starts, under whoever is doing it. Plain conversation (questions, explanations, opinions) never creates one.
+
+- **In progress** — live work right now. A solo job is one row (expert, job name, elapsed time); a Danny-coordinated team job is one card with the overall title and a row per expert, each settling independently as that expert finishes. Work started from a project's dock carries a project badge — click it to jump to the Workbench.
+- **Done today** — what finished today, with its outcome (✓ done · ✗ failed · ■ stopped) and when. On a quiet day it shows the most recent finished items instead (tagged "recent").
+- **Collaboration projects** — open (non-archived) projects with their step progress, as before.
+- Assignments are created and closed automatically — nothing to manage. Stopping a run (or deleting its project mid-run) marks the item stopped, honestly, never "done".
+
 ## Finding your way around
 
-- **Sidebar**: Overview (live activity + stats), Projects, Scheduled, Extensions, Workflows, Roles (the team), and conversation History (Pinned / Today / Yesterday / Earlier / Archived).
+- **Sidebar**: Overview (assignments + stats), Projects, Scheduled, Extensions, Workflows, Roles (the team), and conversation History (Pinned / Today / Yesterday / Earlier / Archived).
 - **Topbar**: the Workspace button opens the right-hand drawer (Tasks / Files / Diff / Terminal / Preview); the gear opens Settings.
 - **⌘K** opens a global palette to search conversations, roles and actions.
 

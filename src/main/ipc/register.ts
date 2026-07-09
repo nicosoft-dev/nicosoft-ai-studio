@@ -3,6 +3,7 @@ import { registerCoordinatorHandlers, abortAllCoordinatorRuns } from './coordina
 import { registerConversationHandlers } from './conversations.handler'
 import { registerEndpointHandlers } from './endpoints.handler'
 import { registerProjectHandlers } from './project.handler'
+import { registerAssignmentHandlers } from './assignment.handler'
 import { registerRoleHandlers } from './roles.handler'
 import { registerSettingsHandlers } from './settings.handler'
 import { registerChatHandlers, abortAllChatRuns } from './chat.handler'
@@ -34,6 +35,7 @@ export function registerIpc(): void {
   registerAgentHandlers()
   registerCoordinatorHandlers()
   registerProjectHandlers()
+  registerAssignmentHandlers()
   registerRoleHandlers()
   registerConversationHandlers()
   registerMemoryHandlers()

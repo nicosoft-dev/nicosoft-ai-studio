@@ -498,6 +498,33 @@ export interface AssignmentChangedEvent {
   convId: string
   batchId: string
 }
+// One work item ("接活") a role received — READ-ONLY on the wire: rows are system-created at run entries
+// and auto-settled, so there is no create/update IPC surface (§6). run_ids stays main-side. These unions
+// are the single source — assignment.repo imports them (same discipline as project.repo's phase/status).
+export type AssignmentStatus = 'in_progress' | 'done' | 'failed' | 'stopped'
+export type AssignmentOrigin = 'danny' | 'solo' | 'dock'
+export interface AssignmentDto {
+  id: string
+  batchId: string // one dispatch = one batch (a collab = N rows sharing it; solo = a single-row batch)
+  batchTitle: string
+  title: string // this role's own slice
+  convId: string
+  projectId: string | null
+  origin: AssignmentOrigin
+  roleId: string
+  status: AssignmentStatus
+  startedAt: string
+  endedAt: string | null
+}
+export interface AssignmentListFilter {
+  convId?: string
+  roleId?: string
+  projectId?: string
+  status?: AssignmentStatus
+  // true = finished rows only (done/failed/stopped), newest ENDED first — the Done-today/recent read.
+  settled?: boolean
+  limit?: number
+}
 // Fired once per turn, after the route decision, before any text streams. `chain` lists the steps
 // the badge should render. Length 1 for single mode (no badge needed); for a pipeline = `[...experts,
 // 'coordinator']` (experts in order plus the trailing Coordinator synthesis). The renderer's DispatchBadge

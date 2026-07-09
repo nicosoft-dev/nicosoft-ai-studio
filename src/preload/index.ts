@@ -96,6 +96,9 @@ import type {
   ProjectTaskStatus,
   ProjectTestStatus,
   ProjectUpdatedEvent,
+  AssignmentDto,
+  AssignmentListFilter,
+  AssignmentChangedEvent,
   ProjectServiceEvent,
   ScheduledTask,
   CreateTaskInput,
@@ -400,6 +403,13 @@ const api = {
       ipcRenderer.invoke('project:test:status', projectId, testId, status),
     onUpdated: (cb: (d: ProjectUpdatedEvent) => void): (() => void) => agentListen('project:updated', cb),
     onService: (cb: (d: ProjectServiceEvent) => void): (() => void) => agentListen('project:service', cb)
+  },
+
+  // Assignments (docs/assignments-design.md §5) — READ-ONLY: rows are system-created at run entries and
+  // auto-settled there; the renderer only lists them and follows the change broadcast.
+  assignments: {
+    list: (filter?: AssignmentListFilter): Promise<AssignmentDto[]> => ipcRenderer.invoke('assignment:list', filter ?? {}),
+    onChanged: (cb: (d: AssignmentChangedEvent) => void): (() => void) => agentListen('assignment:changed', cb)
   },
 
   scheduled: {

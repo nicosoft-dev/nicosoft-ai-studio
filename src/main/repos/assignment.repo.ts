@@ -1,13 +1,14 @@
 import { ulid } from '../db/id'
 import { getDb } from '../db/connection'
+import type { AssignmentOrigin, AssignmentStatus } from '../ipc/contracts'
 
 // assignments — the persistent shape of a work item ("接活" — docs/assignments-design.md §3). Pure SQL row
 // CRUD, mirroring the other repos (getDb + ulid + toRow); lifecycle rules (who opens/closes when, broadcast)
 // live in assignment.service. Every close/sweep statement guards `status = 'in_progress'`, so a settled row
 // is immutable — late settle chains (per-role close, batch backstop, conv abort) can race harmlessly.
+// Status/origin unions come from contracts — the wire enums stay a single source (project.repo discipline).
 
-export type AssignmentStatus = 'in_progress' | 'done' | 'failed' | 'stopped'
-export type AssignmentOrigin = 'danny' | 'solo' | 'dock'
+export type { AssignmentOrigin, AssignmentStatus } from '../ipc/contracts'
 
 export interface AssignmentRow {
   id: string
@@ -182,6 +183,9 @@ export interface AssignmentFilter {
   roleId?: string
   projectId?: string
   status?: AssignmentStatus
+  // Finished rows only (done/failed/stopped), ordered by ended_at DESC — the Done-today/recent read key.
+  // A day-old long-runner that ENDED today would fall outside a started_at-ordered slice.
+  settled?: boolean
   limit?: number
 }
 export function list(filter: AssignmentFilter = {}): AssignmentRow[] {
@@ -203,10 +207,11 @@ export function list(filter: AssignmentFilter = {}): AssignmentRow[] {
     where.push('status = ?')
     params.push(filter.status)
   }
+  if (filter.settled) where.push("status != 'in_progress'")
   const sql =
     'SELECT * FROM assignments' +
     (where.length ? ` WHERE ${where.join(' AND ')}` : '') +
-    ' ORDER BY started_at DESC, id DESC' +
+    (filter.settled ? ' ORDER BY ended_at DESC, id DESC' : ' ORDER BY started_at DESC, id DESC') +
     (filter.limit ? ' LIMIT ?' : '')
   if (filter.limit) params.push(filter.limit)
   const rows = getDb().prepare(sql).all(...params)
