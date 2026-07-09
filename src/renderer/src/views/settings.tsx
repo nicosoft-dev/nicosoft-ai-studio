@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import { createPortal } from 'react-dom'
-import { Icons } from '@/components/icons'
+import { Icons, type IconName } from '@/components/icons'
 import { useAnchoredMenu } from '@/lib/use-anchored-menu'
 import { Avatar, HealthDot } from '@/components/primitives'
 import { STUDIO_DATA } from '@/data/studio-data'
@@ -31,7 +31,7 @@ function prettyVersion(v: string | undefined): { label: string; title: string } 
   return m ? { label: `Nightly · ${m[1]}-${m[2]}-${m[3]}`, title: v } : { label: v, title: v }
 }
 
-const SETTINGS_NAV: { id: string; icon: string }[] = [
+const SETTINGS_NAV: { id: string; icon: IconName }[] = [
   { id: "profile",   icon: "user" },
   { id: "memory",    icon: "box" },
   { id: "endpoints", icon: "plug" },

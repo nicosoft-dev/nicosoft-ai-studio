@@ -658,7 +658,7 @@ function ScheduledEditor({
                           </label>
                         </div>
                         <div className="se-note se-cmd-warn">
-                          <Icons.alertTriangle size={13} /> Runs unattended with your full user permissions — not confined to the working directory. Output pipes into the next step; a non-zero exit marks the step failed.
+                          <Icons.alert size={13} /> Runs unattended with your full user permissions — not confined to the working directory. Output pipes into the next step; a non-zero exit marks the step failed.
                         </div>
                       </div>
                     )}

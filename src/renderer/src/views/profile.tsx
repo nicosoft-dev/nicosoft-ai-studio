@@ -5,7 +5,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import { createPortal } from 'react-dom'
-import { Icons } from '@/components/icons'
+import { Icons, type IconName } from '@/components/icons'
 import { Segmented } from '@/components/primitives'
 import { STUDIO_DATA } from '@/data/studio-data'
 import { toast } from '@/stores/toast'
@@ -69,7 +69,7 @@ export function Dropdown({
   value,
   onChange,
   icon
-}: SelectControlProps & { icon?: string }): ReactElement {
+}: SelectControlProps & { icon?: IconName }): ReactElement {
   const [open, setOpen] = useState(false)
   const [width, setWidth] = useState<number>()
   const triggerRef = useRef<HTMLDivElement>(null)

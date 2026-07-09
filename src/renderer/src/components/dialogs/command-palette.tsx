@@ -2,7 +2,7 @@
    (search field + grouped results + footer), a different DOM family from the standard dialog. — */
 import { useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
-import { Icons } from '@/components/icons'
+import { Icons, type IconName } from '@/components/icons'
 import { Avatar } from '@/components/primitives'
 import { STUDIO_DATA } from '@/data/studio-data'
 import { useRoles } from '@/stores/roles'
@@ -18,7 +18,7 @@ type CmdkRow = {
   expert?: string
   hint?: string
   avatar?: Expert
-  icon?: string
+  icon?: IconName
 }
 
 export function CommandPalette({

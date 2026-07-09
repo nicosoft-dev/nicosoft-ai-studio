@@ -42,9 +42,13 @@ export function Icon({
 }
 
 type IconProp = { size?: number; style?: CSSProperties; strokeWidth?: number; className?: string }
-type IconFn = (p?: IconProp) => ReactElement
+export type IconFn = (p?: IconProp) => ReactElement
 
-export const Icons: Record<string, IconFn> = {
+// `satisfies` (not a `Record<string, IconFn>` annotation): values are still checked, but the KEY SET
+// stays literal — `Icons.someTypo` and a dangling name in an icon-key map are COMPILE errors instead
+// of `undefined` reaching JSX (React #130 took the whole view down — live bug 2026-07-09, the
+// scheduled editor's `Icons.alertTriangle`). Dynamic lookups type their key as IconName.
+export const Icons = {
   search: (p) => (
     <Icon {...p}>
       <circle cx="11" cy="11" r="7" />
@@ -486,12 +490,16 @@ export const Icons: Record<string, IconFn> = {
       <circle cx="15" cy="18" r="1" />
     </Icon>
   )
-}
+} satisfies Record<string, IconFn>
+
+// The literal key set — every place that names an icon by string (tool maps, nav configs, Dropdown's
+// `icon` prop) types against this, so a renamed/missing glyph fails the build, not the render.
+export type IconName = keyof typeof Icons
 
 // Tool name → Icons key. Shared by the Workbench timeline (projects.tsx — normalized action names)
 // and the analytics "Tool calls today" scan (analytics.service.ts — raw tool_use names from
 // transcripts). Resolve through toolIconName() so dynamic MCP names + unknowns fall back sensibly.
-const TOOL_ICON: Record<string, string> = {
+const TOOL_ICON: Record<string, IconName> = {
   // files & docs (no penSquare glyph → Write/Edit share 'edit')
   Read: 'file', Write: 'edit', Edit: 'edit', MultiEdit: 'edit', NotebookEdit: 'edit', WritePdf: 'note',
   // shell & sandboxed code
@@ -519,6 +527,6 @@ const TOOL_ICON: Record<string, string> = {
 }
 
 // Resolve a tool name to an Icons key: exact match → MCP tools (mcp__server__tool) → 'file'.
-export function toolIconName(tool: string): string {
+export function toolIconName(tool: string): IconName {
   return TOOL_ICON[tool] ?? (tool.startsWith('mcp__') ? 'plug' : 'file')
 }

@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import { createPortal } from 'react-dom'
-import { Icons } from '@/components/icons'
+import { Icons, type IconName } from '@/components/icons'
 import { useAnchoredMenu } from '@/lib/use-anchored-menu'
 import { Avatar, HealthDot, Segmented, Switch } from '@/components/primitives'
 import { ImageModelPicker } from '@/components/composer-controls'
@@ -281,7 +281,7 @@ function SkillsTab({ onCount }: { onCount: (n: number) => void }): ReactElement 
 }
 
 /* ——— Plugins ——— */
-const BUNDLE_ICON: Record<PluginBundle['type'], string> = { skill: "zap", mcp: "terminal", role: "users" };
+const BUNDLE_ICON: Record<PluginBundle['type'], IconName> = { skill: "zap", mcp: "terminal", role: "users" };
 function PluginsTab({ onCount }: { onCount: (n: number) => void }): ReactElement {
   const t = useT();
   const [plugins, setPlugins] = useState<PluginDto[]>([]);

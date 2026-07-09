@@ -6,7 +6,7 @@
    PersistedState), so reopening the drawer returns to where you were.
    ============================================================ */
 import { useEffect, useState, type ReactElement } from 'react'
-import { Icons } from '@/components/icons'
+import { Icons, type IconFn } from '@/components/icons'
 import { useChat } from '@/stores/chat'
 import { useT } from '@/stores/locale'
 import { WorkspaceTasks } from '@/views/workspace-tasks'
@@ -127,7 +127,7 @@ export function WorkspaceDrawer({
 
 function Launcher({ onPick }: { onPick: (p: WorkspacePanel) => void }): ReactElement {
   const t = useT()
-  const entries: { panel: WorkspacePanel; icon: (typeof Icons)[string]; label: string; kbd: string }[] = [
+  const entries: { panel: WorkspacePanel; icon: IconFn; label: string; kbd: string }[] = [
     { panel: 'tasks', icon: Icons.listChecks, label: t('workspace.tasks'), kbd: '⌘J' },
     { panel: 'files', icon: Icons.folder, label: t('workspace.files'), kbd: '⌘P' },
     { panel: 'diff', icon: Icons.gitBranch, label: t('workspace.diff'), kbd: '⌘⇧D' },
