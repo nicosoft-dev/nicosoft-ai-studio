@@ -60,6 +60,9 @@ export function runMigrations(db: DatabaseSync): void {
   // screenshot / ns_generate_image), attached from its result so the project timeline shows a thumbnail. NULL
   // on existing rows + non-image tools.
   ensureColumn(db, 'project_tool_events', 'media_url', 'TEXT')
+  // Project archive (批4): archived projects leave the default list and a scheduled advance skips them.
+  // 0 on existing rows; schema.ts carries the column for fresh DBs.
+  ensureColumn(db, 'projects', 'archived', 'INTEGER NOT NULL DEFAULT 0')
   migrateShuriToFrontend(db)
 }
 

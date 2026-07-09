@@ -491,7 +491,11 @@ class SchedulerEngine {
   private async runProjectStep(step: TaskStep, prior: string): Promise<string> {
     if (step.action === 'advance' && step.projectId) {
       // setPhase on a deleted id UPDATEs 0 rows — without this check the step would report success forever.
-      if (!projectService.exists(step.projectId)) throw new Error(`project ${step.projectId} no longer exists — was it deleted?`)
+      const target = projectService.get(step.projectId)
+      if (!target) throw new Error(`project ${step.projectId} no longer exists — was it deleted?`)
+      // Archived = deliberately parked by the user: skip WITH a recorded reason (not a failure — the
+      // schedule may simply outlive the project's active period; unarchive and the next fire advances).
+      if (target.archived) return `Skipped — project "${target.title}" is archived.`
       projectService.setPhase(step.projectId, 'executing')
       this.notifyProjectUpdated(step.projectId) // scheduled advance changed the phase → refresh an open Workbench
       return `Advanced project ${step.projectId} to executing.`

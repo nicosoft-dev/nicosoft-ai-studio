@@ -83,14 +83,44 @@ function ProjectsList({
   projects,
   onOpen,
   onNew,
+  onArchive,
   onDelete
 }: {
   projects: ProjectDto[]
   onOpen: (id: string) => void
   onNew: () => void
+  onArchive: (p: ProjectDto, archived: boolean) => void
   onDelete: (p: ProjectDto) => void
 }): ReactElement {
   const t = useT()
+  const [showArchived, setShowArchived] = useState(false)
+  const active = projects.filter((p) => !p.archived)
+  const archived = projects.filter((p) => p.archived)
+
+  const card = (p: ProjectDto): ReactElement => (
+    <div className={'proj-card' + (p.archived ? ' archived' : '')} key={p.id} onClick={() => onOpen(p.id)}>
+      <div className="pc-top">
+        <span className="pc-title">{p.title}</span>
+        <PhaseChip phase={p.phase} />
+        {/* the whole card opens the project — the menu must not */}
+        <span className="pc-menu" onClick={(e) => e.stopPropagation()}>
+          <RowMenu
+            items={[
+              { label: p.archived ? t('projects.unarchiveAction') : t('projects.archiveAction'), onClick: () => onArchive(p, !p.archived) },
+              { label: t('projects.deleteAction'), danger: true, onClick: () => onDelete(p) }
+            ]}
+          />
+        </span>
+      </div>
+      <div className="pc-goal">{goalSummary(p.goal)}</div>
+      <div className="pc-foot">
+        <AvatarStack ids={p.experts} size={24} />
+        <ProgressBar value={p.progress} />
+        <span className="pc-pct">{Math.round(p.progress * 100)}%</span>
+      </div>
+    </div>
+  )
+
   return (
     <div className="main-col">
       <div className="conv-header">
@@ -106,26 +136,20 @@ function ProjectsList({
             a collaboration lands here automatically.
           </div>
         ) : (
-          <div className="proj-list">
-            {projects.map((p) => (
-              <div className="proj-card" key={p.id} onClick={() => onOpen(p.id)}>
-                <div className="pc-top">
-                  <span className="pc-title">{p.title}</span>
-                  <PhaseChip phase={p.phase} />
-                  {/* the whole card opens the project — the menu must not */}
-                  <span className="pc-menu" onClick={(e) => e.stopPropagation()}>
-                    <RowMenu items={[{ label: t('projects.deleteAction'), danger: true, onClick: () => onDelete(p) }]} />
+          <>
+            {active.length > 0 && <div className="proj-list">{active.map(card)}</div>}
+            {archived.length > 0 && (
+              <>
+                <button className="proj-arch-toggle" onClick={() => setShowArchived((v) => !v)}>
+                  <span className={'pat-chev' + (showArchived ? ' open' : '')}>
+                    <Icons.chevronRight size={12} />
                   </span>
-                </div>
-                <div className="pc-goal">{goalSummary(p.goal)}</div>
-                <div className="pc-foot">
-                  <AvatarStack ids={p.experts} size={24} />
-                  <ProgressBar value={p.progress} />
-                  <span className="pc-pct">{Math.round(p.progress * 100)}%</span>
-                </div>
-              </div>
-            ))}
-          </div>
+                  Archived ({archived.length})
+                </button>
+                {showArchived && <div className="proj-list">{archived.map(card)}</div>}
+              </>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -527,12 +551,14 @@ function ProjectDetail({
   onBack,
   onOpenExpert,
   onEdit,
+  onArchive,
   onDelete
 }: {
   project: ProjectDto
   onBack: () => void
   onOpenExpert: (id: string) => void
   onEdit: () => void
+  onArchive: () => void
   onDelete: () => void
 }): ReactElement {
   const t = useT()
@@ -668,8 +694,12 @@ function ProjectDetail({
           {project.title}
         </span>
         <PhaseChip phase={project.phase} />
+        {project.archived && <span className="proj-arch-badge">archived</span>}
         <button className="btn ghost sm" style={{ marginLeft: 'auto' }} onClick={onEdit} title={t('projects.editAction')}>
           <Icons.edit size={15} /> {t('projects.editAction')}
+        </button>
+        <button className="btn ghost sm" onClick={onArchive} title={project.archived ? t('projects.unarchiveAction') : t('projects.archiveAction')}>
+          <Icons.box size={15} /> {project.archived ? t('projects.unarchiveAction') : t('projects.archiveAction')}
         </button>
         <button className="btn ghost sm" onClick={onDelete} title={t('projects.deleteAction')}>
           <Icons.trash size={15} /> {t('projects.deleteAction')}
@@ -866,8 +896,9 @@ export function ProjectsView({
     })
   }, [activeProject, reload, onSelect])
 
-  // Confirmed delete (list-card menu or Workbench header): the service unlinks the project's
-  // conversations (chats survive) and cascades the plan/tests/timeline away.
+  // Confirmed delete (list-card menu or Workbench header): the handler stops any in-flight run on the
+  // project's conversations, then the service unlinks them (chats survive) and cascades the
+  // plan/tests/timeline away.
   const doDelete = async (p: ProjectDto): Promise<void> => {
     try {
       await window.api.project.remove(p.id)
@@ -876,6 +907,15 @@ export function ProjectsView({
       void reload()
     } catch {
       toast.error(t('projects.deleteFailed'))
+    }
+  }
+  const doArchive = async (p: ProjectDto, archived: boolean): Promise<void> => {
+    try {
+      await window.api.project.archive(p.id, archived)
+      toast.success(t(archived ? 'projects.archivedToast' : 'projects.unarchivedToast'))
+      void reload() // the broadcast also refreshes an open detail
+    } catch {
+      toast.error(t('projects.archiveFailed'))
     }
   }
   const confirmDialog = toDelete && (
@@ -897,6 +937,7 @@ export function ProjectsView({
           onBack={() => onSelect(null)}
           onOpenExpert={onOpenExpert}
           onEdit={() => setEditOpen(true)}
+          onArchive={() => void doArchive(detail, !detail.archived)}
           onDelete={() => setToDelete(detail)}
         />
         {editOpen && (
@@ -909,7 +950,13 @@ export function ProjectsView({
   }
   return (
     <>
-      <ProjectsList projects={projects} onOpen={onSelect} onNew={() => setNewOpen(true)} onDelete={setToDelete} />
+      <ProjectsList
+        projects={projects}
+        onOpen={onSelect}
+        onNew={() => setNewOpen(true)}
+        onArchive={(p, archived) => void doArchive(p, archived)}
+        onDelete={setToDelete}
+      />
       {newOpen && (
         <NewProjectDialog
           onClose={() => setNewOpen(false)}

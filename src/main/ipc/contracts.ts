@@ -1268,6 +1268,7 @@ export interface ProjectDto {
   goal: string | null
   cwd: string | null
   phase: ProjectPhase
+  archived: boolean // out of the default list; a scheduled advance skips it (Unarchive restores)
   progress: number // derived: done tasks / total (0 when no tasks)
   experts: string[] // derived: distinct task assignees, coordinator first
   plan: ProjectTaskDto[]

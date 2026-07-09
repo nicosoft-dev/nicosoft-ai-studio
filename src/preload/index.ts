@@ -387,6 +387,7 @@ const api = {
     get: (id: string): Promise<ProjectDto | null> => ipcRenderer.invoke('project:get', id),
     create: (input: ProjectCreateInput): Promise<ProjectDto> => ipcRenderer.invoke('project:create', input),
     update: (id: string, input: ProjectUpdateInput): Promise<ProjectDto | null> => ipcRenderer.invoke('project:update', id, input),
+    archive: (id: string, archived: boolean): Promise<ProjectDto | null> => ipcRenderer.invoke('project:archive', id, archived),
     remove: (id: string): Promise<void> => ipcRenderer.invoke('project:remove', id),
     phase: (id: string, phase: ProjectPhase): Promise<void> => ipcRenderer.invoke('project:phase', id, phase),
     addTask: (projectId: string, input: ProjectTaskInput): Promise<ProjectTaskDto> =>

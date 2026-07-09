@@ -113,6 +113,7 @@ CREATE TABLE IF NOT EXISTS projects (
   goal       TEXT,
   cwd        TEXT,                                 -- working directory the experts operate in (project/folder path)
   phase      TEXT NOT NULL DEFAULT 'planning',    -- planning | executing | testing | done
+  archived   INTEGER NOT NULL DEFAULT 0,           -- archived (out of the default list; scheduled advance skips)
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

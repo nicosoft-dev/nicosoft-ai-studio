@@ -14,10 +14,11 @@ A project is a multi-expert collaboration with a goal, an optional working folde
 - Plans can pause for your decision: "Plan ready for review" → **Approve & run** or **Revise**; approve/reject actions are also available from the project surface.
 - The Overview page's Activity tab shows live, currently-streaming work including collaborations.
 
-## Edit & delete
+## Edit, archive & delete
 
 - **Edit** (header button inside a project): change the title, goal or working folder. Changing the folder only affects future instructions — files the team already created stay where they are.
-- **Delete**: hover a project card → "…" menu → Delete, or the Delete button in the header. A confirm dialog explains what goes: the plan, tests and timeline are removed permanently. Linked conversations are kept — they only lose their project link.
+- **Archive** (card "…" menu, or the header button): moves the project under a collapsed "Archived (n)" section at the bottom of the list. Nothing is lost — phase, plan, history and conversation links stay; Unarchive restores it exactly. A scheduled Advance step skips an archived project (recorded as skipped, not failed).
+- **Delete**: hover a project card → "…" menu → Delete, or the Delete button in the header. A confirm dialog explains what goes: the plan, tests and timeline are removed permanently, and an in-flight collaboration is stopped first. Linked conversations are kept — they only lose their project link.
 
 ## Automation
 

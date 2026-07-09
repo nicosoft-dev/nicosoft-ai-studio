@@ -14,6 +14,7 @@ export interface ProjectRow {
   goal: string | null
   cwd: string | null
   phase: ProjectPhase
+  archived: boolean
   createdAt: string
   updatedAt: string
 }
@@ -23,6 +24,7 @@ interface ProjectRaw {
   goal: string | null
   cwd: string | null
   phase: string
+  archived: number
   created_at: string
   updated_at: string
 }
@@ -33,6 +35,7 @@ function toProject(r: ProjectRaw): ProjectRow {
     goal: r.goal,
     cwd: r.cwd,
     phase: r.phase as ProjectPhase,
+    archived: r.archived === 1,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }
@@ -54,7 +57,7 @@ export function insertProject(input: ProjectInsert): ProjectRow {
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(id, input.title, input.goal ?? null, input.cwd ?? null, phase, now, now)
-  return { id, title: input.title, goal: input.goal ?? null, cwd: input.cwd ?? null, phase, createdAt: now, updatedAt: now }
+  return { id, title: input.title, goal: input.goal ?? null, cwd: input.cwd ?? null, phase, archived: false, createdAt: now, updatedAt: now }
 }
 
 export function listProjects(): ProjectRow[] {
@@ -77,6 +80,10 @@ export function updateProject(id: string, patch: { title: string; goal: string |
   getDb()
     .prepare('UPDATE projects SET title = ?, goal = ?, cwd = ?, updated_at = ? WHERE id = ?')
     .run(patch.title, patch.goal, patch.cwd, new Date().toISOString(), id)
+}
+
+export function setProjectArchived(id: string, archived: boolean): void {
+  getDb().prepare('UPDATE projects SET archived = ?, updated_at = ? WHERE id = ?').run(archived ? 1 : 0, new Date().toISOString(), id)
 }
 
 // Bump updated_at without changing anything else — call when a child task/test mutates so the project

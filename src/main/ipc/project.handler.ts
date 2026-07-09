@@ -1,5 +1,6 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import { pickDirectory } from './dialogs'
+import { abortConversationRuns } from './coordinator.handler'
 import * as projectService from '../services/project.service'
 import * as gitService from '../services/workspace/git'
 import type { ProjectCreateInput, ProjectPhase, ProjectTaskInput, ProjectTaskStatus, ProjectTestStatus, ProjectUpdateInput } from './contracts'
@@ -26,7 +27,18 @@ export function registerProjectHandlers(): void {
     if (dto) for (const w of BrowserWindow.getAllWindows()) w.webContents.send('project:updated', { streamId: '', projectId: id })
     return dto
   })
-  ipcMain.handle('project:remove', (_e, id: string) => projectService.remove(id))
+  ipcMain.handle('project:remove', (_e, id: string) => {
+    // 一键停删: a project can be deleted while its collaboration is mid-run — abort any in-flight
+    // coordinator stream on its conversations first, then unlink + delete. The aborted run settles
+    // through its own terminal events; its late writes no-op via the collab tolerate-deleted guard.
+    for (const convId of projectService.linkedConversationIds(id)) abortConversationRuns(convId)
+    projectService.remove(id)
+  })
+  ipcMain.handle('project:archive', (_e, id: string, archived: boolean) => {
+    const dto = projectService.setArchived(id, archived)
+    if (dto) for (const w of BrowserWindow.getAllWindows()) w.webContents.send('project:updated', { streamId: '', projectId: id })
+    return dto
+  })
   ipcMain.handle('project:phase', (_e, id: string, phase: ProjectPhase) => projectService.setPhase(id, phase))
   ipcMain.handle('project:task:add', (_e, projectId: string, input: ProjectTaskInput) => projectService.addTask(projectId, input))
   ipcMain.handle('project:task:status', (_e, projectId: string, taskId: string, status: ProjectTaskStatus, output?: string | null) =>

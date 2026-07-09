@@ -46,6 +46,16 @@ const streams = new StreamRegistry()
 export function abortAllCoordinatorRuns(): void {
   streams.abortAll()
 }
+// conv → live coordinator stream ids. Lets project delete (一键停删) abort a project's in-flight
+// collaboration WITHOUT knowing its streamId — the run may have started from chat, the Workbench dock,
+// or another window. Coordinator UI runs only; the scheduler's headless runs have their own controllers.
+const liveByConv = new Map<string, Set<string>>()
+export function abortConversationRuns(convId: string): void {
+  for (const sid of liveByConv.get(convId) ?? []) {
+    streams.abort(sid)
+    sweepStream(sid)
+  }
+}
 // Dispatched-tool approvals (phase 2 still pop to the user — doc 19 §14): the shared bridge owns the pending
 // Map + delete-guarded settle + terminal sweep (same machinery as agent.handler); this handler supplies the
 // coordinator:* emit callbacks (its request event carries roleId).
@@ -60,6 +70,9 @@ export function registerCoordinatorHandlers(): void {
     const streamId = ulid()
     const sender = e.sender
     const { controller, send, finish } = streams.open(streamId, sender)
+    let convSet = liveByConv.get(input.convId)
+    if (!convSet) liveByConv.set(input.convId, (convSet = new Set()))
+    convSet.add(streamId)
     permissions.open(streamId)
     // 16ms delta coalescing (streaming-render-alignment §3.1), one lane per (kind × roleId) — collab/
     // dispatch interleave several experts' streams on this ONE streamId and their deltas must never merge
@@ -222,6 +235,8 @@ export function registerCoordinatorHandlers(): void {
         lanes.flushAll() // belt-and-suspenders: no armed timer may outlive the stream
         workspaceTasks.finalizeConv(input.convId) // turn silent → finalize an all-complete phase (design §5 P19)
         sweepStream(streamId) // deny any approval the renderer never answered before the turn ended
+        convSet.delete(streamId)
+        if (convSet.size === 0) liveByConv.delete(input.convId)
         finish()
       })
 
