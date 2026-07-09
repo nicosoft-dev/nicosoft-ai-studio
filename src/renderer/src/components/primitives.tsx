@@ -1,6 +1,6 @@
 // Shared primitives — recreated from the prototype's components.jsx.
-import { Fragment, useRef, useState } from 'react'
-import type { CSSProperties, ReactElement, ReactNode } from 'react'
+import { Fragment, useEffect, useId, useRef, useState } from 'react'
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactElement, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Icons } from './icons'
 import { STUDIO_DATA } from '@/data/studio-data'
@@ -179,9 +179,97 @@ export function SelectMenu({
   mono?: boolean // mono face for the label + options (model ids, param types)
 }): ReactElement {
   const [open, setOpen] = useState(false)
+  // Keyboard cursor (aria-activedescendant pattern): focus stays on the listbox container; this index is the
+  // highlighted option. Mouse hover moves it too, so pointer and keyboard never fight over two highlights.
+  const [activeIdx, setActiveIdx] = useState(-1)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const { menuRef, style } = useAnchoredMenu(open, triggerRef, 'down')
+  const listId = useId()
   const current = options.find((o) => o.value === value)
+
+  // Next enabled option from `from` in `dir`, wrapping — disabled rows are skipped, never landed on.
+  const nextEnabled = (from: number, dir: 1 | -1): number => {
+    const n = options.length
+    let i = from
+    for (let k = 0; k < n; k++) {
+      i = (i + dir + n) % n
+      if (!options[i].disabled) return i
+    }
+    return -1
+  }
+
+  const openMenu = (): void => {
+    const cur = options.findIndex((o) => o.value === value && !o.disabled)
+    setActiveIdx(cur >= 0 ? cur : nextEnabled(-1, 1))
+    setOpen(true)
+  }
+  const close = (refocusTrigger: boolean): void => {
+    setOpen(false)
+    if (refocusTrigger) triggerRef.current?.focus()
+  }
+  const commit = (idx: number): void => {
+    const o = options[idx]
+    if (!o || o.disabled) return
+    onChange(o.value)
+    close(true)
+  }
+
+  // The listbox takes focus while open (native-select parity: arrows/Enter/Escape work immediately); the
+  // active row follows into view inside the .sm-menu scroll box. Depend on `style` and skip the measuring
+  // pass: useAnchoredMenu first renders the menu visibility:hidden to size it, and its layout-effect
+  // setStyle flushes pending passive effects BEFORE the placed re-render — a focus() fired then lands on a
+  // hidden element and silently no-ops. The placed style (visibility unset) re-runs this effect.
+  useEffect(() => {
+    if (open && style.visibility !== 'hidden') menuRef.current?.focus()
+  }, [open, style, menuRef])
+  useEffect(() => {
+    if (open && activeIdx >= 0) document.getElementById(`${listId}-o${activeIdx}`)?.scrollIntoView({ block: 'nearest' })
+  }, [open, activeIdx, listId])
+
+  const onTriggerKeyDown = (e: ReactKeyboardEvent<HTMLButtonElement>): void => {
+    // Enter/Space already click the button natively (→ onClick toggle); arrows open like a native select.
+    if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      e.preventDefault()
+      openMenu()
+    }
+  }
+
+  const onMenuKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>): void => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      const dir = e.key === 'ArrowDown' ? 1 : -1
+      setActiveIdx((i) => {
+        const next = nextEnabled(i, dir)
+        return next >= 0 ? next : i
+      })
+    } else if (e.key === 'Home' || e.key === 'End') {
+      e.preventDefault()
+      setActiveIdx(e.key === 'Home' ? nextEnabled(-1, 1) : nextEnabled(0, -1))
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      commit(activeIdx)
+    } else if (e.key === 'Escape') {
+      // Close ONLY the menu — stopPropagation keeps a host dialog's own Escape-to-close from firing (the
+      // portal still bubbles through the React tree, so the dialog's onKeyDown would otherwise see this).
+      e.preventDefault()
+      e.stopPropagation()
+      close(true)
+    } else if (e.key === 'Tab') {
+      close(false) // native selects close on Tab and let focus move on
+    } else if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      // Single-char typeahead (native-select parity): jump to the next enabled option starting with the key.
+      const ch = e.key.toLowerCase()
+      const n = options.length
+      for (let k = 1; k <= n; k++) {
+        const i = (activeIdx + k + n) % n
+        if (!options[i].disabled && options[i].label.toLowerCase().startsWith(ch)) {
+          setActiveIdx(i)
+          break
+        }
+      }
+    }
+  }
+
   return (
     <>
       <button
@@ -189,7 +277,11 @@ export function SelectMenu({
         type="button"
         className={'sel-trigger' + (className ? ` ${className}` : '')}
         disabled={disabled}
-        onClick={() => setOpen((s) => !s)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={open ? listId : undefined}
+        onClick={() => (open ? close(false) : openMenu())}
+        onKeyDown={onTriggerKeyDown}
       >
         <span className={'sel-label' + (mono ? ' cmp-mono' : '')}>{current?.label ?? value}</span>
         <Icons.chevronDown size={12} />
@@ -197,17 +289,34 @@ export function SelectMenu({
       {open
         ? createPortal(
             <>
-              <div className="menu-backdrop sm-float-bg" onClick={() => setOpen(false)} />
-              <div ref={menuRef} className="row-menu sm-menu sm-float" style={style} onClick={(e) => e.stopPropagation()}>
+              <div className="menu-backdrop sm-float-bg" onClick={() => close(false)} />
+              <div
+                ref={menuRef}
+                id={listId}
+                role="listbox"
+                tabIndex={-1}
+                aria-activedescendant={activeIdx >= 0 ? `${listId}-o${activeIdx}` : undefined}
+                className="row-menu sm-menu sm-float"
+                style={style}
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={onMenuKeyDown}
+              >
                 {options.length === 0 ? <div className="rm-empty">—</div> : null}
-                {options.map((o) => (
+                {options.map((o, i) => (
                   <div
                     key={o.value}
-                    className={'rm-item' + (o.value === value ? ' active' : '') + (o.disabled ? ' disabled' : '')}
+                    id={`${listId}-o${i}`}
+                    role="option"
+                    aria-selected={o.value === value}
+                    aria-disabled={o.disabled || undefined}
+                    className={'rm-item' + (o.value === value ? ' active' : '') + (o.disabled ? ' disabled' : '') + (i === activeIdx ? ' kb' : '')}
+                    onMouseEnter={() => {
+                      if (!o.disabled) setActiveIdx(i)
+                    }}
                     onClick={() => {
                       if (o.disabled) return
                       onChange(o.value)
-                      setOpen(false)
+                      close(false)
                     }}
                   >
                     <span className={mono ? 'cmp-mono' : undefined}>{o.label}</span>

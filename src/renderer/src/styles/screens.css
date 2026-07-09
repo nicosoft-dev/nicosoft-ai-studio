@@ -1083,6 +1083,12 @@
 .sm-float-bg { z-index: 300; }
 .sm-float { z-index: 301; }
 .sm-menu { max-height: 320px; overflow-y: auto; }
+/* the listbox container takes programmatic focus (aria-activedescendant pattern) — the highlight lives on
+   the active row, not on the box */
+.sm-menu:focus { outline: none; }
+/* keyboard cursor row — same look as :hover so pointer + arrow keys read as ONE highlight */
+.rm-item.kb { background: var(--bg-3); color: var(--text-1); }
+.rm-item.kb svg { color: var(--text-2); }
 
 /* composer-controls dropdowns open upward (composer sits at the bottom); model menu adds a search box */
 .row-menu.up { top: auto; bottom: calc(100% + 6px); }
