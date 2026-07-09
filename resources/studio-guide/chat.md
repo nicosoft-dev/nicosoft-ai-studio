@@ -28,7 +28,10 @@ Type `/` in the composer:
 | `/default` | Back to the default acting mode |
 | `/mode <Ask\|Plan\|Auto>` | Set the permission mode |
 | `/memory` | Open Memory Live (the 3D memory cloud) |
-| `/workflow <name> [key=value …]` | Launch an enabled workflow; Tab fills the defaults for inline editing (see Workflows) |
+| `/workflow` | On its own, shows usage; `/workflow list` lists every workflow; `/workflow <name> [key=value …]` launches an enabled one (see Workflows) |
+| `/schedule` | On its own, shows usage; `/schedule list` lists every scheduled task; `/schedule <id\|name>` runs one right now (even a disabled one) |
+
+The palette shows just these two roots for workflows and tasks — not a row per item. Type `/workflow list` or `/schedule list` to see everything; the list appears in a dismissable block above the composer (it isn't sent to the model).
 
 ## Reading a reply
 

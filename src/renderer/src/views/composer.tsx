@@ -8,7 +8,8 @@ import { Icons } from '@/components/icons'
 import { AttachmentStrip } from '@/components/attachment-strip'
 import { ModelPicker, ThinkingPicker, ImageModelPicker, ModePicker } from '@/components/composer-controls'
 import { CommandPalette, matchCommands, type SlashCommand } from '@/components/command-palette'
-import { workflowCommandSpecs, parseWorkflowArgs, launchPayload, type WfCmdWorkflow } from '@/lib/workflow-command'
+import { parseWorkflowArgs, launchPayload, type WfCmdWorkflow } from '@/lib/workflow-command'
+import { resolveTarget } from '@/lib/command-routing'
 import { AGENT_ROLE_IDS } from '@shared/roles'
 import { toast } from '@/stores/toast'
 import { PathBar } from '@/components/path-bar'
@@ -220,6 +221,7 @@ export function Composer({
     const text = value.trim()
     if ((!text && attach.length === 0) || !ready || streaming || compacting) return // compacting: the send slot is a Stop button — Enter stays consistent with it
     setValue('')
+    setCmdOutput(null) // a real message supersedes any lingering /workflow · /schedule help block
     setTimeout(grow, 0)
     const images = attach.map((a) => ({ dataUrl: a.dataUrl, mime: a.mime, name: a.name }))
     setAttach([])
@@ -257,10 +259,11 @@ export function Composer({
     ? resolveConvCwd(conv, { ...cwdByExpert, [expert.id]: effectiveCwd }, messages)
     : effectiveCwd.trim() || null
 
-  // `/workflow <name> [k=v …]` (workflow-design §6.5 + §7.5 launch review): every ENABLED workflow
-  // surfaces as a palette command (drafts/disabled never do — §9 red line). The list is fetched when the
-  // palette opens, so a just-enabled workflow appears without a view switch. Running/validation lives in
-  // launchWorkflow via a latest-closure ref (same pattern as sendPromptRef).
+  // `/workflow <name> [k=v …]` (workflow-design §6.5 + §7.5 launch review): the `/workflow` ROOT command
+  // resolves the typed name against ENABLED workflows (drafts/disabled never run — §9 red line) and hands
+  // off to launchWorkflow. The list is fetched when the palette opens, so a just-enabled workflow resolves
+  // without a view switch. Running/validation lives in launchWorkflow via a latest-closure ref (same
+  // pattern as sendPromptRef).
   //
   // Launch discipline (§7.5, "whoever launches, checks"): in an AGENT role's conversation the command
   // does NOT start the run — it persists the command line, then main drives ONE visible role turn that
@@ -328,37 +331,114 @@ export function Composer({
   }
   const launchWorkflowRef = useRef(launchWorkflow)
   launchWorkflowRef.current = launchWorkflow
-  const [wfCommands, setWfCommands] = useState<SlashCommand[]>([])
+  // §4/D10: the palette shows exactly TWO root commands for this domain — `/workflow` and `/schedule` —
+  // never a per-item expansion (no `/workflow <name>` rows). Both stay matched while an argument is typed
+  // (takesArg). The other built-in commands (/new, /compact, …) are unaffected. The lists are cached when
+  // the palette is relevant so a command resolves synchronously (and can keep the input on a bad arg).
   const paletteRelevant = value.startsWith('/') && !value.includes('\n')
+  const [wfAll, setWfAll] = useState<Awaited<ReturnType<typeof window.api.workflows.list>>>([])
+  const [taskAll, setTaskAll] = useState<Awaited<ReturnType<typeof window.api.scheduled.list>>>([])
+  const [cmdOutput, setCmdOutput] = useState<string[] | null>(null) // transient help/list block (not persisted, never sent to the model)
   useEffect(() => {
     if (!paletteRelevant) return
     let alive = true
-    void window.api.workflows
-      .list()
-      .then((list) => {
-        if (!alive) return
-        setWfCommands(
-          workflowCommandSpecs(list).map((spec) => ({
-            name: spec.name,
-            desc: spec.desc,
-            takesArg: true,
-            params: spec.params,
-            complete: spec.complete,
-            run: (_ctx, arg) => launchWorkflowRef.current(spec.wf, arg)
-          }))
-        )
-      })
-      .catch(() => {})
+    void window.api.workflows.list().then((l) => alive && setWfAll(l)).catch(() => {})
+    void window.api.scheduled.list().then((l) => alive && setTaskAll(l)).catch(() => {})
     return () => {
       alive = false
     }
   }, [paletteRelevant])
+  // Drop a lingering /workflow · /schedule help block when the conversation changes (the composer isn't
+  // remounted per conversation) — the block belonged to the previous view.
+  useEffect(() => setCmdOutput(null), [activeConv])
+
+  // `/workflow` — bare = usage, `list` = every workflow, `<name> [k=v …]` = launch. Resolution is over
+  // ENABLED workflows only (§9 red line: a draft never runs); `list` shows all with a status dot. Reuses
+  // launchWorkflow so the launch keeps its review-turn / persisted-card discipline. Returns false to keep
+  // the typed input when the argument is bad. `list` is the full workflow set the resolve saw.
+  const actWorkflow = (list: typeof wfAll, arg?: string): boolean | undefined => {
+    const enabled = list.filter((w) => w.enabled)
+    const r = resolveTarget(enabled, arg, true)
+    if (r.kind === 'usage') {
+      setCmdOutput(['Usage:  /workflow list  ·  /workflow <name> [key=value …]', enabled.length ? `Enabled: ${enabled.map((w) => w.name).join(', ')}` : 'No enabled workflows.'])
+      return
+    }
+    if (r.kind === 'list') {
+      setCmdOutput(list.length ? list.map((w) => `${w.enabled ? '●' : '○'} ${w.name}${w.enabled ? '' : '  (draft)'}`) : ['No workflows saved.'])
+      return
+    }
+    if (r.kind === 'error') {
+      toast.error(r.message)
+      return false
+    }
+    setCmdOutput(null)
+    return launchWorkflowRef.current(r.target, r.rest || undefined)
+  }
+  // A cold cache (first command before the palette-open fetch resolved) would resolve against [] and give a
+  // spurious "No match" — so on an empty cache, fetch fresh and act on the result. The warm path stays
+  // synchronous so a bad arg can still keep the input (return false).
+  const runWorkflowCommand = (arg?: string): boolean | undefined => {
+    if (!wfAll.length) {
+      void window.api.workflows.list().then((l) => {
+        setWfAll(l)
+        actWorkflow(l, arg)
+      }).catch(() => {})
+      return
+    }
+    return actWorkflow(wfAll, arg)
+  }
+  const runWorkflowCommandRef = useRef(runWorkflowCommand)
+  runWorkflowCommandRef.current = runWorkflowCommand
+
+  // `/schedule` — bare = usage, `list` = every task, `<id|name>` = run it now (fireNow). A disabled task
+  // may be triggered (an explicit id/name is intent). Resolution is over ALL tasks. Toasts the outcome; the
+  // run itself is visible on the Scheduled page + the Tasks panel Running section.
+  const actSchedule = (list: typeof taskAll, arg?: string): boolean | undefined => {
+    const r = resolveTarget(list, arg, false)
+    if (r.kind === 'usage') {
+      setCmdOutput(['Usage:  /schedule list  ·  /schedule <id|name>', list.length ? `${list.length} task(s) — type “/schedule list” to see them.` : 'No scheduled tasks.'])
+      return
+    }
+    if (r.kind === 'list') {
+      setCmdOutput(list.length ? list.map((t) => `${t.enabled ? '●' : '○'} ${t.name}  ·  ${t.recurring ? (t.cron ?? 'recurring') : 'once'}  ·  ${t.id}`) : ['No scheduled tasks.'])
+      return
+    }
+    if (r.kind === 'error') {
+      toast.error(r.message)
+      return false
+    }
+    setCmdOutput(null)
+    const task = r.target
+    void window.api.scheduled
+      .fireNow(task.id)
+      .then((res) => (res.ok ? toast.success(`Running “${task.name}” now.`) : toast.error(res.error ?? `Couldn't run “${task.name}”.`)))
+      .catch(() => toast.error(`Couldn't run “${task.name}”.`))
+    return undefined
+  }
+  const runScheduleCommand = (arg?: string): boolean | undefined => {
+    if (!taskAll.length) {
+      void window.api.scheduled.list().then((l) => {
+        setTaskAll(l)
+        actSchedule(l, arg)
+      }).catch(() => {})
+      return
+    }
+    return actSchedule(taskAll, arg)
+  }
+  const runScheduleCommandRef = useRef(runScheduleCommand)
+  runScheduleCommandRef.current = runScheduleCommand
+
+  // The two root commands, rebuilt each render (cheap) — their run handlers read the latest closures via refs.
+  const rootCommands: SlashCommand[] = [
+    { name: 'workflow', desc: 'Run a saved workflow — list, or <name> [key=value …]', takesArg: true, run: (_c, arg) => runWorkflowCommandRef.current(arg) },
+    { name: 'schedule', desc: 'Run a scheduled task now — list, or <id|name>', takesArg: true, run: (_c, arg) => runScheduleCommandRef.current(arg) }
+  ]
 
   // Slash-command palette (optimization E): `/` at the start (no space yet) opens a quick-action menu.
   // Single-line `/…` input opens the palette; matchCommands does the precise filtering (so prose like
   // "/clear the cache" yields no match → closed), and multi-word commands like `/mode Ask` keep it open.
   const cmdQuery = paletteRelevant ? value : ''
-  const cmdMatches = cmdQuery ? matchCommands(cmdQuery, wfCommands) : []
+  const cmdMatches = cmdQuery ? matchCommands(cmdQuery, rootCommands) : []
   const cmdOpen = cmdMatches.length > 0
   const runCommand = (cmd: SlashCommand): void => {
     // arg = whatever the user typed after the command name (e.g. "Ask" in "/mode Ask"); undefined if none.
@@ -431,6 +511,16 @@ export function Composer({
             ) : null}
           </div>
           <AttachmentStrip items={attach} onRemove={(id) => setAttach((p) => p.filter((a) => a.id !== id))} />
+          {cmdOutput ? (
+            <div className="cmd-output">
+              <button className="cmd-output-x" title={t('common.close')} onClick={() => setCmdOutput(null)}>
+                <Icons.x size={12} />
+              </button>
+              {cmdOutput.map((line, i) => (
+                <div className="cmd-output-line" key={i}>{line}</div>
+              ))}
+            </div>
+          ) : null}
           {cmdOpen ? <CommandPalette matches={cmdMatches} index={cmdIndex} onPick={runCommand} /> : null}
           <textarea
             ref={taRef}
@@ -458,8 +548,10 @@ export function Composer({
                   setCmdIndex((i) => Math.max(i - 1, 0))
                   return
                 }
-                // Workflow entries with params: Tab fills the `k=v` defaults template for inline editing
-                // (§6.5 "Tab 内联改参"); Enter runs. Commands without a template keep Enter=Tab=run.
+                // A command that carries a `complete` template fills it into the composer for inline editing;
+                // Enter runs. No built-in command sets one today (the per-workflow expansion that used it was
+                // replaced by the `/workflow` root — §4/D10), so Tab currently just runs like Enter. Kept
+                // generic for any future template-bearing command.
                 if (e.key === 'Tab' && !native.isComposing && cmdMatches[cmdIndex]?.complete) {
                   e.preventDefault()
                   const filled = cmdMatches[cmdIndex].complete
