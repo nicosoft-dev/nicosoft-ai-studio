@@ -35,6 +35,7 @@ const STEP_KINDS: { v: StepKind; l: string }[] = [
   { v: 'email', l: 'Send email' },
   { v: 'project', l: 'Project' },
   { v: 'workflow', l: 'Workflow' },
+  { v: 'command', l: 'Command' },
 ]
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const DOW_OPTS = DOW.map((l, i) => ({ v: String(i), l }))
@@ -42,6 +43,37 @@ const PROJECT_ACTIONS = [
   { v: 'create', l: 'Create' },
   { v: 'advance', l: 'Advance' },
 ]
+// Command step (design doc §3.5): shell = a command string handed to a login shell; program = an executable
+// + args, no shell. 'auto' shell = the user's login shell (cmd on Windows).
+const COMMAND_MODES = [
+  { v: 'shell', l: 'Shell' },
+  { v: 'program', l: 'Program' },
+]
+const COMMAND_SHELLS = [
+  { v: 'auto', l: 'Default shell' },
+  { v: 'zsh', l: 'zsh' },
+  { v: 'bash', l: 'bash' },
+  { v: 'sh', l: 'sh' },
+  { v: 'powershell', l: 'PowerShell' },
+  { v: 'cmd', l: 'cmd' },
+]
+const ON_FAILURE_OPTS = [
+  { v: 'stop', l: 'Stop remaining steps' },
+  { v: 'continue', l: 'Continue anyway' },
+]
+
+// Split a program-args string on whitespace OUTSIDE double quotes (a quoted arg keeps its spaces; quotes are
+// stripped). Empty → [].
+function splitArgs(raw: string): string[] {
+  const tokens = raw.match(/(?:[^\s"]+|"[^"]*")+/g) ?? []
+  return tokens.map((tok) => tok.replace(/"([^"]*)"/g, '$1'))
+}
+// Inverse of splitArgs for the input's display value: an arg containing whitespace is re-quoted so the
+// round-trip is LOSSLESS (a plain join would drop the quotes, and the next keystroke would then split a
+// space-containing arg apart — the exact path-with-spaces case program mode exists to support).
+function joinArgs(args: string[]): string {
+  return args.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ')
+}
 
 const pad = (n: number): string => String(n).padStart(2, '0')
 
@@ -194,6 +226,14 @@ function StepChip({ step }: { step: StepDto }): ReactElement {
         <Icons.workflow size={13} /> Workflow
       </span>
     )
+  if (step.kind === 'command') {
+    const head = (step.mode ?? 'shell') === 'program' ? step.program || 'program' : (step.command || 'command').split('\n')[0]
+    return (
+      <span className="step-chip">
+        <Icons.terminal size={13} /> {head.slice(0, 28)}
+      </span>
+    )
+  }
   return (
     <span className="step-chip">
       <Icons.puzzle size={13} /> Tool
@@ -446,8 +486,10 @@ function ScheduledEditor({
                           onChange={(v) => {
                             const kind = v as StepKind
                             // Switching INTO workflow seeds the first enabled workflow + its defaults so
-                            // the step is runnable as saved; other kinds keep their own fields.
+                            // the step is runnable as saved; command seeds its shell default so the editor
+                            // renders complete; other kinds keep their own fields.
                             if (kind === 'workflow') setStep(i, { kind, workflowId: s.workflowId ?? workflows[0]?.id, workflowParams: s.workflowParams ?? wfDefaults(wfById(s.workflowId) ?? workflows[0]) })
+                            else if (kind === 'command') setStep(i, { kind, mode: s.mode ?? 'shell' })
                             else setStep(i, { kind })
                           }}
                         />
@@ -544,7 +586,75 @@ function ScheduledEditor({
                         })}
                       </div>
                     )}
-                    {s.kind !== 'workflow' && (
+                    {s.kind === 'command' && (
+                      <div className="se-cmd">
+                        <Segmented options={COMMAND_MODES} value={s.mode ?? 'shell'} onChange={(v) => setStep(i, { mode: v as 'shell' | 'program' })} />
+                        {(s.mode ?? 'shell') === 'shell' ? (
+                          <>
+                            <div className="se-cmd-row">
+                              <span className="se-cmd-label">Run with</span>
+                              <div style={{ width: 150 }}>
+                                <Dropdown options={COMMAND_SHELLS} value={s.shell ?? 'auto'} onChange={(v) => setStep(i, { shell: v as StepDto['shell'] })} />
+                              </div>
+                            </div>
+                            <textarea
+                              className="input se-instr mono"
+                              rows={3}
+                              value={s.command ?? ''}
+                              onChange={(e) => setStep(i, { command: e.target.value })}
+                              placeholder="./scripts/backup.sh --incremental"
+                            />
+                          </>
+                        ) : (
+                          <>
+                            <div className="se-cmd-row">
+                              <input className="input se-instr mono" value={s.program ?? ''} onChange={(e) => setStep(i, { program: e.target.value })} placeholder="/usr/local/bin/rclone" />
+                              <button
+                                className="btn sm"
+                                onClick={() => {
+                                  void window.api.scheduled.pickProgram().then((p) => {
+                                    if (p) setStep(i, { program: p })
+                                  })
+                                }}
+                              >
+                                Choose…
+                              </button>
+                            </div>
+                            <input className="input se-instr mono" value={joinArgs(s.args ?? [])} onChange={(e) => setStep(i, { args: splitArgs(e.target.value) })} placeholder="sync ~/Documents remote:docs" />
+                          </>
+                        )}
+                        <div className="se-cmd-opts">
+                          <label className="se-cmd-opt">
+                            <span className="se-cmd-label">Working dir</span>
+                            <input className="input mono" value={s.stepCwd ?? ''} onChange={(e) => setStep(i, { stepCwd: e.target.value })} placeholder="Inherits task directory" />
+                          </label>
+                          <label className="se-cmd-opt">
+                            <span className="se-cmd-label">Timeout (s)</span>
+                            <input
+                              className="input"
+                              type="number"
+                              min={1}
+                              value={s.timeoutSec ?? ''}
+                              onChange={(e) => {
+                                const n = Number(e.target.value)
+                                setStep(i, { timeoutSec: Number.isFinite(n) && n > 0 ? Math.round(n) : undefined })
+                              }}
+                              placeholder="600"
+                            />
+                          </label>
+                          <label className="se-cmd-opt">
+                            <span className="se-cmd-label">On failure</span>
+                            <div style={{ width: 170 }}>
+                              <Dropdown options={ON_FAILURE_OPTS} value={s.onFailure ?? 'stop'} onChange={(v) => setStep(i, { onFailure: v as 'stop' | 'continue' })} />
+                            </div>
+                          </label>
+                        </div>
+                        <div className="se-note se-cmd-warn">
+                          <Icons.alertTriangle size={13} /> Runs unattended with your full user permissions — not confined to the working directory. Output pipes into the next step; a non-zero exit marks the step failed.
+                        </div>
+                      </div>
+                    )}
+                    {s.kind !== 'workflow' && s.kind !== 'command' && (
                       <input
                         className="input se-instr"
                         value={s.prompt}

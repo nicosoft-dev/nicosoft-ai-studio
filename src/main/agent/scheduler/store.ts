@@ -165,6 +165,23 @@ export class ScheduledTaskStore {
     return ok
   }
 
+  // Bind a task to a conversation (the engine calls this on a user-created unbound task's first fire, so
+  // every later fire reuses the SAME "Scheduled · name" conversation instead of spawning a fresh orphan
+  // each time — a stable anchor for the Tasks panel's Running row + accumulated history). Deliberately does
+  // NOT emitChange: convId is not a schedule change, and this runs mid-fire where a re-arm would be noise.
+  setConvId(id: string, convId: string): boolean {
+    const apply = (tasks: ScheduledTask[], persist: () => void): boolean => {
+      const t = tasks.find((x) => x.id === id)
+      if (!t || t.convId) return false // never overwrite an existing binding
+      t.convId = convId
+      persist()
+      return true
+    }
+    const durable = readDurable()
+    if (apply(durable, () => writeDurable(durable))) return true
+    return apply(sessionTasks, () => {})
+  }
+
   // Edit a task in place (Scheduled page Save): re-parse the schedule (recomputing cron/nextRunAt/recurring)
   // and replace name/steps/cwd. Keeps id/createdAt/lastFiredAt/enabled/durable. Returns the updated task, or
   // null if the id isn't found or the schedule/steps are invalid.

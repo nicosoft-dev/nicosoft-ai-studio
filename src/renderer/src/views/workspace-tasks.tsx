@@ -17,9 +17,10 @@ import { useT } from '@/stores/locale'
 import { useConvTodos } from '@/stores/conv-todos'
 import { useConvServices } from '@/stores/conv-services'
 import { useWorkflowRuns } from '@/stores/workflow-runs'
+import { useScheduledRuns } from '@/stores/scheduled-runs'
 import { useAllExperts } from '@/lib/all-experts'
 import type { ToolCall } from '@/stores/chat'
-import type { WorkspaceTaskHistory, WorkspacePhase, WorkspaceExamine, WorkspaceService, WorkspaceWorkflowRun, ServiceInfo } from '@/lib/api'
+import type { WorkspaceTaskHistory, WorkspacePhase, WorkspaceExamine, WorkspaceService, WorkspaceWorkflowRun, WorkspaceScheduledRun, ServiceInfo } from '@/lib/api'
 
 const TASK: Record<string, { cls: string; labelKey: string }> = {
   pending: { cls: 'todo', labelKey: 'tasks.statusTodo' },
@@ -30,7 +31,7 @@ interface WsTask {
   content: string
   status: string
 }
-const EMPTY: WorkspaceTaskHistory = { phases: [], examines: [], services: [], workflows: [] }
+const EMPTY: WorkspaceTaskHistory = { phases: [], examines: [], services: [], workflows: [], scheduled: [] }
 
 function fmtTime(ms: number): string {
   try {
@@ -289,19 +290,23 @@ export function WorkspaceTasks({ activeConv }: { activeConv: string | null }): R
     | { kind: 'phase'; row: WorkspacePhase }
     | { kind: 'service'; row: WorkspaceService }
     | { kind: 'workflow'; row: WorkspaceWorkflowRun }
+    | { kind: 'scheduled'; row: WorkspaceScheduledRun }
   )[] = [
     ...history.phases.map((p) => ({ kind: 'phase' as const, row: p })),
     ...history.services.map((s) => ({ kind: 'service' as const, row: s })),
     // §7.5: settled workflow runs launched from THIS conversation — owner is the launching role, so the
     // per-owner History grouping attributes them like everything else
-    ...history.workflows.map((w) => ({ kind: 'workflow' as const, row: w }))
+    ...history.workflows.map((w) => ({ kind: 'workflow' as const, row: w })),
+    // §5: settled scheduled-task runs anchored to THIS conversation (creator's conv, else the run conv).
+    ...(history.scheduled ?? []).map((s) => ({ kind: 'scheduled' as const, row: s }))
   ].sort((a, b) => b.row.createdAt - a.row.createdAt)
 
   // Unify History into per-OWNER groups (like the Live section + the studio_lens panel): each owner's done review
   // panels + completed todo phases + exited services under ONE "● name" header, content below. Previously
   // owner-grouped panels were followed by a FLAT, owner-less phase/service list, so a finished phase from one role
   // (Shuri's) visually merged under the previous owner's header (Flynn's). Owner order = first-seen; '' = solo (no header).
-  const ownerOf = (it: (typeof timeline)[number]): string => (it.kind === 'workflow' ? (it.row.initiator ?? '') : (it.row.owner ?? ''))
+  const ownerOf = (it: (typeof timeline)[number]): string =>
+    it.kind === 'workflow' || it.kind === 'scheduled' ? (it.row.initiator ?? '') : (it.row.owner ?? '')
   const histGroups = [...new Set([...donePanels.map(([o]) => o), ...timeline.map(ownerOf)])]
     .map((owner) => ({
       owner,
@@ -319,9 +324,37 @@ export function WorkspaceTasks({ activeConv }: { activeConv: string | null }): R
   const wfRunning = useWorkflowRuns((s) => s.running)
   const wfEntries = Object.values(wfRunning).filter((r) => !!r.originConvId && r.originConvId === activeConv)
 
+  // — Running scheduled tasks (§5) — one row per in-flight scheduled run anchored to THIS conversation
+  // (the creating role's conversation for agent-created tasks, else the run's own conversation). Shows the
+  // task name, current step k/n + kind, and a Stop button (engine.stopRun aborts the chain).
+  const schedRunning = useScheduledRuns((s) => s.running)
+  const schedEntries = Object.values(schedRunning).filter((r) => r.anchorConvId === activeConv)
+
   return (
     <div className="ws-panel">
       <div className="ws-panel-body">
+        {schedEntries.length > 0 && (
+          <div className="ws-wfruns">
+            <div className="ws-sub-head">{t('tasks.scheduledRunning')}</div>
+            {schedEntries.map((r) => (
+              <div key={r.taskId} className="ws-wfrun ws-schedrun">
+                <span className="wf-dot run" />
+                <span className="ws-wfrun-name">{r.name || '…'}</span>
+                <span className="ws-wfrun-meta">
+                  {t('tasks.stepOf', { done: String(Math.min(r.stepIndex + 1, r.stepCount)), total: String(r.stepCount) })}
+                  {r.kind ? ` · ${r.kind}` : ''}
+                </span>
+                <button
+                  className="icon-btn sm ws-schedrun-stop"
+                  title={t('tasks.stopRun')}
+                  onClick={() => void window.api.scheduled.stopRun(r.taskId)}
+                >
+                  <Icons.x size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         {wfEntries.length > 0 && (
           <div className="ws-wfruns">
             <div className="ws-sub-head">{t('tasks.workflows')}</div>
@@ -430,6 +463,8 @@ export function WorkspaceTasks({ activeConv }: { activeConv: string | null }): R
                     <PhaseCard key={'p' + it.row.id} phase={it.row} t={t} />
                   ) : it.kind === 'service' ? (
                     <ServiceHistCard key={'s' + it.row.id} svc={it.row} t={t} />
+                  ) : it.kind === 'scheduled' ? (
+                    <ScheduledHistCard key={'sc' + it.row.id} run={it.row} t={t} />
                   ) : (
                     <WorkflowHistCard key={'w' + it.row.id} run={it.row} />
                   )
@@ -557,6 +592,44 @@ function WorkflowHistCard({ run }: { run: WorkspaceWorkflowRun }): ReactElement 
         via {kind} · ↑{fmtTok(run.inTokens)} ↓{fmtTok(run.outTokens)}
         {run.failDetail ? ` · ${run.failDetail.slice(0, 60)}` : ''}
       </div>
+    </div>
+  )
+}
+
+// A settled scheduled-task run in History (§5) — outcome + trigger + duration, expandable into the per-step
+// trail (kind · label · exit code · duration · output tail). No agent turn, so no token counts.
+function ScheduledHistCard({ run, t }: { run: WorkspaceScheduledRun; t: ReturnType<typeof useT> }): ReactElement {
+  const [open, setOpen] = useState(false)
+  const ok = run.result === 'ok'
+  const steps = run.steps ?? []
+  return (
+    <div className="ws-hist-card">
+      <div className={'ws-hist-head' + (steps.length ? ' ws-hist-click' : '')} onClick={() => steps.length && setOpen((o) => !o)}>
+        <Icons.clock size={13} />
+        <span className="ws-hist-title">{run.name}</span>
+        <span className={'task-status ' + (ok ? 'done' : 'fail')}>{ok ? 'ok' : run.error || 'error'}</span>
+        <span className="ws-hist-time">{run.durationMs != null ? fmtDur(run.durationMs) : ''}</span>
+      </div>
+      <div className="ws-svc-cmd ws-hist-cmd">
+        {t(run.trigger === 'manual' ? 'tasks.schedManual' : 'tasks.schedScheduled')} · {steps.length} {t('tasks.schedSteps')}
+      </div>
+      {open && steps.length > 0 && (
+        <div className="ws-sched-steps">
+          {steps.map((s, i) => (
+            <div key={i} className={'ws-sched-step' + (s.ok ? '' : ' fail')}>
+              <span className="ws-sched-step-k">
+                {i + 1} · {s.kind}
+                {s.label ? ` · ${s.label}` : ''}
+              </span>
+              <span className="ws-sched-step-meta">
+                {s.exitCode != null ? `exit ${s.exitCode} · ` : ''}
+                {fmtDur(s.ms ?? 0)}
+              </span>
+              {s.outputTail ? <div className="ws-sched-step-out mono">{s.outputTail.slice(0, 400)}</div> : null}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

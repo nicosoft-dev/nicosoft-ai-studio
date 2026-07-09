@@ -410,6 +410,7 @@ const api = {
     fireNow: (id: string): Promise<{ ok: boolean; convId?: string; error?: string }> =>
       ipcRenderer.invoke('scheduled:fireNow', id),
     stopRun: (id: string): Promise<boolean> => ipcRenderer.invoke('scheduled:stopRun', id),
+    pickProgram: (): Promise<string | null> => ipcRenderer.invoke('scheduled:pickProgram'),
     onFired: (cb: (d: ScheduledFiredEvent) => void): (() => void) => agentListen('scheduled:fired', cb),
     onChanged: (cb: () => void): (() => void) => agentListen('scheduled:changed', cb),
     onRunEvent: (cb: (ev: ScheduledRunEvent) => void): (() => void) => agentListen('scheduled:run:event', cb)

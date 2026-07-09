@@ -33,6 +33,7 @@ import * as rolesService from '../../services/roles.service'
 import * as endpointRepo from '../../repos/endpoint.repo'
 import * as convRepo from '../../repos/conversation.repo'
 import * as conversationService from '../../services/conversation.service'
+import * as workspaceTasks from '../../services/workspace/tasks'
 import * as keychain from '../../keychain/keychain'
 import { sessionBus } from '../session-bus'
 
@@ -305,6 +306,24 @@ class SchedulerEngine {
       // destroy the pending scheduled run). A timer fire consumes it on completion either way (its moment has
       // passed — keeping it would leave a dead past-nextRunAt entry).
       if (!task.recurring && !stopped && (trigger === 'schedule' || ok)) scheduledTaskStore.delete(task.id)
+      // §5: archive this run into the anchor conversation's Tasks History (creator's conv for agent-created
+      // tasks, else the run's own conv) with the per-step trail. Best-effort telemetry — recordScheduledRun
+      // swallows its own errors, so it never affects the fire outcome.
+      const anchorConvId = task.creatorConvId ?? runConvId
+      if (anchorConvId) {
+        workspaceTasks.recordScheduledRun(anchorConvId, {
+          taskId: task.id,
+          name: task.name,
+          result: ok ? 'ok' : 'error',
+          trigger,
+          firedAt: now,
+          initiator: task.creatorRoleId ?? null,
+          durationMs: Date.now() - startedAt,
+          runConvId,
+          error: errMsg,
+          steps: stepResults,
+        })
+      }
       this.controllers.delete(task.id)
       this.running.delete(task.id)
       emit({ phase: 'settle', ok })
@@ -331,6 +350,11 @@ class SchedulerEngine {
     const primaryRoleId = task.steps[0]?.roleId ?? DEFAULT_EXECUTOR
     const convId =
       task.convId ?? conversationService.create({ kind: 'chat', primaryRoleId, title: `Scheduled · ${task.name}` }).id
+    // A user-created UNBOUND task (no convId, no creator) would otherwise spawn a fresh orphan conversation
+    // on every fire — scattering the Tasks-panel Running row + one history card per orphan. Bind it to this
+    // conversation so every later fire reuses it (a stable anchor). Agent tasks anchor to creatorConvId and
+    // are left alone. setConvId is a no-op if a binding already exists.
+    if (!task.convId && !task.creatorConvId) scheduledTaskStore.setConvId(task.id, convId)
 
     // Self-rhythm reuse (batch 6): if the task is bound to a conversation that has a LIVE session, DELIVER its
     // agent steps into that session via the unified bus instead of starting a fresh headless run — which would

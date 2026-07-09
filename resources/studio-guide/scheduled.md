@@ -15,8 +15,24 @@ Background automation. A **scheduled task** fires on a trigger and runs a chain 
 | Send email | Compose Recipient (to), Subject and body — email always routes through your email MCP; Studio never sends mail itself |
 | Project | Create or Advance a project |
 | Workflow | Run an enabled workflow (with parameter values) |
+| Command | Run a shell command or a program directly — no expert, no model, no tokens |
 
 Tasks can be enabled/disabled, edited and deleted from their row. When a task fires, the work lands as conversation turns from the expert that ran it.
+
+### Command steps
+
+A **Command** step runs something on your machine directly, with no expert in the loop — ideal for a backup script, a sync, or any tool you'd normally run in a terminal. Two modes:
+
+- **Shell** — a command line handed to a shell (your login shell by default, so it resolves your `PATH`; pick zsh/bash/sh, or PowerShell/cmd on Windows). Multi-line is fine.
+- **Program** — an executable plus arguments, run *without* a shell. Choose the file with the picker; arguments are passed exactly as typed, so spaces and quotes are safe.
+
+Each command step also has a **Working directory** (defaults to the task's), a **Timeout** (default 10 minutes — the whole process tree is killed if it runs over), and an **On failure** choice (Stop the remaining steps, the default, or Continue anyway). The command's output is captured and piped into the next step, and a non-zero exit code marks the step failed.
+
+> ⚠️ A command runs unattended with your full user permissions and is **not** confined to the working directory (unlike an expert step's tools). Only schedule commands you'd run yourself.
+
+### Running & history in the Tasks panel
+
+While a task is running, it appears in the workspace **Tasks** panel (right drawer) under "Scheduled runs" with its current step and a **Stop** button. After it settles, the run drops into the panel's History — click a run to expand its per-step trail (each step's kind, exit code, duration and a snippet of output). The Scheduled page's own row also shows the last run's result.
 
 ## Monitors
 

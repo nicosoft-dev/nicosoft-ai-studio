@@ -5,10 +5,11 @@ The live-work drawer for the current conversation. Open it with ⌘J, or topbar 
 ## Sections
 
 - **Live** — each working expert's to-do list with statuses To do / In progress / Done and a "{done}/{total} done" summary. In coordinator or group conversations the items group per expert; in a solo chat they list flat.
+- **Scheduled runs** — scheduled tasks running right now that belong to this conversation: current step (k/n) and a **Stop** button that aborts the chain.
 - **Workflows** — workflow runs launched *from this conversation*: status at a glance, click to open the full run panel.
 - **Studio Lens** — findings when an expert runs a code review: each finding carries a verdict — Pass, Flagged or False positive.
 - **Services** — dev servers the experts started: Starting / Running / Exited, with **Stop** and **Logs** ("waiting for port" while booting).
-- **History** — settled workflow runs persist here; entries reopen as full replays. **Clear** empties the list.
+- **History** — settled workflow runs and scheduled runs persist here; a scheduled run expands into its per-step trail (kind, exit code, duration, output snippet), and workflow entries reopen as full replays. **Clear** empties the list.
 
 ## Notes
 

@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { scheduledTaskStore } from '../agent/scheduler/store'
 import { schedulerEngine } from '../agent/scheduler/engine'
+import { pickFile } from './dialogs'
 import type { CreateTaskInput } from './contracts'
 
 // Scheduled-task CRUD boundary (doc 28) — the Scheduled page's interface to the scheduler store. Thin: parse
@@ -19,4 +20,6 @@ export function registerScheduledHandlers(): void {
   ipcMain.handle('scheduled:delete', (_e, id: string) => scheduledTaskStore.delete(id))
   ipcMain.handle('scheduled:fireNow', (_e, id: string) => schedulerEngine.fireNow(id))
   ipcMain.handle('scheduled:stopRun', (_e, id: string) => schedulerEngine.stopRun(id))
+  // A command step's Program mode picks an executable via the native file dialog.
+  ipcMain.handle('scheduled:pickProgram', (e) => pickFile(e, { title: 'Choose a program' }))
 }

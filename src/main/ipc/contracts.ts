@@ -881,11 +881,27 @@ export interface WorkspaceWorkflowRunDto {
   startedAt: number
   finishedAt: number
 }
+// One settled scheduled-task run surfaced in the Tasks panel History (design doc §5), anchored to the
+// conversation the run belongs to (creator's conv for agent-created tasks, else the run's own conv).
+export interface WorkspaceScheduledRunDto {
+  id: number
+  createdAt: number
+  taskId: string
+  name: string
+  result: string // ok | error
+  trigger: string // schedule | manual
+  initiator?: string | null // §5: the creating role for an agent-created task (groups the History card); null = user
+  durationMs?: number
+  runConvId?: string // click-through to the conversation the chain ran in
+  error?: string
+  steps?: StepRunSummary[] // per-step trail (expandable)
+}
 export interface WorkspaceTaskHistoryDto {
   phases: WorkspacePhaseDto[]
   examines: WorkspaceExamineDto[]
   services: WorkspaceServiceDto[]
   workflows: WorkspaceWorkflowRunDto[]
+  scheduled: WorkspaceScheduledRunDto[]
 }
 export interface TasksHistoryChanged {
   convId: string

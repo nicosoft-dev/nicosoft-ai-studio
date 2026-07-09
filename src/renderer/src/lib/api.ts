@@ -19,6 +19,7 @@ export type WorkspacePhase = WorkspaceTaskHistory['phases'][number]
 export type WorkspaceExamine = WorkspaceTaskHistory['examines'][number]
 export type WorkspaceService = WorkspaceTaskHistory['services'][number]
 export type WorkspaceWorkflowRun = WorkspaceTaskHistory['workflows'][number]
+export type WorkspaceScheduledRun = WorkspaceTaskHistory['scheduled'][number]
 export type ServiceInfo = Awaited<ReturnType<typeof window.api.services.list>>[number]
 export type MemoryDto = Awaited<ReturnType<typeof window.api.memory.list>>[number]
 export type AnalyticsSummary = Awaited<ReturnType<typeof window.api.analytics.summary>>
