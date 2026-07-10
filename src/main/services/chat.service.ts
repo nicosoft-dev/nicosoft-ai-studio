@@ -193,6 +193,7 @@ async function buildContext(input: ChatSendInput): Promise<ChatMessage[]> {
   const keepFrom = Math.max(0, totalImgs - MAX_REPLAY_IMAGES)
   let imgIdx = 0
   for (const m of recent) {
+    if (convRepo.isCardRow(m)) continue // card rows are UI surfaces, never prose (G10)
     const role = m.author === 'user' ? 'user' : 'assistant'
     const atts = (Array.isArray(m.attachments) ? (m.attachments as { url?: string; mime?: string }[]) : [])
       .filter((a) => typeof a.url === 'string' && imgIdx++ >= keepFrom)

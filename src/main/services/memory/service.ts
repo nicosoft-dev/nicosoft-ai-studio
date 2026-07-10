@@ -62,7 +62,7 @@ Return a JSON array of 0-2 items. Each element: {"content": "<one concise senten
 - Only patterns that will recur (a check that was skipped, a wrong assumption, a verifier misjudgment pattern). Skip one-off facts tied to this task only.
 - No file paths or line numbers unless essential to the lesson.
 - ONLY IF a lesson is a reusable MULTI-STEP procedure (a workflow to follow next time, not a fact to know) that the closure verified end to end, ALSO add a "skill" field to that element: {"skill": {"name": "<short-kebab-case-slug>", "description": "<one line: what the procedure does>", "whenToUse": "<one line: when to reach for it>", "body": "<the procedure: preconditions, numbered steps, pitfalls, how to verify success>"}}. Most lessons do NOT warrant one — omit the field unless the multi-step shape is clear.
-- ONLY IF a lesson is a reusable MULTI-EXPERT pipeline (several DIFFERENT experts in a fixed order that the closure verified end to end — not one expert's checklist, which is a skill), ALSO add a "workflow" field: {"workflow": {"name": "<short-kebab-case-slug>", "description": "<one line: what the pipeline does>", "script": "<a complete studio workflow script>"}}. The script format: export const meta = { name: '<slug>', description: '<one line>', nsw: 1, params: [{ name: 'x', type: 'string', default: '…' }] } then one statement per step, e.g. const a = await agent(\`analyze \${params.x}\`, { role: 'analyst' }) — role must be one of ${WORKFLOW_ROLE_IDS}. It is rare for a lesson to warrant this — omit the field unless the multi-expert shape is clear.
+- ONLY IF a lesson is a reusable MULTI-EXPERT pipeline (several DIFFERENT experts in a fixed order that the closure verified end to end — not one expert's checklist, which is a skill), ALSO add a "workflow" field: {"workflow": {"name": "<short-kebab-case-slug>", "description": "<one line: what the pipeline does>", "script": "<a complete studio workflow script>"}}. The script format: export const meta = { name: '<slug>', description: '<one line>', nsw: 1, params: [{ name: 'x', type: 'string', default: '…' }] } then one statement per step, e.g. const a = await agent(\`analyze \${args.x}\`, { role: 'analyst' }) — declared params are read through the \`args\` global (args.x; args.runAt is the run's ISO fire time; there is NO \`params\` variable at run time), and role must be one of ${WORKFLOW_ROLE_IDS}. It is rare for a lesson to warrant this — omit the field unless the multi-expert shape is clear.
 - If nothing generalizes, return [].
 - Output ONLY the JSON array — no preamble, no explanation, no markdown code fence.`
 
@@ -102,7 +102,7 @@ export async function extract(ctx: ExtractContext, trigger: ExtractTrigger): Pro
     // Explicit "remember…" intent overrides the role's self-learning switch — the user asked directly.
     const selfLearning = trigger === 'explicit' || (roleRepo.getState(ctx.roleId)?.selfLearningEnabled ?? true)
 
-    let transcript = messages.map((m) => `${m.author === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n')
+    let transcript = messages.filter((m) => !convRepo.isCardRow(m)).map((m) => `${m.author === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n')
     if (transcript.length > MAX_TRANSCRIPT_CHARS) transcript = transcript.slice(-MAX_TRANSCRIPT_CHARS)
 
     const text = await chatOnce(target.ep, target.key, model, [
@@ -439,6 +439,7 @@ async function llmFilter(input: RecallInput, pool: MemoryRow[]): Promise<MemoryR
   const model = pickSmallModel(target.ep.protocol, target.ep.availableModels, input.model)
   const recent = convRepo
     .listByConversation(input.convId)
+    .filter((m) => !convRepo.isCardRow(m)) // card rows are machine payloads, not conversation (G10)
     .slice(-6)
     .map((m) => `${m.author === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
     .join('\n')

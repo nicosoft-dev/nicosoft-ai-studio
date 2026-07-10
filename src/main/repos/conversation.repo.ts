@@ -279,6 +279,16 @@ export function updateMessageContent(id: string, content: string): boolean {
   return getDb().prepare('UPDATE messages SET content = ? WHERE id = ?').run(content, id).changes > 0
 }
 
+// CARD rows — segmentKind marks the content as a machine JSON payload rendered as a UI card (a /workflow
+// launch record, a workflow draft card), NOT an utterance. G10: machine protocol never rides the prose
+// channel — every model-visible surface (history seeds, chat/step replay, compaction summaries, memory
+// extraction) must skip these rows. Draft cards double the stakes: their payload is patched IN PLACE
+// (superseded/created flags), so replaying them would also mutate the prompt-cache prefix retroactively.
+export const CARD_SEGMENT_KINDS = new Set(['workflow-launch', 'workflow-draft'])
+export function isCardRow(m: { segmentKind: string | null }): boolean {
+  return m.segmentKind !== null && CARD_SEGMENT_KINDS.has(m.segmentKind)
+}
+
 export function listByConversation(convId: string): MessageRow[] {
   // ORDER BY created_at, id: id is a monotonic ULID (db/id.ts), so within the same millisecond ids
   // strictly increase — the tiebreaker keeps messages in true creation order, which summary

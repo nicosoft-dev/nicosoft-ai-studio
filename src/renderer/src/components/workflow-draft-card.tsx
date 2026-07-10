@@ -82,7 +82,9 @@ export function WorkflowDraftCard({ content, expertId }: { content: string; expe
       .then(([l, all]) => {
         if (!alive) return
         setLint(l)
-        setUpdateTarget(!!l.name && !!convId && all.some((w) => w.name === l.name && w.originConvId === convId))
+        // Same key as main's §5.2 exemption: user-source + this conversation's provenance (a distilled
+        // row sharing the originConvId is NOT the update target — main refuses that name outright).
+        setUpdateTarget(!!l.name && !!convId && all.some((w) => w.name === l.name && w.originConvId === convId && w.source === 'user'))
       })
       .catch(() => {})
     return () => {
@@ -107,11 +109,25 @@ export function WorkflowDraftCard({ content, expertId }: { content: string; expe
     if (!convId || busy) return
     setBusy(true)
     setErr(null)
-    window.api.workflows
-      .createFromDraft({ convId, draftId: payload.draftId, script })
-      .then((w) => toast.success(t('wfd.created', { name: w.name }))) // the card flips via the conv:card patch broadcast
-      .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
-      .finally(() => setBusy(false))
+    void (async () => {
+      try {
+        // Re-resolve create-vs-update AT CLICK TIME: another card's confirm (or another window) may have
+        // created/deleted the same name since mount. If the true action differs from the label the user
+        // just read, flip the label and stop — the next click confirms what will actually happen.
+        const all = await window.api.workflows.list()
+        const target = !!lint?.name && all.some((w) => w.name === lint.name && w.originConvId === convId && w.source === 'user')
+        if (target !== updateTarget) {
+          setUpdateTarget(target)
+          return
+        }
+        const w = await window.api.workflows.createFromDraft({ convId, draftId: payload.draftId, script })
+        toast.success(t('wfd.created', { name: w.name })) // the card flips via the conv:card patch broadcast
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : String(e))
+      } finally {
+        setBusy(false)
+      }
+    })()
   }
   const openEditor = (): void => {
     // Prefill only — the editor persists nothing until its own Save (assisted authoring §6.2).

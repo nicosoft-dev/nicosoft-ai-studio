@@ -737,6 +737,7 @@ export function conversationToAgentMessages(messages: convRepo.MessageRow[]): Ag
   let elided = 0
   const out: AgentMessage[] = []
   for (const m of messages) {
+    if (convRepo.isCardRow(m)) continue // card rows are UI surfaces, never prose (G10) — see conversation.repo
     if (m.author === 'user') {
       const content: AnyBlock[] = []
       if (m.content) content.push({ type: 'text', text: m.content })

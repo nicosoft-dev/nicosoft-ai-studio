@@ -1178,9 +1178,9 @@ export const useChat = create<ChatState>((set, get) => {
       set((s) => {
         const msgs = (s.byConversation[convId] ?? []).map((m) => ({ ...m }))
         let i = -1
-        // Card rows (workflow launch records) are role 'assistant' but not turns — the receipt anchors
-        // to the newest REAL assistant segment, never to a card (whose renderer shows no blocks).
-        for (let j = msgs.length - 1; j >= 0; j--) if (msgs[j].role === 'assistant' && msgs[j].segmentKind !== 'workflow-launch') { i = j; break }
+        // Card rows (workflow launch records / draft cards) are role 'assistant' but not turns — the
+        // receipt anchors to the newest REAL assistant segment, never to a card (whose renderer shows no blocks).
+        for (let j = msgs.length - 1; j >= 0; j--) if (msgs[j].role === 'assistant' && msgs[j].segmentKind !== 'workflow-launch' && msgs[j].segmentKind !== 'workflow-draft') { i = j; break }
         if (i < 0) return s // no assistant segment to anchor (degenerate history) — toasts cover the outcome
         planted = true
         msgs[i] = { ...msgs[i], blocks: [...(msgs[i].blocks ?? []), { kind: 'compaction', tokens: 0, auto: false, manual: true, pending: true, startedAt: Date.now() }] }

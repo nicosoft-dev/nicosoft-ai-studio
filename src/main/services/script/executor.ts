@@ -565,6 +565,10 @@ export interface RunScriptOptions {
   // Absent → 批 1 pure-computation path (no primitives).
   orchestration?: OrchestrationHooks
   timeoutMs?: number
+  // Threaded into parseScript. The workflow contract allows description:'' (the list shows the role
+  // chain) and every save/lint/preflight gate passes allowEmptyDescription — the RUN parse must match,
+  // or an empty-description workflow fails at start with a script-error no gate ever showed.
+  parse?: ParseScriptOptions
 }
 
 export type RunScriptResult = { ok: true; meta: ScriptMeta; value: unknown } | { ok: false; error: string }
@@ -573,7 +577,7 @@ export type RunScriptResult = { ok: true; meta: ScriptMeta; value: unknown } | {
 // is the 批 1 pure-computation path (args in, value out). With it (批 2), agent/parallel/pipeline are live and
 // the script orchestrates sub-agents through the injected spawnAgent hook.
 export async function runScript(opts: RunScriptOptions): Promise<RunScriptResult> {
-  const parsed = parseScript(opts.src)
+  const parsed = parseScript(opts.src, opts.parse)
   if ('error' in parsed) return { ok: false, error: parsed.error }
 
   const t = transpile(parsed.scriptBody)

@@ -98,6 +98,10 @@ interface LiveRun {
   phase: string | null
   steps: LiveStep[]
   logs: string[]
+  // True when this view SUBSCRIBED MID-RUN and missed step-start events (a launch-card click mounts the
+  // view after step 1 already started): stubbed steps render live, and once the run settles the panel
+  // prefers the DB replay over this incomplete picture.
+  partial?: boolean
 }
 type LiveMap = Record<string, LiveRun>
 
@@ -119,7 +123,14 @@ function runReducer(state: LiveMap, ev: RunEvent): LiveMap {
   const step = (i: number): LiveStep | undefined => next.steps[i]
   const putStep = (i: number, patch: Partial<LiveStep>): void => {
     const cur = step(i)
-    if (cur) next.steps[i] = { ...cur, ...patch }
+    if (cur) {
+      next.steps[i] = { ...cur, ...patch }
+      return
+    }
+    // An event for a step whose step-start we never saw (subscribed mid-run) — stub the slot so its
+    // deltas/tools render instead of vanishing; the panel backfills role/hint from the projection.
+    next.partial = true
+    next.steps[i] = { index: i, role: '?', phase: next.phase, hint: '', status: 'running', text: '', reasoning: '', inTok: 0, outTok: 0, startedAt: Date.now(), tools: [], notes: [], ...patch }
   }
   switch (ev.kind) {
     case 'status':
@@ -199,6 +210,10 @@ function runReducer(state: LiveMap, ev: RunEvent): LiveMap {
 
 type Sub = { kind: 'list' } | { kind: 'edit'; id: string | null; script?: string } | { kind: 'run'; workflowId: string; runId: string }
 
+// Last consumed external-request nonces (module scope — must survive WorkflowsView remounts, see below).
+let consumedRunNonce = 0
+let consumedEditNonce = 0
+
 export function WorkflowsView({
   runRequest = null,
   editRequest = null,
@@ -220,11 +235,20 @@ export function WorkflowsView({
     void window.api.workflows.list().then(setItems).catch(() => {})
   }
   useEffect(reload, [])
+  // External requests are ONE-SHOT: App keeps the last request in state (it can't know when we consumed
+  // it), so a remount would replay it forever — every later sidebar visit reopening the old run panel /
+  // re-seeding a ghost editor. The consumed nonces live at module scope precisely to survive remounts.
   useEffect(() => {
-    if (runRequest) setSub({ kind: 'run', workflowId: runRequest.workflowId, runId: runRequest.runId })
+    if (runRequest && runRequest.nonce !== consumedRunNonce) {
+      consumedRunNonce = runRequest.nonce
+      setSub({ kind: 'run', workflowId: runRequest.workflowId, runId: runRequest.runId })
+    }
   }, [runRequest?.nonce])
   useEffect(() => {
-    if (editRequest) setSub({ kind: 'edit', id: editRequest.workflowId ?? null, script: editRequest.workflowId ? undefined : editRequest.script })
+    if (editRequest && editRequest.nonce !== consumedEditNonce) {
+      consumedEditNonce = editRequest.nonce
+      setSub({ kind: 'edit', id: editRequest.workflowId ?? null, script: editRequest.workflowId ? undefined : editRequest.script })
+    }
   }, [editRequest?.nonce])
   useEffect(
     () =>
@@ -676,7 +700,9 @@ function WorkflowEditor({
   const [script, setScript] = useState<string>(workflow?.script ?? initialScript ?? NEW_SCRIPT)
   const [savedId, setSavedId] = useState<string | null>(workflow?.id ?? null)
   const [lint, setLint] = useState<LintDto | null>(null)
-  const [dirty, setDirty] = useState(false)
+  // A prefilled NEW editor starts DIRTY: the drafted script exists nowhere yet, so Save must be live
+  // immediately — the whole point of "Open in editor" is persisting it (possibly untouched).
+  const [dirty, setDirty] = useState(!workflow && !!initialScript)
   const [cursorLine, setCursorLine] = useState(1)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const preRef = useRef<HTMLPreElement>(null)
@@ -982,9 +1008,12 @@ function RunPanel({
     return undefined
   }, [running])
 
-  // replay a settled run: run row + hidden-conv messages + transcript tool cards
+  // replay a settled run: run row + hidden-conv messages + transcript tool cards. A PARTIAL live entry
+  // (subscribed mid-run — see LiveRun.partial) also loads the replay once its run settles: the live
+  // picture is missing the pre-subscribe steps, and the DB has the complete record by settle time.
+  const settledPartial = !!liveRun && liveRun.status !== 'running' && liveRun.partial === true
   useEffect(() => {
-    if (liveRun) { setReplay(null); return }
+    if (liveRun && !settledPartial) { setReplay(null); return }
     void (async () => {
       const run = await window.api.workflows.runGet(runId)
       if (!run) return
@@ -994,7 +1023,7 @@ function RunPanel({
       for (const [rid, t] of Object.entries(transcript)) tools[rid] = t.tools.map((tc) => ({ id: tc.id, name: tc.name, status: tc.status, result: typeof tc.result === 'string' ? tc.result : undefined }))
       setReplay({ run, msgs, tools })
     })()
-  }, [runId, liveRun === undefined])
+  }, [runId, liveRun === undefined, settledPartial])
 
   // static projection: phases per agent-step order (rail scaffold + replay phase labels) — phase nodes
   // precede their agents in source order, so thread the current phase onto each agent entry
@@ -1010,13 +1039,17 @@ function RunPanel({
     return out
   }, [projection])
 
-  const runRow = liveRun ? runs.find((r) => r.id === runId) : replay?.run
-  const steps: ViewStep[] = liveRun
+  // A settled PARTIAL live entry hands over to the replay the moment it loads (complete record); a
+  // healthy live entry keeps rendering seamlessly across the settle (no blank-and-reload flash).
+  const showLive = !!liveRun && !(settledPartial && replay)
+  const runRow = showLive ? runs.find((r) => r.id === runId) : replay?.run
+  const steps: ViewStep[] = showLive && liveRun
     ? liveRun.steps.filter(Boolean).map((s) => ({
         index: s.index,
-        role: s.role,
-        phase: s.phase,
-        hint: s.hint,
+        // Stubbed mid-run slots (role '?') backfill their identity from the static projection.
+        role: s.role === '?' ? (projAgents[s.index]?.role ?? '?') : s.role,
+        phase: s.phase ?? projAgents[s.index]?.phase ?? null,
+        hint: s.hint || (projAgents[s.index]?.hint ?? ''),
         status: s.status,
         text: s.text,
         inTok: s.inTok,
@@ -1062,7 +1095,7 @@ function RunPanel({
   const sigma = liveRun && running ? null : runRow // settled Σ from the run row (turn-final aggregate)
   const runNo = runs.length ? runs.length - runs.findIndex((r) => r.id === runId) : null
   const paramChips = Object.entries(runRow?.params ?? {}).map(([k, v]) => `${k}=${String(v)}`)
-  const elapsed = liveRun ? fmtDur(Date.now() - liveRun.startedAt) : runRow?.finishedAt ? fmtDur(new Date(runRow.finishedAt).getTime() - new Date(runRow.startedAt).getTime()) : ''
+  const elapsed = showLive && liveRun ? fmtDur(Date.now() - liveRun.startedAt) : runRow?.finishedAt ? fmtDur(new Date(runRow.finishedAt).getTime() - new Date(runRow.startedAt).getTime()) : ''
   const doneCount = steps.filter((s) => s.status === 'ok').length
 
   const stop = (): void => { void window.api.workflows.stop(runId) }

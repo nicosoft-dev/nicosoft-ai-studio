@@ -87,9 +87,17 @@ export function makeLaunchDecisionTool(req: LaunchReviewRequest): Tool {
       const mode = input.mode ?? 'async'
       const subscribe: notify.WorkflowNotifyKind[] = input.subscribe?.length ? input.subscribe : ['result', 'error']
       const dropCard = (runId: string): void => {
-        const payload = JSON.stringify({ v: 1, workflowId: req.workflow.id, runId, name: req.workflow.name, params: req.params })
-        const row = convService.append(req.convId, { author: 'expert', content: payload, segmentKind: 'workflow-launch' })
-        req.onCard(row.id, payload)
+        // Tolerant: the card is the launch's RECORD, not its precondition. If the conversation was
+        // deleted mid-review-turn the append throws on the FK — the run is already live, so failing
+        // here must not fall into the "could not start" catch below (async would also skip its notify
+        // registration); the run stays visible on the Workflows page either way.
+        try {
+          const payload = JSON.stringify({ v: 1, workflowId: req.workflow.id, runId, name: req.workflow.name, params: req.params })
+          const row = convService.append(req.convId, { author: 'expert', content: payload, segmentKind: 'workflow-launch' })
+          req.onCard(row.id, payload)
+        } catch (e) {
+          console.warn('[workflow] launch card could not be persisted (conversation gone?):', e instanceof Error ? e.message : e)
+        }
       }
       // The event sink: the shared broadcast + the notify matcher (no-op unless this run registered).
       const sink = (ev: WorkflowRunEvent): void => {

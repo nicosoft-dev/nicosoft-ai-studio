@@ -414,6 +414,7 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
     const keepFrom = Math.max(0, totalImgs - MAX_REPLAY_IMAGES)
     let imgIdx = 0
     for (const m of recent) {
+      if (convRepo.isCardRow(m)) continue // card rows are UI surfaces, never prose (G10)
       const role = m.author === 'user' ? 'user' : 'assistant'
       const kept = Array.isArray(m.attachments) ? (m.attachments as { url?: string; mime?: string }[]).filter((a) => typeof a.url === 'string' && imgIdx++ >= keepFrom) : []
       const atts = messageAttachments(kept)

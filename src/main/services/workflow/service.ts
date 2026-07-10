@@ -14,6 +14,7 @@ import * as rolesService from '../roles.service'
 import * as convService from '../conversation.service'
 import { scan, parseFull, NSW_VERSION } from './scanner'
 import { analyze } from './analyze'
+import { effectiveCwd } from './rules'
 import { parseScript } from '../script/executor'
 import * as settingsService from '../settings.service'
 import { normalizeMemoryName as normalizeSlug } from '../memory/agent-memory'
@@ -96,7 +97,9 @@ export function lint(script: string): WorkflowLintDto {
   const scanned = scan(script)
   const issues = [...s.issues]
   if (!/^[a-z0-9][a-z0-9_-]*$/.test(s.name)) {
-    issues.push({ line: 1, message: `meta.name must be a kebab-case slug (try \`${normalizeSlug(s.name) || 'my-workflow'}\`)` })
+    // The suggestion must itself pass this regex — normalizeSlug keeps a leading '-'/'_' verbatim.
+    const suggest = (normalizeSlug(s.name) || '').replace(/^[^a-z0-9]+/, '') || 'my-workflow'
+    issues.push({ line: 1, message: `meta.name must be a kebab-case slug (try \`${suggest}\`)` })
   }
   if (s.steps === 0) issues.push({ line: 1, message: 'the script has no agent() step' })
   const unknownRoles = s.roles.filter((r) => !known.has(r))
@@ -202,8 +205,20 @@ export function setEnabled(id: string, enabled: boolean): WorkflowDto {
   return toDto(updated as WorkflowRow)
 }
 
-export function remove(id: string): void {
-  // Delete the runs' hidden conversations first (no FK between conversations and runs); the run rows
+export async function remove(id: string): Promise<void> {
+  // Stop any LIVE runs first: deleting the rows under a streaming executor otherwise leaves it burning
+  // LLM tokens against cascade-deleted conversations, failing per-step persists on FK violations, with
+  // no Stop surface left (the list row is gone). stop() aborts the run's controllers; a late finish()
+  // against the deleted row is a harmless no-op UPDATE.
+  for (const r of runRepo.listByWorkflow(id)) {
+    if (r.status !== 'running') continue
+    try {
+      await stop(r.id)
+    } catch (e) {
+      console.warn('[workflow] failed to stop a live run before delete:', e instanceof Error ? e.message : e)
+    }
+  }
+  // Delete the runs' hidden conversations (no FK between conversations and runs); the run rows
   // themselves cascade with the workflow row.
   for (const convId of runRepo.convIdsByWorkflow(id)) {
     try {
@@ -286,7 +301,10 @@ export function importConfirm(script: string): WorkflowDto {
     const first = l.scan.violations[0]
     throw new Error(`security scan failed — line ${first.line}: ${first.message}`)
   }
-  let name = normalizeSlug(l.name ?? '') || 'imported-workflow'
+  // normalizeSlug keeps an already-[a-z0-9_-] name verbatim, which admits a leading '-'/'_' the kebab
+  // lint rejects — strip it here or the import lands a draft that can never be ACTIVATED (setEnabled
+  // re-runs the lint gate). The normalization exists precisely so the landed row conforms.
+  let name = (normalizeSlug(l.name ?? '') || 'imported-workflow').replace(/^[^a-z0-9]+/, '') || 'imported-workflow'
   let finalScript = script
   if (name !== l.name) finalScript = rewriteMetaName(finalScript, name)
   if (repo.getByName(name)) {
@@ -332,9 +350,16 @@ export function distillUpsert(input: DistillWorkflowInput): DistillWorkflowOutco
   const name = normalizeSlug(input.name.trim())
   if (!name) return { kind: 'rejected', error: 'workflow needs a slug name' }
   // Sync the meta to the (normalized) proposal fields FIRST, so the gate below checks what will land.
-  // rewriteMeta never throws — a script whose meta doesn't even validate comes back UNCHANGED and the
-  // lint below rejects it with the real parse error (the proposal must carry a complete meta).
-  const script = rewriteMeta(input.script, { name, description: input.description })
+  // rewriteMeta returns the script UNCHANGED when the meta doesn't validate (the lint below then rejects
+  // it with the real parse error) — but serializeMeta JSON-round-trips meta VALUES, so a pure-literal
+  // value JSON can't represent (a BigInt) throws inside; catch it into the rejected outcome the
+  // gate-lesson caller expects instead of letting the pipeline's blanket catch eat it.
+  let script: string
+  try {
+    script = rewriteMeta(input.script, { name, description: input.description })
+  } catch {
+    return { kind: 'rejected', error: 'meta contains values that cannot be serialized — use JSON-safe literals only' }
+  }
   const l = lint(script)
   if (l.scan && !l.scan.ok) {
     const first = l.scan.violations[0]
@@ -345,8 +370,10 @@ export function distillUpsert(input: DistillWorkflowInput): DistillWorkflowOutco
 
   const existing = repo.getByName(name)
   if (existing && existing.source === 'distilled') {
-    // update-over-duplicate: refresh the procedure, keep the user's enabled decision untouched
-    const row = repo.update(existing.id, { description: l.description ?? input.description, script, params: l.params, cwd: l.cwd })
+    // update-over-duplicate: refresh the procedure, keep the user's enabled decision untouched.
+    // Same missing-cwd guard as the create branch/importConfirm — a refresh from another machine must
+    // not land a nonexistent directory in the mirror column where a fresh distill would blank it.
+    const row = repo.update(existing.id, { description: l.description ?? input.description, script, params: l.params, cwd: l.cwdWarning === 'missing' ? null : l.cwd })
     if (!row) return { kind: 'rejected', error: 'update failed' }
     return { kind: 'updated', name, active: row.enabled }
   }
@@ -413,8 +440,11 @@ export function draftCard(input: DraftCardInput): DraftCardOutcome {
   const name = l.name as string
   // Same-name exemption: a workflow this CONVERSATION already created via a card is the thing being
   // revised — allow the draft through; confirm takes the update path (§5.2). Any other clash bounces.
+  // source==='user' is part of the key: a DISTILLED workflow can carry this conversation's originConvId
+  // too (the gate-lesson pipeline stamps it), and "updating" that row would leave it a disabled
+  // source='distilled' draft the next distillation silently overwrites — not what the card promises.
   const clash = repo.getByName(name)
-  const update = clash !== null && clash.originConvId === input.convId
+  const update = clash !== null && clash.originConvId === input.convId && clash.source === 'user'
   if (clash && !update) return { ok: false, error: `a workflow named "${name}" already exists — pick another name` }
   // Context guard: the card is a user-facing confirmation surface — it needs a conversation someone can
   // SEE. A workflow run's hidden conversation (kind='workflow') has no one to confirm.
@@ -456,8 +486,8 @@ export function createFromDraft(req: { convId: string; draftId: string; script: 
   const l = gateOrThrow(script) // same gate as any save — roles may have been disabled since the card landed
   const clash = repo.getByName(l.name as string)
   const dto =
-    clash && clash.originConvId === req.convId
-      ? save({ id: clash.id, script }) // §5.2 update semantics: revising what this conversation created
+    clash && clash.originConvId === req.convId && clash.source === 'user'
+      ? save({ id: clash.id, script }) // §5.2 update semantics: revising what this conversation created (same key as draftCard)
       : save({ script, origin: { roleId: card.expertId, convId: req.convId } })
   const patched = convService.patchDraftCard(req.convId, req.draftId, { createdWorkflowId: dto.id })
   if (patched) broadcastConvCard(req.convId, patched)
@@ -481,6 +511,13 @@ export function preflightRun(id: string, params: Record<string, string | number 
     if (typeof v === 'string' && v.trim() && (!existsSync(v.trim()) || !statSync(v.trim()).isDirectory())) {
       throw new Error(`folder param \`${p.name}\`: ${v} is not a directory on this machine`)
     }
+  }
+  // Same rationale for the cwd the steps will ACTUALLY confine to (a run-provided folder param overrides
+  // meta.cwd — rules.effectiveCwd): a saved cwd deleted since save, or one imported from another machine,
+  // would otherwise fail every step's tool calls while the LLM streams burn tokens.
+  const cwd = effectiveCwd(row, params)
+  if (cwd && (!existsSync(cwd) || !statSync(cwd).isDirectory())) {
+    throw new Error(`working folder ${cwd} is not a directory on this machine — edit the workflow or pass a folder param`)
   }
   return row
 }

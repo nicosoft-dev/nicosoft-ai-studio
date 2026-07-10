@@ -196,6 +196,10 @@ async function executeRun(opts: {
   const result = await runScript({
     src: workflow.script,
     args,
+    // Match the save/lint/preflight gates: the workflow contract allows description:'' (the list shows
+    // the role chain) — without this every empty-description workflow failed AT RUN with a script-error
+    // none of the gates ever surfaced (the New-workflow template ships description:'').
+    parse: { allowEmptyDescription: true },
     orchestration: {
       spawnAgent,
       signal,

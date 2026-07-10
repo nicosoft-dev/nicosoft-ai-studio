@@ -198,7 +198,9 @@ async function foldSummary(
   model: string,
   signal?: AbortSignal
 ): Promise<string | null> {
-  const lines = fold.map((m) => `${m.author === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+  // Card rows (workflow launch/draft — machine JSON payloads) never feed the summary text; the fold's
+  // covered_up_to bookkeeping still spans them (they stay in the DB for rendering, they're just not prose).
+  const lines = fold.filter((m) => !convRepo.isCardRow(m)).map((m) => `${m.author === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
   const prior = prev ? `Existing summary so far:\n${prev.content}\n\n` : ''
   const transcript = lines.join('\n')
 
