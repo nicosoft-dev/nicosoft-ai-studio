@@ -79,18 +79,26 @@ export async function add(input: SkillInput, ownerPluginId?: string): Promise<Sk
 
 // Imported: parse the folder's SKILL.md (throws on missing file / empty body), MATERIALIZE the folder
 // into extensions/skills/<id>/ (design §4.3 — the install owns its payload; the user deleting their
-// download no longer breaks the skill), and snapshot its fields. A source already under extensions/
-// (a plugin-owned skill inside the plugin's copy) is referenced in place — never copied twice.
+// download no longer breaks the skill), and snapshot its fields FROM THE COPY — the copy is what the
+// install actually owns, and re-parsing it is the post-copy verification (a symlinked SKILL.md is
+// skipped by materialize, so a source-only parse would have minted a row over a gutted copy). A source
+// already under extensions/ (a plugin-owned skill inside the plugin's copy) is referenced in place.
 async function createImported(input: SkillInput, ownerPluginId?: string): Promise<SkillRow> {
   if (!input.dirPath) throw new Error('Imported skill needs a folder path')
-  const parsed = loadSkillDir(input.dirPath) // validate the SOURCE before copying anything
+  // Validate the SOURCE first (clearest error names the user's own folder) and keep its parse: the
+  // loader's name fallback is basename(dir), which on the COPY would be the ULID folder — the name
+  // must come from the user's world, the content snapshot from the copy we own.
+  const sourceParsed = loadSkillDir(input.dirPath)
   const id = newExtensionId()
   const materialize = !isMaterializedPath(input.dirPath)
-  const dirPath = materialize ? await materializeDirCopy('skills', id, input.dirPath) : input.dirPath
+  const dirPath = materialize
+    ? await materializeDirCopy('skills', id, input.dirPath, { requireFiles: ['SKILL.md'] })
+    : input.dirPath
   try {
+    const parsed = loadSkillDir(dirPath) // re-verify + snapshot from the copy, not the source
     return skillRepo.create({
       id,
-      name: input.name?.trim() || parsed.name,
+      name: input.name?.trim() || sourceParsed.name,
       description: input.description ?? parsed.description,
       whenToUse: input.whenToUse ?? parsed.whenToUse,
       source: 'imported',
@@ -139,7 +147,9 @@ export async function update(id: string, patch: SkillInput): Promise<SkillDto | 
     let dirPath = patch.dirPath ?? existing.dirPath ?? ''
     if (patch.dirPath && patch.dirPath !== existing.dirPath && !isMaterializedPath(patch.dirPath)) {
       loadSkillDir(patch.dirPath) // validate the new source before replacing the copy
-      dirPath = await materializeDirCopy('skills', existing.id, patch.dirPath)
+      // Atomic re-materialize: the old copy survives any copy failure (incl. a symlinked-away SKILL.md,
+      // caught by requireFiles) — the loadSkillDir(dirPath) below then re-parses the copy that DID land.
+      dirPath = await materializeDirCopy('skills', existing.id, patch.dirPath, { requireFiles: ['SKILL.md'] })
     }
     const parsed = dirPath ? loadSkillDir(dirPath) : null
     repatch = {

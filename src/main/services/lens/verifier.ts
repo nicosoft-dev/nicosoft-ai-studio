@@ -31,7 +31,10 @@ export function chooseVerifierRole(implementer: string | string[]): string {
   const exclude = new Set(Array.isArray(implementer) ? implementer : [implementer])
   const order = ['analyst', 'engineer', 'frontend', 'generalist', 'scheduler', 'translator', 'editor', 'designer']
   return (
-    order.find((r) => !exclude.has(r) && agentService.AGENT_ROLE_IDS.has(r) && Boolean(rolesService.getBinding(r)?.endpointId)) ??
+    // isDispatchReady, not just "has a binding row": a binding whose endpoint is gone/disabled or whose
+    // key is missing would be picked here and then fail the verifier step (same predicate the router
+    // pool and facilitate use — one readiness definition everywhere a role is CHOSEN to run).
+    order.find((r) => !exclude.has(r) && agentService.AGENT_ROLE_IDS.has(r) && rolesService.isDispatchReady(r)) ??
     'generalist'
   )
 }

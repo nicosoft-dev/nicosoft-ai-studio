@@ -4,6 +4,7 @@ import * as chatService from '../services/chat.service'
 import * as compressionService from '../services/compression.service'
 import { LlmError } from '../llm/types'
 import { broadcastUsage } from './usage-broadcast'
+import { registerLiveRun } from '../agent/live-runs'
 import { DeltaCoalescer } from './stream-coalesce'
 import type { ChatSendInput, ChatCompressInput } from './contracts'
 
@@ -23,6 +24,10 @@ export function registerChatHandlers(): void {
     const streamId = ulid()
     const controller = new AbortController()
     streams.set(streamId, controller)
+    // Conv-addressable abort (live-runs registry): deleting the conversation aborts its in-flight chat
+    // stream too, so nothing keeps appending to deleted rows. (Renderer-gone still deliberately does NOT
+    // abort chat — this hook only fires on deletion.)
+    const offLive = registerLiveRun(input.convId, () => controller.abort())
     const sender = e.sender
     const sendEvent = (channel: string, data: unknown): void => {
       if (!sender.isDestroyed()) sender.send(channel, data)
@@ -83,6 +88,7 @@ export function registerChatHandlers(): void {
       })
       .finally(() => {
         flushLanes() // belt-and-suspenders: no armed timer may outlive the stream
+        offLive() // the stream is over — conv deletion must not "abort" it later
         streams.delete(streamId)
       })
 

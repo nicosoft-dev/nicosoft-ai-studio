@@ -12,6 +12,7 @@ import { forwardLlmEvent, type RunStreamSink } from '../services/agent-dispatch'
 import * as compressionService from '../services/compression.service'
 import * as workspaceTasks from '../services/workspace/tasks'
 import { sessionBus, type InjectionOutcome } from '../agent/session-bus'
+import { registerLiveRun } from '../agent/live-runs'
 import { drainSoloResume } from '../services/solo-async'
 import { ENGINEER_ROLE_ID } from '../services/agent-tools'
 import { isSoloPreviewWriteTool } from '../agent/tools/preview'
@@ -67,6 +68,10 @@ export function startAgentRun(input: AgentRunInput, sender: WebContents, opts?: 
   const streamId = ulid()
   const roleId = input.roleId ?? ENGINEER_ROLE_ID
   const { controller, send, finish } = streams.open(streamId, sender)
+  // Conv-addressable abort (live-runs registry): conversation deletion — role delete, plugin uninstall,
+  // direct delete — stops this run instead of leaving it streaming into deleted rows. The old role-delete
+  // path only aborted coordinator UI runs; solo runs kept burning tokens (lifecycle review 2026-07-11).
+  const offLive = registerLiveRun(input.convId, () => controller.abort())
   permissions.open(streamId)
   pendingQByStream.set(streamId, new Set())
 
@@ -231,6 +236,7 @@ export function startAgentRun(input: AgentRunInput, sender: WebContents, opts?: 
       })
       .finally(() => {
         lanes.flushAll() // belt-and-suspenders: no armed timer may outlive the stream
+        offLive() // the run is over — conv deletion must not "abort" it later
         workspaceTasks.finalizeConv(input.convId) // run silent → finalize an all-complete phase (design §5 P19)
         sweepStream(streamId) // deny any prompt the renderer never answered before the run ended
         finish()

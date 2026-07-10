@@ -14,6 +14,7 @@ import { LlmError } from '../llm/types'
 import { broadcastConvImage, broadcastConvTodos, broadcastUsage } from './usage-broadcast'
 import { broadcastRunEvent } from './workflow.handler'
 import { StreamRegistry } from './stream-lifecycle'
+import { abortLiveRuns, registerLiveRun } from '../agent/live-runs'
 import { CoalescerGroup } from './stream-coalesce'
 import { PermissionBridge } from './permission-bridge'
 import { serializeAssistantBlocks, serializeToolResults } from './agent-serialize'
@@ -46,15 +47,12 @@ const streams = new StreamRegistry()
 export function abortAllCoordinatorRuns(): void {
   streams.abortAll()
 }
-// conv → live coordinator stream ids. Lets project delete (一键停删) abort a project's in-flight
-// collaboration WITHOUT knowing its streamId — the run may have started from chat, the Workbench dock,
-// or another window. Coordinator UI runs only; the scheduler's headless runs have their own controllers.
-const liveByConv = new Map<string, Set<string>>()
+// Conv-addressable abort now rides the shared live-runs registry (agent/live-runs.ts) — coordinator UI
+// runs register there alongside solo/chat streams, so project delete (一键停删), role delete, and
+// conversation.service.remove itself can stop a conversation's ENTIRE live surface without knowing any
+// streamId or which handler owns it. This export stays as the handler-facing verb (project.handler uses it).
 export function abortConversationRuns(convId: string): void {
-  for (const sid of liveByConv.get(convId) ?? []) {
-    streams.abort(sid)
-    sweepStream(sid)
-  }
+  abortLiveRuns(convId)
 }
 // Dispatched-tool approvals (phase 2 still pop to the user — doc 19 §14): the shared bridge owns the pending
 // Map + delete-guarded settle + terminal sweep (same machinery as agent.handler); this handler supplies the
@@ -70,9 +68,11 @@ export function registerCoordinatorHandlers(): void {
     const streamId = ulid()
     const sender = e.sender
     const { controller, send, finish } = streams.open(streamId, sender)
-    let convSet = liveByConv.get(input.convId)
-    if (!convSet) liveByConv.set(input.convId, (convSet = new Set()))
-    convSet.add(streamId)
+    // Abort + sweep together: an aborted run's pending approval dialogs must clear with it.
+    const offLive = registerLiveRun(input.convId, () => {
+      streams.abort(streamId)
+      sweepStream(streamId)
+    })
     permissions.open(streamId)
     // 16ms delta coalescing (streaming-render-alignment §3.1), one lane per (kind × roleId) — collab/
     // dispatch interleave several experts' streams on this ONE streamId and their deltas must never merge
@@ -235,8 +235,7 @@ export function registerCoordinatorHandlers(): void {
         lanes.flushAll() // belt-and-suspenders: no armed timer may outlive the stream
         workspaceTasks.finalizeConv(input.convId) // turn silent → finalize an all-complete phase (design §5 P19)
         sweepStream(streamId) // deny any approval the renderer never answered before the turn ended
-        convSet.delete(streamId)
-        if (convSet.size === 0) liveByConv.delete(input.convId)
+        offLive() // the run is over — conv deletion must not "abort" it later
         finish()
       })
 

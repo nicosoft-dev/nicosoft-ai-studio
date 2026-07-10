@@ -1,10 +1,12 @@
 import * as roleRepo from '../repos/role.repo'
 import * as memoryRepo from '../repos/memory.repo'
 import * as convRepo from '../repos/conversation.repo'
+import * as endpointRepo from '../repos/endpoint.repo'
+import * as keychain from '../keychain/keychain'
 import * as convService from './conversation.service'
 import { transaction } from '../db/connection'
 import { AGENT_ROLE_IDS, ROLE_DISPLAY_NAMES } from '@shared/roles'
-import { DISPATCHABLE_ROLE_IDS } from '../agent/roles/prompts'
+import { DISPATCHABLE_ROLE_IDS, roleIdFromName } from '../agent/roles/prompts'
 import type {
   CustomRoleCreateDto,
   CustomRoleDto,
@@ -104,8 +106,9 @@ export function remove(roleId: string): void {
   // fan-out (assignments, monitor/self-rhythm/hook/file-watch disposal, async ops, pipeline todos,
   // media files, on-disk session dirs). The old raw removeByRole cascade skipped all of it, leaving
   // orphaned assignment rows, armed watchers, and media/transcripts on disk (lifecycle review
-  // 2026-07-10). Live runs are aborted at the IPC layer BEFORE this (roles.handler), same as project
-  // deletion. Best-effort per conversation: one failed cleanup must not strand the role itself.
+  // 2026-07-10). Live runs are aborted INSIDE conversation.service.remove (the shared live-runs
+  // registry) — so this path stops them even when called with no IPC layer in sight (plugin uninstall).
+  // Best-effort per conversation: one failed cleanup must not strand the role itself.
   for (const convId of convRepo.listIdsByRole(roleId)) {
     try {
       convService.remove(convId)
@@ -160,22 +163,49 @@ export function dispatchableRoleIds(): string[] {
   return [...DISPATCHABLE_ROLE_IDS, ...roleRepo.listCustom().filter((r) => r.agent).map((r) => r.id)]
 }
 
+// Can this role actually RUN a dispatched step right now? Binding (endpoint + model) → endpoint row
+// exists and is enabled → an API key in the keychain: the exact four checks runRoleStep throws on.
+// Asked at ROUTING time so Danny's pool never offers a role whose dispatch would fail on arrival
+// (lifecycle review 2026-07-11: an agent-enabled custom role with no binding was selectable, then died
+// in step.ts). Capability surfaces (workflow lint, profile pages) deliberately do NOT use this —
+// readiness is transient config, not identity; only the live dispatch pool filters by it.
+// frontend inherits engineer's binding via getBinding, so Shuri stays ready whenever Flynn is.
+export function isDispatchReady(roleId: string): boolean {
+  const b = getBinding(roleId)
+  if (!b?.endpointId || !b.model) return false
+  const ep = endpointRepo.getById(b.endpointId)
+  if (!ep?.enabled) return false
+  try {
+    return keychain.getApiKey(b.endpointId) !== null
+  } catch {
+    // An unreadable keychain (OS store unavailable) means the role cannot run a step RIGHT NOW — that's
+    // the truthful answer, and the router must degrade gracefully rather than crash the routing turn.
+    return false
+  }
+}
+
 export function listCustom(): CustomRoleDto[] {
   return roleRepo.listCustom().map(toCustomDto)
 }
 
 // Role names are ROUTING IDENTITY, not just display: Danny routes by name, @mentions match by name,
-// and roleIdFromName resolves a duplicate to one winner (built-in first, then the first agent twin) —
-// so a second role with the same name is silently unreachable. Reject the collision at the write gate
-// (case-insensitive, against built-in display names AND other custom roles); existing duplicates in
-// the wild keep working under the prefer-agent rule, we just stop minting new ambiguity.
+// and roleIdFromName resolves a duplicate to one winner — so a second role reachable by the same string
+// is silently unreachable. The gate therefore asks THE RESOLVER ITSELF: if this name resolves to any
+// actual role other than the one being renamed, it's taken. That covers everything the resolver matches —
+// built-in display names ("Flynn"), built-in raw ids ("engineer" — the earlier display-name-only check
+// let a custom "engineer" through that then always routed to Flynn), other customs' names, and other
+// customs' ulids (verbatim-id match). Existing duplicates in the wild keep working under the resolver's
+// prefer-agent rule; we just stop minting new ambiguity.
 function assertNameFree(name: string, selfId?: string): void {
-  const lower = name.toLowerCase()
-  if (Object.values(ROLE_DISPLAY_NAMES).some((n) => n.toLowerCase() === lower)) {
-    throw new Error(`"${name}" is a built-in expert's name — pick another`)
+  const resolved = roleIdFromName(name)
+  if (resolved === selfId) return // renaming a role to (a case variant of) its own name/id is fine
+  if (ROLE_DISPLAY_NAMES[resolved]) {
+    throw new Error(`"${name}" already addresses the built-in expert ${ROLE_DISPLAY_NAMES[resolved]} — pick another name`)
   }
-  const twin = roleRepo.listCustom().find((r) => r.id !== selfId && r.name.trim().toLowerCase() === lower)
-  if (twin) throw new Error(`a custom role named "${name}" already exists — names must stay unique so @mentions and routing are unambiguous`)
+  if (roleRepo.getCustom(resolved)) {
+    throw new Error(`"${name}" already addresses an existing custom role — names must stay unique so @mentions and routing are unambiguous`)
+  }
+  // Anything else is the resolver's lowercase passthrough for an unknown name — free to take.
 }
 
 // Create a new user-defined role. The fresh role starts ENABLED (no role_states row inserted; the
@@ -192,7 +222,11 @@ export function createCustom(input: CustomRoleCreateDto): CustomRoleDto {
 // built-in id is a silent no-op (returns null) — the IPC layer surfaces that as null to the caller.
 export function updateCustom(id: string, patch: CustomRoleUpdateDto): CustomRoleDto | null {
   const trimmed = patch.name?.trim()
-  if (trimmed) assertNameFree(trimmed, id) // renames pass the same uniqueness gate as create
+  // Gate only an ACTUAL rename. A patch that carries the role's unchanged name (the editor always sends
+  // the full form) must not re-litigate it — a LEGACY role whose name is already shadowed (pre-gate
+  // twin, or an old custom named like a built-in id) would otherwise be unable to edit ANY field, since
+  // its own name resolves to the other role and the gate throws (adversarial review 2026-07-11).
+  if (trimmed && trimmed !== roleRepo.getCustom(id)?.name) assertNameFree(trimmed, id)
   const safe = trimmed !== undefined ? { ...patch, name: trimmed || undefined } : patch
   const row = roleRepo.updateCustom(id, safe)
   return row ? toCustomDto(row) : null

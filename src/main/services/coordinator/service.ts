@@ -664,13 +664,14 @@ async function facilitate(question: string, positions: { role: string; text: str
   const target = endpointWithKey(binding.endpointId)
   if (!target || !target.ep.enabled) return { action: 'converge' }
   const disabled = disabledRoleIds()
-  // Only experts that can actually speak: not disabled, not already on the panel, AND have a binding —
-  // Designer (image role, no chat binding) would just fail + get filtered, leaving a dangling "Bringing in
-  // Designer" note. Excluding it here keeps Coordinator from pulling in someone who can't contribute.
+  // Only experts that can actually speak: not disabled, not already on the panel, AND dispatch-ready
+  // (binding + live endpoint + API key — the full runRoleStep precondition, not just "has a binding row";
+  // an endpoint-less binding passed the old check and still failed downstream). Designer (image role, no
+  // chat binding) would just fail + get filtered, leaving a dangling "Bringing in Designer" note.
   const available =
     panel.length >= MAX_PANEL
       ? []
-      : rolesService.dispatchableRoleIds().filter((r) => !disabled.has(r) && !panel.includes(r) && !!rolesService.getBinding(r)?.endpointId)
+      : rolesService.dispatchableRoleIds().filter((r) => !disabled.has(r) && !panel.includes(r) && rolesService.isDispatchReady(r))
   const messages: ChatMessage[] = [
     { role: 'system', content: COORDINATOR_FACILITATOR_PROMPT },
     { role: 'user', content: buildFacilitateInput(question, positions, panel, available) }

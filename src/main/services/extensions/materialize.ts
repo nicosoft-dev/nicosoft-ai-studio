@@ -15,7 +15,7 @@
 // design decision 2); only NEW installs are materialized.
 
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { cp, lstat, mkdir, rm } from 'node:fs/promises'
+import { cp, lstat, mkdir, rename, rm } from 'node:fs/promises'
 import { basename, join, resolve, sep } from 'node:path'
 import { dataDir } from '../../db/connection'
 import { ulid } from '../../db/id'
@@ -49,28 +49,93 @@ export function isMaterializedPath(p: string): boolean {
   return resolve(p).startsWith(resolve(extensionsRoot()) + sep)
 }
 
-// Deep-copy the user's source folder into extensions/<kind>/<id>/, replacing any prior copy for that id.
-// SYMLINKS ARE SKIPPED OUTRIGHT (not dereferenced, not preserved): the old dereference:true would follow
-// a link pointing ANYWHERE — a skill folder containing `creds -> ~/.ssh` copied the target's CONTENT into
-// the app's data root — and copying the link itself would leave the materialized payload pointing outside
+// Size guardrails for a materialized copy. Generous enough for a real payload (an MCP server folder can
+// legitimately carry node_modules), far below a mis-pointed source (~ or a repo checkout root) that would
+// flood the app data dir. Exceeding either aborts the copy — and thanks to the tmp+swap dance below, an
+// aborted copy costs nothing: the previous payload stays untouched.
+export const MATERIALIZE_MAX_FILES = 50_000
+export const MATERIALIZE_MAX_BYTES = 2 * 1024 * 1024 * 1024 // 2 GiB
+
+export interface MaterializeOptions {
+  // Paths (relative to the copy root) that MUST exist in the copy before it replaces the old payload —
+  // e.g. a skill's SKILL.md. Catches the "critical file was a symlink and got skipped" install: better a
+  // clean failure that keeps the previous copy than a silently gutted one.
+  requireFiles?: string[]
+  // Test seams — production callers never pass these.
+  maxFiles?: number
+  maxBytes?: number
+}
+
+// Deep-copy the user's source folder into extensions/<kind>/<id>/, replacing any prior copy for that id
+// ATOMICALLY: copy into a sibling tmp dir, verify it, then swap it in (old aside → tmp in → drop old).
+// The old rm-then-cp order destroyed the previous payload BEFORE the new copy was proven — a mid-copy
+// failure left the DB row pointing at a gutted dir. Now the copy either fully lands or the previous
+// payload stays untouched (a failed swap rolls the old dir back).
+// SYMLINKS ARE SKIPPED OUTRIGHT (not dereferenced, not preserved): dereference:true would follow a link
+// pointing ANYWHERE — a skill folder containing `creds -> ~/.ssh` copied the target's CONTENT into the
+// app's data root — and copying the link itself would leave the materialized payload pointing outside
 // its own folder. Nothing in a self-contained copy may reference the world outside it. Async end to end:
 // this runs on install — sometimes from an agent tool mid-turn — and a large source folder must not block
 // the main process. .git and .DS_Store are dead weight and are skipped. Returns the internal path.
-export async function materializeDirCopy(kind: ExtensionKind, id: string, srcDir: string): Promise<string> {
+export async function materializeDirCopy(kind: ExtensionKind, id: string, srcDir: string, opts?: MaterializeOptions): Promise<string> {
   if (!existsSync(srcDir)) throw new Error(`source folder not found: ${srcDir}`)
+  const safe = safeSegment(id)
   const dest = materializedDir(kind, id)
-  await rm(dest, { recursive: true, force: true })
-  await mkdir(dest, { recursive: true })
-  await cp(srcDir, dest, {
-    recursive: true,
-    dereference: false,
-    filter: async (src) => {
-      const b = basename(src)
-      if (b === '.git' || b === '.DS_Store') return false
-      return !(await lstat(src)).isSymbolicLink()
+  // Staging siblings of dest (same fs → rename is atomic). safeSegment never allows dots, so `.tmp-…` /
+  // `.old-…` can't collide with a real extension id. Deterministic names double as crash self-healing:
+  // clear any leftovers from an earlier interrupted install of this same id before starting.
+  const tmp = join(extensionsRoot(), kind, `.tmp-${safe}`)
+  const old = join(extensionsRoot(), kind, `.old-${safe}`)
+  await rm(tmp, { recursive: true, force: true })
+  await rm(old, { recursive: true, force: true })
+  const maxFiles = opts?.maxFiles ?? MATERIALIZE_MAX_FILES
+  const maxBytes = opts?.maxBytes ?? MATERIALIZE_MAX_BYTES
+  let files = 0
+  let bytes = 0
+  try {
+    await mkdir(tmp, { recursive: true })
+    await cp(srcDir, tmp, {
+      recursive: true,
+      dereference: false,
+      filter: async (src) => {
+        const b = basename(src)
+        if (b === '.git' || b === '.DS_Store') return false
+        const st = await lstat(src)
+        if (st.isSymbolicLink()) return false
+        if (st.isFile()) {
+          files += 1
+          bytes += st.size
+          if (files > maxFiles || bytes > maxBytes) {
+            // Throwing from the filter rejects the whole cp() — the tmp dir is discarded below.
+            throw new Error(
+              `source folder exceeds the install limit (${maxFiles.toLocaleString()} files / ${Math.round(maxBytes / (1024 * 1024))} MB) — point the install at the extension's own folder, not a parent directory`
+            )
+          }
+        }
+        return true
+      }
+    })
+    for (const f of opts?.requireFiles ?? []) {
+      if (!existsSync(join(tmp, f))) {
+        throw new Error(`the copied folder is missing required file "${f}" — if it is a symlink in the source, replace it with a real file (symlinks are not copied)`)
+      }
     }
-  })
-  return dest
+    // Swap. If moving tmp into place fails after the old copy was set aside, restore the old copy —
+    // never leave the id with NO payload while its DB row still points here.
+    const hadOld = existsSync(dest)
+    if (hadOld) await rename(dest, old)
+    try {
+      await rename(tmp, dest)
+    } catch (e) {
+      if (hadOld) await rename(old, dest).catch(() => {})
+      throw e
+    }
+    await rm(old, { recursive: true, force: true }).catch(() => {})
+    return dest
+  } catch (e) {
+    await rm(tmp, { recursive: true, force: true }).catch(() => {})
+    throw e
+  }
 }
 
 // Remove an extension's materialized payload (dir + the mcp manifest file). Best-effort by design: a

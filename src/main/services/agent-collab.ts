@@ -460,7 +460,9 @@ export async function runCollabSession(
         }
         reasonByRole.set(x.roleId, result.reason)
         compactCarry = result.compact // §4a — hand the anchor to the next wake
-        return result.messages
+        // The reason rides the return — the collab scheduler settles injected notes off it (a refusal /
+        // thrash_stop turn must NOT read as 'completed' to an awaiting scheduled chain).
+        return { messages: result.messages, reason: result.reason }
       },
     }
   })

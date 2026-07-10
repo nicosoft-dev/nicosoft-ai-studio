@@ -36,6 +36,7 @@ import * as conversationService from '../../services/conversation.service'
 import * as workspaceTasks from '../../services/workspace/tasks'
 import * as keychain from '../../keychain/keychain'
 import { sessionBus, type InjectionOutcome } from '../session-bus'
+import { registerLiveRun } from '../live-runs'
 
 // Cap one timer at 6h: bounds a far-future task's delay (setTimeout overflows past ~24.8d) and re-checks
 // after system sleep / clock changes. NOT a poll — a timer exists ONLY while an enabled task is scheduled,
@@ -286,6 +287,13 @@ class SchedulerEngine {
     let ok = false
     let stopped = false
     let errMsg: string | undefined
+    // Conv-addressable abort (live-runs registry): the chain's HEADLESS steps stream into the run conv
+    // under the chain's own controller — invisible to the IPC handlers' registrations — so deleting that
+    // conversation (directly, or via role delete cascading it) must abort the chain here, not leave an
+    // unattended bypass-permission agent burning tokens into deleted rows (adversarial review 2026-07-11).
+    // On the live-inject branch the same hook stops the chain the moment its TARGET conv is deleted,
+    // instead of failing at the next step's hasDelivery re-check.
+    let offLive: (() => void) | undefined
     try {
       convId = await this.runChain(
         task,
@@ -293,6 +301,7 @@ class SchedulerEngine {
         stepResults,
         (cid) => {
           runConvId = cid
+          offLive ??= registerLiveRun(cid, () => controller.abort())
           emit({ phase: 'start' })
         },
         (i, kind) => emit({ phase: 'step', stepIndex: i, kind }),
@@ -338,6 +347,7 @@ class SchedulerEngine {
           steps: stepResults,
         })
       }
+      offLive?.() // the fire is over — conv deletion must not "abort" a settled chain later
       this.controllers.delete(task.id)
       this.running.delete(task.id)
       emit({ phase: 'settle', ok })

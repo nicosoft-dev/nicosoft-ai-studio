@@ -3,12 +3,14 @@ import { join } from 'node:path'
 import { dataDir } from '../db/connection'
 import * as convRepo from '../repos/conversation.repo'
 import * as assignmentService from './assignment.service'
+import * as compressionService from './compression.service'
 import * as titleService from './title.service'
 import * as workspaceTasks from './workspace/tasks'
 import { disposeSoloAsync } from './solo-async'
 import { resetPipelineTodos } from './pipeline-todos'
 import { monitorService } from './monitor.service'
 import { selfRhythmService } from './self-rhythm.service'
+import { abortLiveRuns } from '../agent/live-runs'
 import { hookRegistry } from '../agent/hooks/registry'
 import { fileWatchManager } from '../agent/hooks/file-watch'
 import { persistDataUrl, removeConversationMedia } from '../media/storage'
@@ -166,6 +168,12 @@ export async function generateTitle(input: ConversationTitleInput): Promise<stri
 }
 
 export function remove(convId: string): void {
+  // FIRST: abort every live run still streaming into this conversation (solo agent / coordinator UI /
+  // plain chat — the shared live-runs registry). Deletion reaches here from many entry points (direct
+  // delete, role delete, plugin uninstall via rolesService.remove) and only SOME of them pass an IPC
+  // handler that could stop runs — so the stop lives HERE, at the one choke point every path shares.
+  abortLiveRuns(convId)
+  compressionService.cancelCompact(convId) // an in-flight fold's LLM call must not finish against deleted rows
   convRepo.remove(convId)
   assignmentService.removeByConversation(convId) // assignments carry no FK on conv_id — cascade here (docs/assignments-design.md §6)
   workspaceTasks.dropLive(convId) // workspace_task_history rows cascade via FK; the in-memory live phase doesn't

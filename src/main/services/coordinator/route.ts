@@ -56,6 +56,9 @@ export async function route(userInput: string, history: convRepo.MessageRow[], c
   //    and names with digits/spaces ("@Ada2") resolve instead of being truncated at the first non-letter.
   //    Only a FULL name followed by a boundary (end / non-alphanumeric) takes the fast path; a partial,
   //    disabled, unknown or chat-only @mention falls through to the LLM router.
+  //    Deliberately NOT readiness-filtered: an @mention is the user explicitly addressing a role —
+  //    dispatching it and failing with the actionable "no endpoint binding" error beats silently
+  //    rerouting their explicit choice to someone else.
   const mention = matchMention(userInput, enabled)
   if (mention) {
     // Assignments: the 0-LLM fast path has no router judgment, so work-vs-chat falls to the SAME
@@ -66,28 +69,44 @@ export async function route(userInput: string, history: convRepo.MessageRow[], c
     return { mode: 'single', role: mention.id, reason: 'explicit @mention', needsPlan: isNonTrivialTask(userInput), ...(w.isWork ? { isWork: true, taskTitle: w.title } : {}) }
   }
 
+  // Danny's POOL is stricter than the mention universe: drop roles that cannot run a step right now
+  // (no binding / dead endpoint / no API key — isDispatchReady, the same four checks runRoleStep throws
+  // on). Offering an unrunnable role to the LLM router just moved the failure to dispatch time
+  // (step.ts bad_request); filtering here keeps the router's pool and its roster prompt coherent
+  // (lifecycle review 2026-07-11).
+  const ready = enabled.filter((r) => rolesService.isDispatchReady(r))
+  if (ready.length === 0) {
+    // Zero experts can run a step right now. If Danny himself is dispatch-ready he answers DIRECT —
+    // his own binding is all direct mode needs, and chitchat that worked pre-filter must keep working
+    // (the router LLM used to pick 'direct' for it). Only when Danny can't run either do we fall back
+    // to single/enabled[0], whose dispatch error tells the user what to configure.
+    return rolesService.isDispatchReady('coordinator')
+      ? { mode: 'direct', reason: 'no dispatch-ready experts — answering directly', needsPlan: false }
+      : { mode: 'single', role: enabled[0], reason: 'no dispatch-ready roles', needsPlan: isNonTrivialTask(userInput) }
+  }
+
   const binding = rolesService.getBinding('coordinator')
-  if (!binding?.endpointId || !binding.model) return { mode: 'single', role: enabled[0], reason: 'coordinator not configured' }
+  if (!binding?.endpointId || !binding.model) return { mode: 'single', role: ready[0], reason: 'coordinator not configured' }
   const ep = endpointRepo.getById(binding.endpointId)
-  if (!ep || !ep.enabled) return { mode: 'single', role: enabled[0], reason: 'endpoint missing' }
+  if (!ep || !ep.enabled) return { mode: 'single', role: ready[0], reason: 'endpoint missing' }
   const apiKey = keychain.getApiKey(binding.endpointId)
-  if (!apiKey) return { mode: 'single', role: enabled[0], reason: 'no api key' }
+  if (!apiKey) return { mode: 'single', role: ready[0], reason: 'no api key' }
 
   const workflows = routableWorkflows()
-  const messages = buildRouterMessages(userInput, history, enabled, workflows)
+  const messages = buildRouterMessages(userInput, history, ready, workflows)
   let tier1: RouteDecision
   try {
     const text = await chatOnce(ep, apiKey, binding.model, messages, {
       thinking: resolveDepth(ep.protocol, binding.model, binding.thinkingDepth),
       signal,
     })
-    tier1 = parseRouteDecision(text, enabled, workflows)
+    tier1 = parseRouteDecision(text, ready, workflows)
   } catch (e) {
-    // Router LLM failed — fall back to the first enabled role so Coordinator never dead-ends, but DON'T
+    // Router LLM failed — fall back to the first ready role so Coordinator never dead-ends, but DON'T
     // swallow silently: a persistent failure here makes every turn degrade to one role, which looks
     // like a routing-quality problem while actually being a broken router. Surface it.
-    console.warn('[coordinator] router LLM call failed, falling back to', enabled[0], '—', e instanceof Error ? e.message : e)
-    return { mode: 'single', role: enabled[0], reason: 'router error' }
+    console.warn('[coordinator] router LLM call failed, falling back to', ready[0], '—', e instanceof Error ? e.message : e)
+    return { mode: 'single', role: ready[0], reason: 'router error' }
   }
 
   // L1 two-tier gate (coordinator dispatch §3.1): tier-1 above is the cheap, tool-less judgment. Escalate to
@@ -98,7 +117,7 @@ export async function route(userInput: string, history: convRepo.MessageRow[], c
   // cb present = a real streamed turn (coordinator.service.run) → Danny's investigation can be VISIBLE via the
   // shared step machinery. Without a cb, fall through to the tier-1 decision rather than run it silently (§3).
   if (tier1.investigate && ctx.cwd && ctx.convId && cb) {
-    return await routeAsAgent(userInput, history, enabled, workflows, ctx.cwd, ctx.convId, tier1, cb, signal)
+    return await routeAsAgent(userInput, history, ready, workflows, ctx.cwd, ctx.convId, tier1, cb, signal)
   }
   return tier1
 }

@@ -14,6 +14,7 @@
 // non-waking send so the conversation is forced to converge instead of ping-ponging forever.
 
 import type { AgentMessage } from './types'
+import type { AgentResult } from './loop'
 import type { InjectionOutcome } from './session-bus'
 
 export interface CollabMessage {
@@ -73,9 +74,13 @@ export interface ExpertSpec {
   name: string
   initialPrompt: string // the task this expert starts on (coordinator's hand-off)
   // Run ONE agent loop turn for this expert: given its accumulated messages + its collab handle, run to
-  // end_turn and return the updated messages. agent.service supplies this (sets up tools/system/ctx +
-  // injects collab). Keeping it a callback keeps collab.ts pure scheduling — no agent.service coupling.
-  runTurn: (messages: AgentMessage[], collab: CollabHandle, signal: AbortSignal) => Promise<AgentMessage[]>
+  // end_turn and return the updated messages PLUS how the turn terminated. agent.service supplies this
+  // (sets up tools/system/ctx + injects collab). Keeping it a callback keeps collab.ts pure scheduling —
+  // no agent.service coupling (AgentResult is a type-only import). The reason is part of the contract
+  // because the scheduler settles injected notes off it: a turn that returned normally but ended in
+  // refusal / thrash_stop / max_turns did NOT complete the injected work, and reporting it 'completed'
+  // let a scheduled chain sail past a dead step (lifecycle review 2026-07-11).
+  runTurn: (messages: AgentMessage[], collab: CollabHandle, signal: AbortSignal) => Promise<{ messages: AgentMessage[]; reason: AgentResult['reason'] }>
   // 批H (dogfood2 P2): the expert's LIVE todo list, so the scheduler can structurally check at hand-off that the
   // expert isn't parking with dangling (non-completed) items — a prompt rule alone didn't hold (Shuri left 3 open).
   getTodos?: () => { content: string; status: string }[]
@@ -315,12 +320,17 @@ export class CollabSession {
           e.status = 'running'
           e.waitRequested = false
           this.onEvent({ kind: 'turn', roleId: e.spec.roleId })
-          e.messages = await e.spec.runTurn(e.messages, handle, signal)
+          const turn = await e.spec.runTurn(e.messages, handle, signal)
+          e.messages = turn.messages
           ran = true
           // The turn that consumed the drained external notes just finished — settle their injectors' waiters
-          // (the scheduler awaits this to keep a live chain's steps ordered). An abort cut the turn short, so
-          // its notes did NOT run to completion → 'dropped'; a clean turn end → 'completed'.
-          for (const settle of e.inFlightNotes.splice(0)) settle(signal.aborted ? 'dropped' : 'completed')
+          // (the scheduler awaits this to keep a live chain's steps ordered). Abort cut it short → 'dropped';
+          // ONLY a clean end_turn is 'completed'; any abnormal terminal that still returned normally
+          // (max_turns / thrash_stop / incomplete / refusal) is 'failed' — same outcome mapping as solo
+          // (agent.handler), so a scheduled chain never records ok on a turn that died mid-work.
+          const outcome: InjectionOutcome =
+            signal.aborted || turn.reason === 'aborted' ? 'dropped' : turn.reason === 'completed' ? 'completed' : 'failed'
+          for (const settle of e.inFlightNotes.splice(0)) settle(outcome)
           if (signal.aborted) break
           if (e.mailbox.length) continue // mail arrived mid-turn → process it immediately
         }
@@ -394,10 +404,12 @@ export class CollabSession {
       }
     }
     e.exited = true // the loop is gone — injectExternal must not route a note here (it can never drain again)
-    // Notes in flight here were CONSUMED by the turn that then threw — the step ran and failed, which an
-    // awaiting scheduler chain records as a step failure ('failed'); never-consumed notes live in
-    // pendingResults and are rerouted below (or settle 'dropped' when no live peer remains).
-    for (const settle of e.inFlightNotes.splice(0)) settle('failed')
+    // Notes in flight here were CONSUMED by the turn that then threw. An ABORT surfacing as the throw
+    // (user Stop / conv deletion cutting the LLM stream) means the turn was cut short, not that it failed
+    // — 'dropped', exactly like solo's .catch branching on controller.signal.aborted (C12). A genuine
+    // throw is a step failure ('failed'); never-consumed notes live in pendingResults and are rerouted
+    // below (or settle 'dropped' when no live peer remains).
+    for (const settle of e.inFlightNotes.splice(0)) settle(signal.aborted ? 'dropped' : 'failed')
     // If the loop ERROR-exited with notes still queued (an inject landed while it was running, then the turn threw
     // before its pre-park drain), reroute them to a surviving live expert — `exited` is already set so they can't
     // route back here (waiters ride along with the entry). No live peer → routeNote settles them 'dropped'

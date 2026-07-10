@@ -343,7 +343,7 @@ export async function runConsolidatedReview(
   // Independence guard applies ONLY to an auto-picked reviewer. When the caller NAMES the author (reviewerOverride —
   // the driver, an implementer by design), skip it: the driver authoring its own team's review is intended, and
   // independence is provided LATER by Danny's separate Turing final audit, not by this tool run.
-  if (!reviewerOverride && (implSet.has(reviewer) || !rolesService.getBinding(reviewer)?.endpointId)) {
+  if (!reviewerOverride && (implSet.has(reviewer) || !rolesService.isDispatchReady(reviewer))) {
     return { ok: false, message: `studio_lens (review) needs at least one configured expert independent of the implementer(s) to act as the reviewer, but none is bound. Configure another expert (e.g. ${displayName('analyst')}/${displayName('frontend')}/${displayName('engineer')}) and retry.`, confirmed: [], refuted: [], produced: [], report: null }
   }
   const paths = target.changed
