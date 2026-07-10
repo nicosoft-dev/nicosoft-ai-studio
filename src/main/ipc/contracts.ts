@@ -317,6 +317,15 @@ export interface ConvImage {
   attachment: MessageAttachmentDto
 }
 
+// A persisted CARD message row landed or changed mid-turn (today: workflow draft cards —
+// workflow-assisted-authoring §3.4). Carries the full row so the renderer can insert OR replace by id;
+// broadcast to every window (the drafting turn may run headless or in another window). Conversations not
+// loaded in a window's store ignore it — they re-read the row from the DB on open.
+export interface ConvCard {
+  convId: string
+  message: MessageDto
+}
+
 // App-level info for the Settings › About / Privacy pages: version, the local data directory (for "reveal
 // data folder"), and on-device counts that back the privacy summary.
 export interface AppInfo {
@@ -591,6 +600,27 @@ export interface WorkflowLaunchFromConvReq {
   params: Record<string, string | number | boolean>
   cwd?: string
   permissionMode?: AgentPermissionMode
+}
+
+// Assisted authoring (workflow-assisted-authoring §3.1): the JSON payload a workflow DRAFT CARD message
+// row carries (segmentKind='workflow-draft'). The script is the single source of truth — name/params/cwd/
+// flow diagram are all derived by the renderer via workflows.lint(script), never stored redundantly, so
+// the confirmation diagram can never drift from what will land. Zero workflow rows exist before confirm.
+export interface WorkflowDraftPayload {
+  v: 1
+  draftId: string // minted by the draft tool — the supersede/confirm anchor
+  script: string // the complete workflow script (meta + body)
+  supersedes?: string // revision: the draftId this card replaces
+  superseded?: boolean // patched onto the OLD card when a revision lands
+  createdWorkflowId?: string // patched on confirm; present = the card's "created" state
+}
+
+// Confirm a draft card into a real workflow (workflow-assisted-authoring §5.1) — idempotent on the card's
+// createdWorkflowId; same-name workflows created from THIS conversation update in place (§5.2).
+export interface WorkflowCreateFromDraftReq {
+  convId: string
+  draftId: string
+  script: string
 }
 export interface CoordinatorDoneDto {
   streamId: string
@@ -1148,7 +1178,8 @@ export interface WorkflowDto {
   cwd: string | null // workflow-level default working folder (meta.cwd mirror)
   enabled: boolean
   source: WorkflowSource
-  originRole: string | null // distilled: the roleId that proposed it; others null
+  originRole: string | null // distilled/assisted: the roleId that proposed/drafted it; others null
+  originConvId: string | null // distilled/assisted: the conversation it came from — draft cards key the §5.2 update semantics on it
   roles: string[] // distinct agent() roles in script order (derived at read time — the auto role chain)
   steps: number // static agent() call-site count (list progress "x/y" + run rail scaffold)
   lastRun: { status: WorkflowRunStatus; startedAt: string } | null // list-page "last run" chip

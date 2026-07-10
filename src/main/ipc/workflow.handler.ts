@@ -15,7 +15,7 @@ import { resolveDepth } from '../llm/thinking'
 import * as endpointRepo from '../repos/endpoint.repo'
 import { startAgentRun } from './agent.handler'
 import { pickDirectory, pickFile, saveToFile } from './dialogs'
-import type { WorkflowLaunchFromConvReq, WorkflowRunEvent, WorkflowRunTrigger } from './contracts'
+import type { WorkflowCreateFromDraftReq, WorkflowLaunchFromConvReq, WorkflowRunEvent, WorkflowRunTrigger } from './contracts'
 
 // .nsw files are the SCRIPT TEXT — cap reads at 1MB (a workflow script is a few KB; anything bigger is
 // not a workflow file).
@@ -43,6 +43,10 @@ export function registerWorkflowHandlers(): void {
   ipcMain.handle('workflows:rewriteMeta', (_e, script: string, patch: workflowService.MetaPatch) => workflowService.rewriteMeta(script, patch))
   ipcMain.handle('workflows:pickDir', (e) => pickDirectory(e, { title: 'Select the working folder' }))
   ipcMain.handle('workflows:save', (_e, input: { id?: string; script: string }) => workflowService.save(input))
+  // Assisted authoring confirm (workflow-assisted-authoring §5.1): the user clicked [Create] on a draft
+  // card — the ONLY path from a drafted script to a workflow row. Idempotent; same-conversation same-name
+  // updates in place (§5.2). The renderer's card flips via the conv:card broadcast the service emits.
+  ipcMain.handle('workflows:createFromDraft', (_e, req: WorkflowCreateFromDraftReq) => workflowService.createFromDraft(req))
   ipcMain.handle('workflows:setEnabled', (_e, id: string, enabled: boolean) => workflowService.setEnabled(id, enabled))
   ipcMain.handle('workflows:remove', (_e, id: string) => workflowService.remove(id))
 

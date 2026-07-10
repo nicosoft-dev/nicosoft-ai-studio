@@ -12,6 +12,7 @@ import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import { Icons } from '@/components/icons'
 import { Avatar, SelectMenu, Switch } from '@/components/primitives'
+import { WorkflowFlow } from '@/components/workflow-flow'
 import { Modal } from '@/components/modal'
 import { ConfirmDialog } from '@/components/dialogs/confirm-dialog'
 import { RowMenu } from '@/views/extensions'
@@ -196,14 +197,21 @@ function runReducer(state: LiveMap, ev: RunEvent): LiveMap {
 
 /* ── root ───────────────────────────────────────────────────── */
 
-type Sub = { kind: 'list' } | { kind: 'edit'; id: string | null } | { kind: 'run'; workflowId: string; runId: string }
+type Sub = { kind: 'list' } | { kind: 'edit'; id: string | null; script?: string } | { kind: 'run'; workflowId: string; runId: string }
 
 export function WorkflowsView({
-  runRequest = null
+  runRequest = null,
+  editRequest = null,
+  onDraftWithAi,
 }: {
   // External open request (a chat launch card clicked → App switches view + passes this): nonce marks
   // each click so the same run can be reopened after navigating away within the view.
   runRequest?: { workflowId: string; runId: string; nonce: number } | null
+  // External editor request (a draft card's "Open in editor" / "Open" — assisted authoring §6.2): either
+  // a script PREFILL (nothing persisted until the editor's own Save) or an existing workflow id.
+  editRequest?: { script?: string; workflowId?: string; nonce: number } | null
+  // Page-header "Draft with AI" (§7): App opens the new-conversation flow with a composer prefill.
+  onDraftWithAi?: () => void
 }): ReactElement {
   const [sub, setSub] = useState<Sub>({ kind: 'list' })
   const [items, setItems] = useState<WorkflowDto[]>([])
@@ -215,6 +223,9 @@ export function WorkflowsView({
   useEffect(() => {
     if (runRequest) setSub({ kind: 'run', workflowId: runRequest.workflowId, runId: runRequest.runId })
   }, [runRequest?.nonce])
+  useEffect(() => {
+    if (editRequest) setSub({ kind: 'edit', id: editRequest.workflowId ?? null, script: editRequest.workflowId ? undefined : editRequest.script })
+  }, [editRequest?.nonce])
   useEffect(
     () =>
       window.api.workflows.onRunEvent((ev) => {
@@ -228,13 +239,18 @@ export function WorkflowsView({
 
   if (sub.kind === 'edit') {
     const editing = sub.id ? items.find((w) => w.id === sub.id) ?? null : null
-    return (
-      <WorkflowEditor
-        workflow={editing}
-        onBack={() => { reload(); setSub({ kind: 'list' }) }}
-        onRun={(w, runId) => { reload(); openRun(w.id, runId) }}
-      />
-    )
+    // Edit-by-id before `items` hydrates (an external editRequest racing the mount fetch): hold the list
+    // for a frame instead of silently opening a BLANK editor for an existing workflow.
+    if (sub.id === null || editing) {
+      return (
+        <WorkflowEditor
+          workflow={editing}
+          initialScript={sub.script}
+          onBack={() => { reload(); setSub({ kind: 'list' }) }}
+          onRun={(w, runId) => { reload(); openRun(w.id, runId) }}
+        />
+      )
+    }
   }
   if (sub.kind === 'run') {
     const w = items.find((x) => x.id === sub.workflowId)
@@ -256,6 +272,7 @@ export function WorkflowsView({
       live={live}
       reload={reload}
       onNew={() => setSub({ kind: 'edit', id: null })}
+      onDraftWithAi={onDraftWithAi}
       onEdit={(id) => setSub({ kind: 'edit', id })}
       onOpenRun={openRun}
     />
@@ -275,6 +292,7 @@ function WorkflowList({
   live,
   reload,
   onNew,
+  onDraftWithAi,
   onEdit,
   onOpenRun,
 }: {
@@ -282,6 +300,7 @@ function WorkflowList({
   live: LiveMap
   reload: () => void
   onNew: () => void
+  onDraftWithAi?: () => void
   onEdit: (id: string) => void
   onOpenRun: (workflowId: string, runId: string) => void
 }): ReactElement {
@@ -373,6 +392,11 @@ function WorkflowList({
         <span className="conv-title">{t('sidebar.workflows')}</span>
         <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 8 }}>
           <button className="btn ghost sm" onClick={onImport}><Icons.download size={13} /> Import</button>
+          {onDraftWithAi && (
+            <button className="btn ghost sm" onClick={onDraftWithAi} title={t('wfd.draftWithAiHint')}>
+              <Icons.sparkle size={13} /> {t('wfd.draftWithAi')}
+            </button>
+          )}
           <button className="btn sm" onClick={onNew}><Icons.plus size={13} /> New workflow</button>
         </span>
       </div>
@@ -637,15 +661,19 @@ function highlight(src: string): string {
 
 function WorkflowEditor({
   workflow,
+  initialScript,
   onBack,
   onRun,
 }: {
   workflow: WorkflowDto | null
+  // Prefill for a NEW editor (a draft card's "Open in editor" — assisted authoring §6.2): seeds the pane
+  // only; nothing persists until the editor's own Save.
+  initialScript?: string
   onBack: () => void
   onRun: (w: WorkflowDto, runId: string) => void
 }): ReactElement {
   const { byId } = useAllExperts()
-  const [script, setScript] = useState<string>(workflow?.script ?? NEW_SCRIPT)
+  const [script, setScript] = useState<string>(workflow?.script ?? initialScript ?? NEW_SCRIPT)
   const [savedId, setSavedId] = useState<string | null>(workflow?.id ?? null)
   const [lint, setLint] = useState<LintDto | null>(null)
   const [dirty, setDirty] = useState(false)
@@ -861,7 +889,7 @@ function WorkflowEditor({
         </div>
         <div className="wf-edit-r">
           <span className="wf-lab">Preview — generated from the script</span>
-          <FlowProjection nodes={lint?.nodes ?? []} params={lint?.params ?? []} byId={byId} cursorLine={cursorLine} onNode={jumpToLine} />
+          <WorkflowFlow nodes={lint?.nodes ?? []} params={lint?.params ?? []} byId={byId} cursorLine={cursorLine} onNode={jumpToLine} />
         </div>
       </div>
     </div>
@@ -903,74 +931,6 @@ function ParamsTable({ params, onCommit }: { params: ParamDef[]; onCommit: (p: P
         ))}
         <button className="wf-param-add" onClick={() => setDraft((d) => [...d, { name: '', type: 'string' }])}>＋ param</button>
       </div>
-    </div>
-  )
-}
-
-/* ── DAG projection (read-only; node ⇄ script line) ─────────── */
-
-function FlowProjection({
-  nodes,
-  params,
-  byId,
-  cursorLine,
-  onNode,
-}: {
-  nodes: FlowNode[]
-  params: ParamDef[]
-  byId: Record<string, { id: string; name: string; color: string } & object>
-  cursorLine: number
-  onNode: (line: number) => void
-}): ReactElement {
-  // group agent nodes under their preceding phase; adjacent parallel agents share a row
-  const groups: { title: string | null; line: number; rows: FlowNode[][] }[] = []
-  let cur: { title: string | null; line: number; rows: FlowNode[][] } = { title: null, line: 0, rows: [] }
-  for (const n of nodes) {
-    if (n.kind === 'phase') {
-      if (cur.rows.length || cur.title) groups.push(cur)
-      cur = { title: n.title ?? '', line: n.line, rows: [] }
-      continue
-    }
-    const lastRow = cur.rows[cur.rows.length - 1]
-    if (n.parallel && lastRow && lastRow[lastRow.length - 1]?.parallel) lastRow.push(n)
-    else cur.rows.push([n])
-  }
-  if (cur.rows.length || cur.title) groups.push(cur)
-  const argsChip = params.length ? params.map((p) => `${p.name}${p.default !== undefined ? ` = ${p.default}` : ''}`).join(' · ') : 'no params'
-  // the node whose line is closest at-or-before the cursor gets the selection ring
-  const agentLines = nodes.filter((n) => n.kind === 'agent').map((n) => n.line)
-  const selLine = agentLines.filter((l) => l <= cursorLine).pop() ?? -1
-
-  return (
-    <div className="wf-dag">
-      <span className="wf-dag-start">▶ args: {argsChip}</span>
-      {groups.map((g, gi) => (
-        <div key={gi} className="wf-dag-seq">
-          <span className="wf-dag-edge" />
-          <div className={'wf-dag-phase' + (g.title === null ? ' bare' : '')}>
-            {g.title !== null && <em>{(g.title || ' ').toUpperCase()}</em>}
-            {g.rows.map((row, ri) => (
-              <div key={ri} className="wf-dag-row">
-                {row.map((n, ni) => {
-                  const e = byId[n.role ?? '']
-                  return (
-                    <button key={ni} className={'wf-dag-node' + (n.line === selLine ? ' sel' : '')} onClick={() => onNode(n.line)}>
-                      {e ? <Avatar expert={e as never} size={22} /> : <span className="wf-dag-q">?</span>}
-                      <span className="wf-dag-body">
-                        {e?.name ?? n.role}
-                        {n.loop && <span className="wf-dag-loop" title="inside a loop">↻</span>}
-                        <small>{n.hint || '…'}</small>
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-      <span className="wf-dag-edge" />
-      <span className="wf-dag-start">return</span>
     </div>
   )
 }

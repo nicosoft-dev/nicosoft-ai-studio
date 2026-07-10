@@ -1,7 +1,7 @@
 // App root — recreated from the prototype's app.jsx.
 // The prototype simulated a desktop + scaled fixed window in the browser; here the Electron
 // BrowserWindow IS the window, so the .desktop/.stage/scale/width-switch wrappers are dropped.
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import { Topbar, Sidebar } from '@/components/shell'
 import { WindowControls } from '@/components/window-controls'
@@ -25,6 +25,7 @@ import { useCustomRoles } from '@/stores/custom-roles'
 import { useMemoryCloud } from '@/stores/memory-cloud'
 import { useAllExperts } from '@/lib/all-experts'
 import { previewApi, type PreviewOpenEvent } from '@/lib/preview-api'
+import { useT } from '@/stores/locale'
 import { Toaster } from '@/components/toaster'
 import { UpdatePrompt } from '@/components/update-prompt'
 
@@ -58,6 +59,7 @@ function saveState(s: PersistedState): void {
 
 export default function App(): ReactElement {
   const chat = useChat()
+  const t = useT()
   const { experts, byId: EXPERT_BY_ID } = useAllExperts()
   const roles = useRoles()
   const memCloud = useMemoryCloud()
@@ -232,6 +234,25 @@ export default function App(): ReactElement {
     window.addEventListener('nsai:open-workflow-run', h)
     return () => window.removeEventListener('nsai:open-workflow-run', h)
   }, [])
+  // A draft card's "Open in editor" / "Open" (workflow-assisted-authoring §6.2) — same held-state pattern
+  // as nsai:open-workflow-run so WorkflowsView can open the editor AFTER it mounts. script = a prefill
+  // (nothing persisted until the editor's own Save); workflowId = open the existing workflow.
+  const [wfOpenEdit, setWfOpenEdit] = useState<{ script?: string; workflowId?: string; nonce: number } | null>(null)
+  useEffect(() => {
+    const h = (e: Event): void => {
+      const d = (e as CustomEvent<{ script?: string; workflowId?: string }>).detail
+      if (!d || (!d.script && !d.workflowId)) return
+      setWfOpenEdit({ script: d.script, workflowId: d.workflowId, nonce: Date.now() })
+      setView('workflows')
+      setCmdk(false)
+    }
+    window.addEventListener('nsai:open-workflow-editor', h)
+    return () => window.removeEventListener('nsai:open-workflow-editor', h)
+  }, [])
+  // "Draft with AI" (assisted authoring §7): the Workflows page button runs the NORMAL new-conversation
+  // flow (role picker) and seeds the composer once a role is picked. The ref scopes the prefill to this
+  // one interaction — canceling the picker discards it, so a later plain New conversation stays clean.
+  const draftWorkflowAsk = useRef(false)
 
   const selectConv = (id: string): void => {
     const conv = chat.conversations.find((c) => c.id === id)
@@ -363,7 +384,14 @@ export default function App(): ReactElement {
           ) : view === 'extensions' ? (
             <ExtensionsView />
           ) : view === 'workflows' ? (
-            <WorkflowsView runRequest={wfOpenRun} />
+            <WorkflowsView
+              runRequest={wfOpenRun}
+              editRequest={wfOpenEdit}
+              onDraftWithAi={() => {
+                draftWorkflowAsk.current = true
+                setRolePicker(true)
+              }}
+            />
           ) : view === 'projects' ? (
             <ProjectsView
               activeProject={activeProject}
@@ -425,10 +453,19 @@ export default function App(): ReactElement {
           onPick={(id) => {
             setRolePicker(false)
             chat.newConversation()
+            // Draft-with-AI entry: seed the composer AFTER newConversation (which resets nothing here but
+            // keeps the ordering obvious) — the conversation view consumes the one-shot prefill on mount.
+            if (draftWorkflowAsk.current) {
+              draftWorkflowAsk.current = false
+              chat.setComposerPrefill(t('wfd.prefill'))
+            }
             setActiveExpert(id)
             setView('app')
           }}
-          onClose={() => setRolePicker(false)}
+          onClose={() => {
+            draftWorkflowAsk.current = false
+            setRolePicker(false)
+          }}
         />
       )}
       <UpdatePrompt />

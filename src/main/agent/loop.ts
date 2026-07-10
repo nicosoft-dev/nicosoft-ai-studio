@@ -434,7 +434,9 @@ export async function* runAgent(
   // schedule_create is stripped too: its D4 command-echo visibility (the exact unattended command) only
   // reaches the user on the MAIN turn — a sub-agent's tool_result is summarized to the parent, which could
   // paraphrase or drop the command. Scheduling belongs to the main agent; schedule_list/delete stay.
-  const subAgentTools = tools.filter((t) => t.name !== 'EnterPlanMode' && t.name !== 'ExitPlanMode' && t.name !== 'studio_lens' && !t.name.startsWith('preview_') && !t.name.startsWith('monitor_') && t.name !== 'schedule_wakeup' && t.name !== 'schedule_create' && t.name !== 'remember_project_map' && t.name !== 'remember' && t.name !== 'forget' && t.name !== 'recall_memory' && t.name !== 'distill_skill' && t.name !== 'studio_guide' && !t.name.startsWith('install_') && t.name !== 'ns_computer_use')
+  // workflow_draft is stripped like install_: the confirmation card is a conversation-level, user-facing
+  // decision surface — a child must never present one (workflow-assisted-authoring §4).
+  const subAgentTools = tools.filter((t) => t.name !== 'EnterPlanMode' && t.name !== 'ExitPlanMode' && t.name !== 'studio_lens' && !t.name.startsWith('preview_') && !t.name.startsWith('monitor_') && t.name !== 'schedule_wakeup' && t.name !== 'schedule_create' && t.name !== 'remember_project_map' && t.name !== 'remember' && t.name !== 'forget' && t.name !== 'recall_memory' && t.name !== 'distill_skill' && t.name !== 'studio_guide' && !t.name.startsWith('install_') && t.name !== 'ns_computer_use' && t.name !== 'workflow_draft')
   const makeSpawnSubAgent =
     (signal: AbortSignal): SpawnSubAgent =>
     async ({ prompt, parentToolId, isolation }) => {
@@ -522,7 +524,7 @@ export async function* runAgent(
   // runChild that runs one of a child's turns with the sub-agent tool set — no Task, no nested agent_*
   // (depth 1) — threading the child's persisted readFileState/todos. Sub-agents get subAgents: undefined.
   if (ctx.subAgents instanceof AsyncSubAgentPool) {
-    const asyncChildTools = tools.filter((t) => t.name !== 'Task' && !t.name.startsWith('agent_') && t.name !== 'EnterPlanMode' && t.name !== 'ExitPlanMode' && t.name !== 'studio_lens' && !t.name.startsWith('preview_') && !t.name.startsWith('monitor_') && t.name !== 'schedule_wakeup' && t.name !== 'schedule_create' && t.name !== 'remember_project_map' && t.name !== 'remember' && t.name !== 'forget' && t.name !== 'recall_memory' && t.name !== 'distill_skill' && t.name !== 'studio_guide' && !t.name.startsWith('install_'))
+    const asyncChildTools = tools.filter((t) => t.name !== 'Task' && !t.name.startsWith('agent_') && t.name !== 'EnterPlanMode' && t.name !== 'ExitPlanMode' && t.name !== 'studio_lens' && !t.name.startsWith('preview_') && !t.name.startsWith('monitor_') && t.name !== 'schedule_wakeup' && t.name !== 'schedule_create' && t.name !== 'remember_project_map' && t.name !== 'remember' && t.name !== 'forget' && t.name !== 'recall_memory' && t.name !== 'distill_skill' && t.name !== 'studio_guide' && !t.name.startsWith('install_') && t.name !== 'workflow_draft')
     const asyncWorktrees = new Map<string, ManagedWorktree>()
     const asyncWorktreeNames = new Map<string, string>()
     const asyncCwds = new Map<string, string>()

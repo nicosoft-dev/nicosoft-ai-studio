@@ -282,6 +282,25 @@ export const useChat = create<ChatState>((set, get) => {
       appendImage(d.convId, { url: d.attachment.url, name: d.attachment.name ?? 'image' })
     })
 
+    // Workflow draft cards (workflow-assisted-authoring §3.4): a card row landed (insert) or its payload
+    // was patched (replace by id). Only conversations THIS window has loaded react — touching an unloaded
+    // one would seed byConversation with a lone card and openConversation's already-loaded check would
+    // then skip the real history; unloaded conversations read the row from the DB on open anyway.
+    window.api.onConvCard((d) => {
+      const msgs = get().byConversation[d.convId]
+      if (!msgs) return
+      if (msgs.some((m) => m.id === d.message.id)) {
+        get().updateCard(d.convId, { id: d.message.id, content: d.message.content })
+      } else {
+        get().insertCard(d.convId, {
+          id: d.message.id,
+          content: d.message.content,
+          segmentKind: d.message.segmentKind ?? 'workflow-draft',
+          expertId: d.message.expertId,
+        })
+      }
+    })
+
     // studio_lens panel progress on the conv-level channel (ipc/lens-broadcast). A SOLO async lens parks its
     // caller, so its turn stream finishes and its sub_tool events can't ride it — they arrive here keyed by convId
     // instead, tagged with the calling run's roleId (agent-dispatch broadcasts loop.roleId). Group with the SAME
@@ -837,12 +856,27 @@ export const useChat = create<ChatState>((set, get) => {
     insertCard: (convId, card) => {
       set((s) => {
         const msgs = [...(s.byConversation[convId] ?? [])]
-        const msg: ChatMessage = { id: card.id, role: 'assistant', text: card.content, expertId: null, dispatch: null, segmentKind: card.segmentKind }
+        const msg: ChatMessage = { id: card.id, role: 'assistant', text: card.content, expertId: card.expertId ?? null, dispatch: null, segmentKind: card.segmentKind }
         if (msgs.length && msgs[msgs.length - 1].streaming) msgs.splice(msgs.length - 1, 0, msg)
         else msgs.push(msg)
         return { byConversation: { ...s.byConversation, [convId]: msgs } }
       })
     },
+    // A card row's payload was patched in main (a draft superseded / created — assisted authoring §3.4):
+    // swap the content in place by row id. Only the one message changes identity (memoized siblings skip).
+    updateCard: (convId, card) => {
+      set((s) => {
+        const cur = s.byConversation[convId]
+        if (!cur) return s
+        const i = cur.findIndex((m) => m.id === card.id)
+        if (i < 0) return s
+        const msgs = [...cur]
+        msgs[i] = { ...msgs[i], text: card.content }
+        return { byConversation: { ...s.byConversation, [convId]: msgs } }
+      })
+    },
+    composerPrefill: null,
+    setComposerPrefill: (text) => set({ composerPrefill: text }),
     // §7.5 launch review: the review turn streams in on agent:resume-stream — a path that can fire
     // BEFORE any send() this session (greeting /workflow, or a reopened conversation). The stream
     // subscriptions must exist first or the whole turn is invisible live (it would only appear on

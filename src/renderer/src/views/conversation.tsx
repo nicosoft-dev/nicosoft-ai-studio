@@ -144,6 +144,16 @@ export function ChatView({ expert, onOpenSettings, onBackToProject }: { expert: 
     setFocusNonce((n) => n + 1)
   }
 
+  // One-shot composer prefill (assisted authoring §7): "Draft with AI" seeds the text through a transient
+  // store field — race-free whether this view was already mounted or mounts with the new conversation.
+  const composerPrefill = useChat((s) => s.composerPrefill)
+  useEffect(() => {
+    if (composerPrefill === null) return
+    setValue(composerPrefill)
+    setFocusNonce((n) => n + 1)
+    useChat.getState().setComposerPrefill(null)
+  }, [composerPrefill])
+
   // Workspace Files panel → "Insert path to agent": append the clicked file's (cwd-relative) path to the
   // composer and focus it. Cross-component via a window event (same pattern as nsai:open-conversation),
   // since the composer's value lives here, not in the drawer.

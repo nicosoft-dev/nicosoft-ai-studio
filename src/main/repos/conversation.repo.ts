@@ -272,6 +272,13 @@ export function append(conversationId: string, input: MessageAppendInput): Messa
   }
 }
 
+// Replace one message's content in place — the ONE content-mutation primitive in the repo. Chat text is
+// append-only by design; this exists solely for the workflow draft-card payload patch (superseded /
+// createdWorkflowId flags), and the service layer restricts it to segmentKind='workflow-draft' rows.
+export function updateMessageContent(id: string, content: string): boolean {
+  return getDb().prepare('UPDATE messages SET content = ? WHERE id = ?').run(content, id).changes > 0
+}
+
 export function listByConversation(convId: string): MessageRow[] {
   // ORDER BY created_at, id: id is a monotonic ULID (db/id.ts), so within the same millisecond ids
   // strictly increase — the tiebreaker keeps messages in true creation order, which summary

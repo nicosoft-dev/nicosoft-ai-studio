@@ -12,6 +12,7 @@ import { ToolRun, OMIT_WHEN_DONE, INLINE_SURFACE } from '@/components/tool-run'
 import { WidgetCard } from '@/components/widget-card'
 import { ChunkedMarkdown } from '@/components/markdown'
 import { WorkflowLaunchCard } from '@/components/workflow-launch-card'
+import { WorkflowDraftCard } from '@/components/workflow-draft-card'
 import { Icons } from '@/components/icons'
 import { useT, useLocale } from '@/stores/locale'
 import { isSynthesis, groupRuns, sameChain, segmentFolds } from '@/stores/chat-helpers'
@@ -445,6 +446,19 @@ export function ChatSegment({
     return (
       <div className="segment wfl">
         <WorkflowLaunchCard content={first.text} />
+      </div>
+    )
+  }
+  // A workflow DRAFT card (workflow-assisted-authoring §6): a confirmation surface, not an utterance —
+  // no avatar/readout (the drafter is named inside the card). Rendered per MESSAGE: two adjacent cards
+  // from one turn share expertId + segmentKind and canMerge folds them into ONE segment — each must
+  // still show (a superseded revision and its replacement can sit back to back).
+  if (!isUser && first.segmentKind === 'workflow-draft') {
+    return (
+      <div className="segment wfd">
+        {msgs.map((m) => (
+          <WorkflowDraftCard key={m.id} content={m.text} expertId={m.expertId ?? null} />
+        ))}
       </div>
     )
   }

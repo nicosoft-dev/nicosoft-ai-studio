@@ -2178,3 +2178,28 @@ button.wf-last .wf-arr { color: var(--text-4); font-size: 10px; margin-left: 1px
 .wfl-status { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11px; color: var(--text-3); margin-left: auto; flex-shrink: 0; }
 .wfl-open { color: var(--text-4); font-size: 11.5px; flex-shrink: 0; }
 .wfl-card:hover .wfl-open { color: var(--accent); }
+
+/* workflow DRAFT card — the assisted-authoring confirmation surface (workflow-assisted-authoring §6):
+   header (icon + mono name + drafter chip + state badge), description, read-only flow diagram
+   (shared .wf-dag), param/cwd chips, action row. superseded = whole card grayed. */
+.segment.wfd { padding: 2px 0; display: flex; flex-direction: column; gap: 8px; }
+.wfd-card {
+  display: flex; flex-direction: column; gap: 8px; width: 100%;
+  border: 1px solid var(--border-1); border-radius: var(--r-md); background: var(--bg-1);
+  padding: 10px 12px; font-size: 12.5px; color: var(--text-2); min-width: 0;
+}
+.wfd-card.superseded { opacity: 0.55; }
+.wfd-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.wfd-badge {
+  font-family: var(--mono); font-size: 10.5px; padding: 1px 7px; border-radius: 99px;
+  border: 1px solid var(--border-2); color: var(--text-3); flex-shrink: 0;
+}
+.wfd-badge.ok { border-color: color-mix(in srgb, var(--success) 45%, transparent); color: var(--success); display: inline-flex; align-items: center; gap: 4px; }
+.wfd-badge.off { border-style: dashed; }
+.wfd-flow-toggle { margin-left: auto; background: none; border: none; color: var(--text-4); font-size: 11px; cursor: pointer; padding: 2px 4px; flex-shrink: 0; }
+.wfd-flow-toggle:hover { color: var(--accent); }
+.wfd-desc { color: var(--text-3); font-size: 12px; }
+.wfd-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.wfd-warn { color: var(--text-amber, #b7791f); font-size: 11.5px; }
+.wfd-err { color: var(--error); font-size: 11.5px; }
+.wfd-actions { display: flex; gap: 8px; align-items: center; }

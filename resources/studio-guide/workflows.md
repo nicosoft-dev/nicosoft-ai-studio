@@ -17,6 +17,14 @@ A workflow is a saved multi-expert procedure: a small script that pins which exp
 - The **run panel** shows one card per step: expert, phase, status, live text, tool cards, token counts and duration, with a rail of the planned structure ending in `return`.
 - Row menu → **Runs** lists past runs; a settled run replays in full (steps, text, tool cards).
 
+## Drafting with an expert
+
+- Ask any expert in plain language to build a workflow ("draft a weekly competitor-analysis workflow: fetch data, two analysts in parallel, then a summary") — the expert drafts the script and a **draft card** appears in the conversation: name, description, params and a read-only **flow diagram** derived from the script itself, so what you see is exactly what would be created.
+- **Nothing is created until you confirm.** Click **Create** on the card to save it — it lands enabled and ready to run, credited to you with the drafting expert recorded as its origin. Ignoring the card simply discards the draft.
+- Not happy? Just keep talking — the expert submits a revision, the old card grays out ("replaced by a newer draft") and a new card takes its place. After you've created one, further revisions confirm as **Update** on the same workflow.
+- **Open in editor** copies the drafted script into a fresh editor for hand-tuning — nothing is saved until you press Save there.
+- The Workflows page's **Draft with AI** button starts this flow directly: it opens a new conversation with the request pre-typed.
+
 ## Launch from chat
 
 - `/workflow <name> key=value …` — parameters use `key=value`; quote values containing spaces (`key="two words"`). Unknown or malformed parameters are rejected with a message and nothing runs.

@@ -74,6 +74,11 @@ export function create(input: ConversationCreateDto): ConversationDto {
   )
 }
 
+export function get(convId: string): ConversationDto | null {
+  const row = convRepo.getById(convId)
+  return row ? toConvDto(row) : null
+}
+
 export function messages(convId: string): MessageDto[] {
   return convRepo.listByConversation(convId).map(toMsgDto)
 }
@@ -99,6 +104,35 @@ export function append(convId: string, input: MessageAppendDto): MessageDto {
   })
   convRepo.touch(convId) // bump updated_at so the history list re-sorts
   return toMsgDto(row)
+}
+
+// ── workflow draft cards (workflow-assisted-authoring §3.3) ─────────────────────────────────────────────
+
+// Locate a draft card row by its payload draftId. Only segmentKind='workflow-draft' rows are considered
+// and unparseable payloads are skipped — the ONLY rows whose content is machine-patched below.
+export function findDraftCard(convId: string, draftId: string): MessageDto | null {
+  for (const row of convRepo.listByConversation(convId)) {
+    if (row.segmentKind !== 'workflow-draft') continue
+    try {
+      if ((JSON.parse(row.content) as { draftId?: string }).draftId === draftId) return toMsgDto(row)
+    } catch {
+      /* a corrupt payload renders as a broken card; never a patch target */
+    }
+  }
+  return null
+}
+
+// Merge-patch a draft card's JSON payload in place and return the updated row. This is the whole
+// message-content mutation surface of the app: restricted to draft cards by findDraftCard above, and
+// tolerant of a missing card (null — an old card may be gone with its conversation, a supersede must not
+// throw the drafting turn). Callers broadcast the returned dto themselves (broadcastConvCard).
+export function patchDraftCard(convId: string, draftId: string, patch: Record<string, unknown>): MessageDto | null {
+  const card = findDraftCard(convId, draftId)
+  if (!card) return null
+  const merged = { ...(JSON.parse(card.content) as Record<string, unknown>), ...patch }
+  const content = JSON.stringify(merged)
+  if (!convRepo.updateMessageContent(card.id, content)) return null
+  return { ...card, content }
 }
 
 export function rename(convId: string, title: string): void {

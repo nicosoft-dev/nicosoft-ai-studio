@@ -7,8 +7,9 @@
 // They stay separate because they answer different questions ("how full is the window" vs "what is this
 // request doing right now"), not because either accumulates. Keyed by convId — every path knows its
 // convId, so we skip the streamId→conv indirection the done events use.
+import { BrowserWindow } from 'electron'
 import type { WebContents } from 'electron'
-import type { ConvTodos, ConvUsage, MessageAttachmentDto } from './contracts'
+import type { ConvCard, ConvTodos, ConvUsage, MessageAttachmentDto, MessageDto } from './contracts'
 
 export function broadcastUsage(
   sender: WebContents,
@@ -50,4 +51,15 @@ export function broadcastConvTodos(sender: WebContents, convId: string, roleId: 
   if (sender.isDestroyed()) return
   const ev: ConvTodos = { convId, roleId, todos }
   sender.send('conv:todos', ev)
+}
+
+// A workflow draft card row landed or changed (workflow-assisted-authoring §3.4). Unlike the per-sender
+// helpers above, this goes to EVERY window (git-broadcast pattern): the appending turn may be running
+// headless (a scheduled step) or in another window, and the card must appear / patch wherever the
+// conversation is on screen. Windows whose store hasn't loaded the conversation ignore it.
+export function broadcastConvCard(convId: string, message: MessageDto): void {
+  const ev: ConvCard = { convId, message }
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.webContents.isDestroyed()) w.webContents.send('conv:card', ev)
+  }
 }

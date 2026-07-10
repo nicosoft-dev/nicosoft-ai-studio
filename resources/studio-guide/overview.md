@@ -24,7 +24,7 @@ You can add custom roles ("New Role" in the sidebar) with their own system promp
 
 - **Solo chat** — "New Conversation" → pick one expert → talk to it directly.
 - **Coordinator** — pick Danny. He answers simple things himself, or routes your request: a single specialist, a **pipeline** (sequential hand-off), **parallel** takes (independent perspectives, then a synthesis), a **council** (experts debate a high-stakes call), or a **collaboration** (2–3 builders constructing something together). Type `@Flynn` (any expert name) to route instantly.
-- **Workflows** — save a multi-expert procedure and run it by hand, with `/workflow`, or on a schedule.
+- **Workflows** — save a multi-expert procedure and run it by hand, with `/workflow`, or on a schedule; or ask any expert to draft one for you — you confirm a flow diagram in chat before anything is created.
 - **Scheduled** — timed tasks and monitors that run in the background and report back.
 
 ## The Overview page — assignments

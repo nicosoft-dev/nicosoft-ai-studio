@@ -17,9 +17,13 @@ import { analyze } from './analyze'
 import { parseScript } from '../script/executor'
 import * as settingsService from '../settings.service'
 import { normalizeMemoryName as normalizeSlug } from '../memory/agent-memory'
+import { broadcastConvCard } from '../../ipc/usage-broadcast'
+import { ulid } from '../../db/id'
 import type { WorkflowRow } from '../../repos/workflow.repo'
 import type { WorkflowRunRow } from '../../repos/workflow-run.repo'
 import type {
+  MessageDto,
+  WorkflowDraftPayload,
   WorkflowDto,
   WorkflowFailReason,
   WorkflowLintDto,
@@ -38,7 +42,9 @@ type Ast = Node & { [k: string]: unknown }
 // already dispatched work, so the dispatcher persona is not a step executor), enabled and endpoint-bound.
 // runsAgentLoop = built-ins ∪ agent-enabled custom roles (custom-agent-roles §5) — an Agent-on custom
 // role with a binding is a valid step target; chat-only personas still lint as unknown.
-function validStepRoles(): Set<string> {
+// Exported for the workflow_draft tool's dynamic roster (assisted authoring §4.3) — the drafting model
+// sees exactly the ids this lint accepts, custom ulids included.
+export function validStepRoles(): Set<string> {
   const disabled = new Set(rolesService.listStates().filter((s) => !s.enabled).map((s) => s.roleId))
   const out = new Set<string>()
   for (const b of rolesService.listBindings()) {
@@ -126,6 +132,7 @@ function toDto(row: WorkflowRow, lastRuns?: Map<string, { status: WorkflowRunDto
     enabled: row.enabled,
     source: row.source,
     originRole: row.originRole,
+    originConvId: row.originConvId,
     roles: analyzed.ok ? analyzed.shape.roles : [],
     steps: analyzed.ok ? analyzed.shape.steps : 0,
     lastRun: lastRuns?.get(row.id) ?? null,
@@ -160,7 +167,7 @@ function gateOrThrow(script: string): WorkflowLintDto {
   return l
 }
 
-export function save(input: { id?: string; script: string }): WorkflowDto {
+export function save(input: { id?: string; script: string; origin?: { roleId: string | null; convId: string } }): WorkflowDto {
   const l = gateOrThrow(input.script)
   const name = l.name as string
   const clash = repo.getByName(name)
@@ -178,7 +185,9 @@ export function save(input: { id?: string; script: string }): WorkflowDto {
     params: l.params,
     cwd: l.cwd,
     enabled: true, // user-authored workflows are live on save; only imported/distilled draft at 0
-    source: 'user',
+    source: 'user', // assisted authoring too: the CONFIRM is the user's act — the drafter goes in origin
+    originRole: input.origin?.roleId ?? null, // assisted authoring §3.2: drafting provenance (columns pre-exist)
+    originConvId: input.origin?.convId ?? null,
   })
   return toDto(row)
 }
@@ -363,6 +372,96 @@ export function distillUpsert(input: DistillWorkflowInput): DistillWorkflowOutco
     originConvId: input.originConvId,
   })
   return { kind: 'created', name: finalName, active: row.enabled }
+}
+
+// ── assisted authoring (workflow-assisted-authoring §4-§5) ──────────────────────────────────────────────
+//
+// A role drafts a workflow IN CHAT: the workflow_draft tool calls draftCard() below, which gates the
+// script (same scanner/lint/role gates as save — a bad draft bounces back to the model, the user never
+// sees it) and lands a CARD message row (segmentKind='workflow-draft', content = WorkflowDraftPayload).
+// Nothing touches the workflows table until the user clicks the card's confirm button, which arrives as
+// createFromDraft() — so "confirm the diagram first" is structural, not convention.
+
+export interface DraftCardInput {
+  script: string
+  supersedes?: string // revising an earlier card in this conversation: the draftId it replaces
+  roleId: string // the drafting role (card row expertId → origin_role at confirm)
+  convId: string
+}
+
+export type DraftCardOutcome =
+  | { ok: true; message: MessageDto; name: string; steps: number; phases: number; roles: string[]; update: boolean }
+  | { ok: false; error: string }
+
+export function draftCard(input: DraftCardInput): DraftCardOutcome {
+  // Gates in the documented order (§4.1): scan → parse/shape → role validity → name clash → context.
+  // Same severity logic as gateOrThrow, but returned as data — the tool feeds it back to the model to
+  // fix and resubmit (no throw: a rejected draft is a normal authoring iteration, not a fault).
+  const l = lint(input.script)
+  if (l.scan && !l.scan.ok) {
+    const first = l.scan.violations[0]
+    return { ok: false, error: `security scan failed — line ${first.line}: ${first.message}` }
+  }
+  // analyze() already folds unknown roles into the shape issues (l.error carries the line-anchored
+  // message) — append the roster hint whenever roles are the failure, so the model re-copies real ids.
+  if (l.error) {
+    return { ok: false, error: l.unknownRoles.length ? `${l.error} — use exactly the ids from your roster` : l.error }
+  }
+  if (l.unknownRoles.length > 0) {
+    return { ok: false, error: `unknown or disabled role \`${l.unknownRoles[0]}\` — use exactly the ids from your roster` }
+  }
+  const name = l.name as string
+  // Same-name exemption: a workflow this CONVERSATION already created via a card is the thing being
+  // revised — allow the draft through; confirm takes the update path (§5.2). Any other clash bounces.
+  const clash = repo.getByName(name)
+  const update = clash !== null && clash.originConvId === input.convId
+  if (clash && !update) return { ok: false, error: `a workflow named "${name}" already exists — pick another name` }
+  // Context guard: the card is a user-facing confirmation surface — it needs a conversation someone can
+  // SEE. A workflow run's hidden conversation (kind='workflow') has no one to confirm.
+  const conv = convService.get(input.convId)
+  if (!conv || conv.kind === 'workflow') {
+    return { ok: false, error: 'drafting needs a visible conversation — no one can confirm a card here' }
+  }
+  // Revision: gray out the card being replaced first (tolerant — it may be gone), then land the new one.
+  if (input.supersedes) {
+    const old = convService.patchDraftCard(input.convId, input.supersedes, { superseded: true })
+    if (old) broadcastConvCard(input.convId, old)
+  }
+  const payload: WorkflowDraftPayload = { v: 1, draftId: ulid(), script: input.script }
+  if (input.supersedes) payload.supersedes = input.supersedes
+  const row = convService.append(input.convId, {
+    author: 'expert',
+    expertId: input.roleId,
+    content: JSON.stringify(payload),
+    segmentKind: 'workflow-draft',
+  })
+  broadcastConvCard(input.convId, row)
+  return { ok: true, message: row, name, steps: l.steps, phases: l.phases.length, roles: l.roles, update }
+}
+
+// The confirm click (workflows:createFromDraft). Idempotent: a card that already carries
+// createdWorkflowId returns that workflow (double-click / two-window race) as long as it still exists.
+// The CARD's payload script is the source of truth — it is what the user saw and confirmed; the request's
+// script rides along per the contract but a stale renderer can never land a different text than the card.
+export function createFromDraft(req: { convId: string; draftId: string; script: string }): WorkflowDto {
+  const card = convService.findDraftCard(req.convId, req.draftId)
+  if (!card) throw new Error('draft card not found')
+  const payload = JSON.parse(card.content) as WorkflowDraftPayload
+  if (payload.createdWorkflowId) {
+    const existing = get(payload.createdWorkflowId)
+    if (existing) return existing
+    // the created workflow was deleted since — fall through and create it again (explicit user click)
+  }
+  const script = typeof payload.script === 'string' && payload.script ? payload.script : req.script
+  const l = gateOrThrow(script) // same gate as any save — roles may have been disabled since the card landed
+  const clash = repo.getByName(l.name as string)
+  const dto =
+    clash && clash.originConvId === req.convId
+      ? save({ id: clash.id, script }) // §5.2 update semantics: revising what this conversation created
+      : save({ script, origin: { roleId: card.expertId, convId: req.convId } })
+  const patched = convService.patchDraftCard(req.convId, req.draftId, { createdWorkflowId: dto.id })
+  if (patched) broadcastConvCard(req.convId, patched)
+  return dto
 }
 
 // ── run / stop / history ────────────────────────────────────────────────────────────────────────────────

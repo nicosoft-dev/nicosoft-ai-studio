@@ -142,7 +142,10 @@ export interface ChatState {
   loadConversations: () => Promise<void>
   openConversation: (convId: string) => Promise<void>
   newConversation: () => void
-  insertCard: (convId: string, card: { id: string; content: string; segmentKind: string }) => void // slot a persisted card row (e.g. /workflow launch) into the live list without disturbing a streaming tail
+  insertCard: (convId: string, card: { id: string; content: string; segmentKind: string; expertId?: string | null }) => void // slot a persisted card row (e.g. /workflow launch, a workflow draft) into the live list without disturbing a streaming tail
+  updateCard: (convId: string, card: { id: string; content: string }) => void // replace a card row's content in place (a draft card's payload was patched in main — superseded/created flags)
+  composerPrefill: string | null // one-shot composer seed ("Draft with AI" → new conversation); the conversation view consumes and clears it
+  setComposerPrefill: (text: string | null) => void
   ensureStreamListeners: () => void // §7.5: subscribe the stream handlers before a backend-driven turn (launch review) when no send() ran yet this session
   adoptConversation: (conv: ConversationDto) => void // §7.5: adopt a conversation minted outside send() (greeting /workflow) as the active thread
   insertUserLine: (convId: string, line: { id: string; text: string }) => void // §7.5: the user's persisted /workflow command line → their bubble

@@ -12,6 +12,7 @@ import type {
   AgentRunInput,
   AgentResumeStream,
   ConvUsage,
+  ConvCard,
   ConvImage,
   ConvTodos,
   ConvServices,
@@ -83,6 +84,7 @@ import type {
   WorkflowRunDto,
   WorkflowRunEvent,
   WorkflowRunTrigger,
+  WorkflowCreateFromDraftReq,
   WorkflowLaunchFromConvReq,
   SkillInput,
   PluginDto,
@@ -160,6 +162,10 @@ const api = {
   // Live per-conversation generated images: an agent tool produced an image (persisted nsai-media:// ref),
   // broadcast so the renderer attaches it to the in-flight assistant bubble without base64 crossing IPC.
   onConvImage: (cb: (d: ConvImage) => void): (() => void) => agentListen('conv:image', cb),
+
+  // A persisted card row (workflow draft) landed or changed — the store inserts/replaces it live in the
+  // conversations it has loaded; unloaded ones re-read the row on open (workflow-assisted-authoring §3.4).
+  onConvCard: (cb: (d: ConvCard) => void): (() => void) => agentListen('conv:card', cb),
 
   // Live per-conversation TodoWrite list, pushed the moment the tool executes (mid-turn) — the workspace
   // Tasks panel tracks real progress instead of waiting for the turn to settle into the transcript.
@@ -537,6 +543,8 @@ const api = {
       ipcRenderer.invoke('workflows:rewriteMeta', script, patch),
     pickDir: (): Promise<string | null> => ipcRenderer.invoke('workflows:pickDir'),
     save: (input: { id?: string; script: string }): Promise<WorkflowDto> => ipcRenderer.invoke('workflows:save', input),
+    // Assisted authoring §5.1: confirm a draft card into a real workflow (idempotent; same-conv same-name updates).
+    createFromDraft: (req: WorkflowCreateFromDraftReq): Promise<WorkflowDto> => ipcRenderer.invoke('workflows:createFromDraft', req),
     setEnabled: (id: string, enabled: boolean): Promise<WorkflowDto> => ipcRenderer.invoke('workflows:setEnabled', id, enabled),
     remove: (id: string): Promise<void> => ipcRenderer.invoke('workflows:remove', id),
     export: (id: string): Promise<string | null> => ipcRenderer.invoke('workflows:export', id),

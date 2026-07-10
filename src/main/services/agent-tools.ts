@@ -28,6 +28,7 @@ import { rememberProjectMapTool } from '../agent/tools/remember-project-map'
 import { workflowStatusTool } from '../agent/tools/workflow-status'
 import { rememberTool, forgetTool, recallMemoryTool } from '../agent/tools/memory'
 import { distillSkillTool } from '../agent/tools/distill-skill'
+import { workflowDraftTool } from '../agent/tools/workflow-draft'
 import { installSkillTool, installMcpTool, installPluginTool } from '../agent/tools/install-extension'
 import { studioGuideTool } from '../agent/tools/studio-guide'
 import type { Tool } from '../agent/tool'
@@ -176,6 +177,12 @@ export const COMPUTER_USE_TOOLS = [computerUseTool] as unknown as Tool[]
 // are stripped in loop.ts (a child's narrow slice is exactly what the distillation gate forbids saving).
 export const DISTILL_TOOLS = [distillSkillTool] as unknown as Tool[]
 
+// workflow_draft (workflow-assisted-authoring §4) — every AGENT role (built-in + agent-enabled custom),
+// gated on isAgent below so coordinator-direct stays out: in a Danny conversation the DISPATCHED role
+// drafts, and the card lands in that same conversation. Sub-agents are stripped in loop.ts (the card is
+// a conversation-level, user-facing confirmation surface — a child must never present one).
+export const WORKFLOW_AUTHOR_TOOLS = [workflowDraftTool] as unknown as Tool[]
+
 // install_{skill,mcp,plugin} (extension-install-design §5) — a GLOBALLY-toggled tier like computer-use:
 // when extensions.agentInstallEnabled is on (default OFF, Extensions → Tools), every agent role can
 // PROPOSE an install; the user remains the gate — each call is red-floor (approval.ts) and lands in the
@@ -216,14 +223,16 @@ export function toolsForAgentRole(roleId: string): Tool[] {
   // kit — an agent can't even propose an install. The red-floor classifier + install confirmation gate
   // the calls when on (extension-install-design §5.2).
   const install = isAgent && settingsService.get<boolean>('extensions.agentInstallEnabled') === true ? INSTALL_TOOLS : []
-  // workflow_status (§7.5 batch C): the read-only run window — the ONLY standing workflow tool a role
-  // has (launching stays behind the per-turn review closure, so watching ≠ starting).
+  // workflow_status (§7.5 batch C): the read-only run window — plus workflow_draft (assisted authoring
+  // §4), which PROPOSES a workflow as an in-chat confirmation card. Launching stays behind the per-turn
+  // review closure and creating stays behind the user's confirm click, so watching ≠ drafting ≠ starting.
   const wfStatus = isAgent ? [workflowStatusTool as unknown as Tool] : []
+  const wfAuthor = isAgent ? WORKFLOW_AUTHOR_TOOLS : []
   // remember_project_map — project memory's write side for every role incl. coordinator-direct (§4.6: seed when
   // none recorded / refresh when verified stale; app-DB only, read-only classified). Sub-agents are stripped in
   // loop.ts (a Task/async child sees a narrow slice by construction — exactly the write the prompt forbids).
   // studio_guide — the product-manual read (studio-guide-product-manual): same tier as the memory tools —
   // every agent role plus coordinator-direct (Danny is the front door for "what can Studio do?"), sub-agents
   // stripped in loop.ts. Pairs with the standing STUDIO_GUIDE_INDEX prompt section (buildAgentSystem).
-  return [...core, ...PLAN_TOOLS, askUserQuestionTool as unknown as Tool, rememberProjectMapTool as unknown as Tool, studioGuideTool as unknown as Tool, ...MEMORY_TOOLS, ...DISTILL_TOOLS, ...install, ...panel, ...visualize, ...preview, ...monitor, ...computerUse, ...wfStatus, ...mcpManager.toolsForRole(roleId), ...(skill ? [skill] : [])]
+  return [...core, ...PLAN_TOOLS, askUserQuestionTool as unknown as Tool, rememberProjectMapTool as unknown as Tool, studioGuideTool as unknown as Tool, ...MEMORY_TOOLS, ...DISTILL_TOOLS, ...install, ...panel, ...visualize, ...preview, ...monitor, ...computerUse, ...wfStatus, ...wfAuthor, ...mcpManager.toolsForRole(roleId), ...(skill ? [skill] : [])]
 }
