@@ -18,6 +18,7 @@ import type { MemoryDto } from '@/lib/api'
 import { Icons } from '@/components/icons'
 import { useRoles } from '@/stores/roles'
 import { Avatar, Switch } from '@/components/primitives'
+import { AgentCapabilityEditor, groupsFromTools, toolsFromGroups, type AgentCapabilityState } from '@/components/agent-capability'
 import { Dropdown } from '@/views/profile'
 import { ConfirmDialog } from '@/components/dialogs/confirm-dialog'
 import { MemoryLayer } from '@/views/memory'
@@ -102,6 +103,30 @@ function InlineBinding({ expert, onOpenEndpoint }: { expert: Expert; onOpenEndpo
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+// Agent capability, edit-in-place on the PROFILE page (custom roles only): every toggle persists
+// immediately through the same store update the editor dialog uses — the grid, write⇒read lock and
+// default seeding are the ONE shared AgentCapabilityEditor, so the two surfaces can't drift. The hero
+// badge / sidebar tag / composer gates all follow the store row live.
+function AgentCapabilitySection({ expertId }: { expertId: string }): ReactElement | null {
+  const row = useCustomRoles((s) => s.list.find((r) => r.id === expertId))
+  if (!row) return null
+  const save = (next: AgentCapabilityState): void => {
+    void useCustomRoles
+      .getState()
+      .update(expertId, { agent: next.agent, tools: toolsFromGroups(next.groups) })
+      .catch(() => toast.error('Couldn’t save the agent settings'))
+  }
+  return (
+    <div className="detail-section">
+      <div className="ds-head">
+        <span className="ds-title">Agent capability</span>
+        <span className="ds-hint">what this role may do with tools — changes save instantly</span>
+      </div>
+      <AgentCapabilityEditor agent={row.agent} groups={groupsFromTools(row.tools)} onChange={save} />
     </div>
   )
 }
@@ -292,6 +317,9 @@ export function ExpertDetail({
             <div className="ds-head"><span className="ds-title">Model</span><span className="ds-hint">endpoint &amp; model this role runs on</span></div>
             <InlineBinding expert={e} onOpenEndpoint={onOpenEndpoint} />
           </div>
+
+          {/* agent capability — custom roles only, edit-in-place (built-ins keep their curated kits) */}
+          {e.custom && <AgentCapabilitySection expertId={expertId} />}
 
           {/* memory */}
           <MemorySection expertId={expertId} />
