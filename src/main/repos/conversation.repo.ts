@@ -212,10 +212,13 @@ export function remove(id: string): void {
   getDb().prepare('DELETE FROM conversations WHERE id = ?').run(id)
 }
 
-// Delete every conversation a role owns; their messages, summaries, and extraction_state rows cascade
-// via FK. Used when a role is deleted.
-export function removeByRole(roleId: string): void {
-  getDb().prepare('DELETE FROM conversations WHERE primary_role_id = ?').run(roleId)
+// Every conversation a role owns — role deletion iterates these through conversation.service.remove so
+// the FULL per-conversation cleanup runs (assignments, monitor/self-rhythm/hook disposal, async ops,
+// media files, session dirs). The old raw `DELETE … WHERE primary_role_id` cascade skipped all of that
+// and left live agents streaming into deleted rows — deliberately no bulk-delete primitive remains.
+export function listIdsByRole(roleId: string): string[] {
+  const rows = getDb().prepare('SELECT id FROM conversations WHERE primary_role_id = ?').all(roleId) as unknown as { id: string }[]
+  return rows.map((r) => r.id)
 }
 
 // --- messages ---

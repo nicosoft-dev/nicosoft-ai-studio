@@ -215,7 +215,9 @@ export function startAgentRun(input: AgentRunInput, sender: WebContents, opts?: 
         // Assignments: the run settled — close this run's row (if classification opened/reopened one) with
         // the run's own terminal. Awaits the bounded classifier, so a fast run can't leak an orphan.
         void assignmentService.settleSoloRun(pendingAssignment, assignmentService.statusForRunReason(r.reason))
-        return r.reason === 'aborted' ? 'dropped' : 'settled'
+        // Injector-facing outcome: only a CLEAN finish is 'completed' — max_turns/thrash/incomplete/refusal
+        // all ended abnormally, and an awaiting scheduler step must not be recorded ok on their strength.
+        return r.reason === 'aborted' ? 'dropped' : r.reason === 'completed' ? 'completed' : 'failed'
       })
       .catch((err: unknown): InjectionOutcome => {
         const code = err instanceof LlmError ? err.code : 'unknown'
@@ -223,7 +225,9 @@ export function startAgentRun(input: AgentRunInput, sender: WebContents, opts?: 
         lanes.flushAll()
         send('coordinator:error', { streamId, code, message })
         void assignmentService.settleSoloRun(pendingAssignment, controller.signal.aborted ? 'stopped' : 'failed')
-        return controller.signal.aborted ? 'dropped' : 'settled'
+        // An API/model error means the injected step never ran to completion — 'failed', not 'settled':
+        // a scheduled chain stops and records the step honestly instead of sailing past a dead run.
+        return controller.signal.aborted ? 'dropped' : 'failed'
       })
       .finally(() => {
         lanes.flushAll() // belt-and-suspenders: no armed timer may outlive the stream

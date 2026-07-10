@@ -377,10 +377,11 @@ class SchedulerEngine {
     // the two never drift). Agent steps are injected with their own role + the kind's instruction framing; we
     // must NOT re-validate the step's role binding here (that gate belongs to the headless run() path that
     // actually starts a run under it — validating a role the injected note never executes as would throw a
-    // false "not bound" mid-chain). An injected step with a LATER step behind it is AWAITED (inject()'s outcome
-    // promise settles when the consuming turn/run ends), so the chain's order survives injection — "analyze,
-    // THEN run the script" can't run the script first. The ONE feature still not preserved is sequential
-    // output-piping (an injected step's output can't feed the next; `prior` stays empty on the live path).
+    // false "not bound" mid-chain). Every injected step is AWAITED (inject()'s outcome promise settles when
+    // the consuming turn/run ends), so the chain's order survives injection — "analyze, THEN run the script"
+    // can't run the script first — and the step's recorded ok/fail reflects how the run actually ENDED
+    // (completed/failed/dropped), not merely that it was enqueued. The ONE feature still not preserved is
+    // sequential output-piping (an injected step's output can't feed the next; `prior` stays empty here).
     // When the conv is NOT live, fall through to the headless chain below.
     const live = !!task.convId && sessionBus.hasDelivery(task.convId)
     onConv(live ? task.convId! : convId)
@@ -411,15 +412,12 @@ class SchedulerEngine {
           throw new Error(`${where}: the live session ended before the injected step ran`)
         }
         const delivered = sessionBus.inject(task.convId!, { text: agentInstruction(step), source: `schedule:${task.id}`, priority: 'later', roleId: step.roleId })
-        if (i === task.steps.length - 1) {
-          // Nothing follows — no ordering to protect. Don't hold the engine slot for the live turn's duration;
-          // record the hand-off and settle the task run now (the session surfaces the turn's own outcome).
-          results.push({ kind: step.kind, label, ok: true, ms: Date.now() - t0, outputTail: 'delivered into the live session' })
-          continue
-        }
-        // A later step exists → WAIT for the injected step's consuming turn/run to finish, or the chain's order
-        // inverts (the next command/workflow step would run before this one). A task Stop mid-wait ends the
-        // chain (the live session keeps running its turn — Stop cancels the SCHEDULE, not the conversation).
+        // EVERY injected step is awaited — including the last one. The old last-step short-circuit
+        // ("record the hand-off, don't hold the slot") recorded ok:true on enqueue: a run that then
+        // failed still showed a successful history row and CONSUMED a one-shot task. Headless agent
+        // steps hold the slot for their full duration too, so this is also the symmetric behavior.
+        // A task Stop mid-wait ends the chain (the live session keeps running its turn — Stop cancels
+        // the SCHEDULE, not the conversation).
         const outcome = await raceTaskAbort(delivered, signal)
         if (outcome === 'aborted') {
           results.push({ kind: step.kind, label, ok: true, ms: Date.now() - t0, outputTail: 'delivered into the live session; stop requested before it finished' })
@@ -428,6 +426,12 @@ class SchedulerEngine {
         if (outcome === 'dropped') {
           results.push({ kind: step.kind, label, ok: false, ms: Date.now() - t0, outputTail: 'the live session ended before this step could run' })
           throw new Error(`${where}: the live session ended before the injected step ran`)
+        }
+        if (outcome === 'failed') {
+          // Delivered, ran, and the consuming turn ended abnormally (API error / turn-limit / refusal):
+          // the step FAILED — record it honestly and stop the chain, exactly like a headless step throw.
+          results.push({ kind: step.kind, label, ok: false, ms: Date.now() - t0, outputTail: 'the injected step failed in the live session' })
+          throw new Error(`${where}: the injected step failed in the live session`)
         }
         results.push({ kind: step.kind, label, ok: true, ms: Date.now() - t0, outputTail: 'ran in the live session' })
         continue

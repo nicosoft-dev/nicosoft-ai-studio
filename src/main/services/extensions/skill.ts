@@ -70,8 +70,8 @@ export function list(): SkillDto[] {
   return skillRepo.list().map(toDto)
 }
 
-export function add(input: SkillInput, ownerPluginId?: string): SkillDto {
-  const row = input.source === 'imported' ? createImported(input, ownerPluginId) : createBuiltin(input, ownerPluginId)
+export async function add(input: SkillInput, ownerPluginId?: string): Promise<SkillDto> {
+  const row = input.source === 'imported' ? await createImported(input, ownerPluginId) : createBuiltin(input, ownerPluginId)
   mirrorRow(row)
   register(row)
   return toDto(row)
@@ -81,12 +81,12 @@ export function add(input: SkillInput, ownerPluginId?: string): SkillDto {
 // into extensions/skills/<id>/ (design §4.3 — the install owns its payload; the user deleting their
 // download no longer breaks the skill), and snapshot its fields. A source already under extensions/
 // (a plugin-owned skill inside the plugin's copy) is referenced in place — never copied twice.
-function createImported(input: SkillInput, ownerPluginId?: string): SkillRow {
+async function createImported(input: SkillInput, ownerPluginId?: string): Promise<SkillRow> {
   if (!input.dirPath) throw new Error('Imported skill needs a folder path')
   const parsed = loadSkillDir(input.dirPath) // validate the SOURCE before copying anything
   const id = newExtensionId()
   const materialize = !isMaterializedPath(input.dirPath)
-  const dirPath = materialize ? materializeDirCopy('skills', id, input.dirPath) : input.dirPath
+  const dirPath = materialize ? await materializeDirCopy('skills', id, input.dirPath) : input.dirPath
   try {
     return skillRepo.create({
       id,
@@ -127,7 +127,7 @@ function createBuiltin(input: SkillInput, ownerPluginId?: string): SkillRow {
   })
 }
 
-export function update(id: string, patch: SkillInput): SkillDto | null {
+export async function update(id: string, patch: SkillInput): Promise<SkillDto | null> {
   const existing = skillRepo.getById(id)
   if (!existing) return null
   let repatch: SkillUpdatePatch
@@ -139,7 +139,7 @@ export function update(id: string, patch: SkillInput): SkillDto | null {
     let dirPath = patch.dirPath ?? existing.dirPath ?? ''
     if (patch.dirPath && patch.dirPath !== existing.dirPath && !isMaterializedPath(patch.dirPath)) {
       loadSkillDir(patch.dirPath) // validate the new source before replacing the copy
-      dirPath = materializeDirCopy('skills', existing.id, patch.dirPath)
+      dirPath = await materializeDirCopy('skills', existing.id, patch.dirPath)
     }
     const parsed = dirPath ? loadSkillDir(dirPath) : null
     repatch = {

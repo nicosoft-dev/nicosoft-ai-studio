@@ -25,11 +25,15 @@ import type { AgentContext } from './context'
 export type InjectionPriority = 'next' | 'later'
 
 // Terminal state of one injection, reported back to the injector (inject()'s returned promise):
-//   'settled' — the note was delivered AND the turn/run that consumed it finished (success or in-run error;
-//               the session surfaces its own errors in-conversation). The scheduler keys step ORDER off this.
-//   'dropped' — the note never ran to completion: the session was disposed/torn down with it still queued,
-//               no live expert could receive it, or the consuming turn was cut short by an abort.
-export type InjectionOutcome = 'settled' | 'dropped'
+//   'completed' — the note was delivered AND the turn/run that consumed it finished CLEANLY.
+//   'failed'    — the note was delivered but the consuming turn/run ended abnormally (API/model error,
+//                 turn-limit/thrash stop, refusal). The session surfaces the error in-conversation; the
+//                 injector must still see it — a scheduler chain records the step failed and a one-shot
+//                 task is NOT consumed on the strength of a run that never actually did the work.
+//   'dropped'   — the note never ran to completion: the session was disposed/torn down with it still
+//                 queued, no live expert could receive it, or the consuming turn was cut short by an abort.
+// The scheduler keys both step ORDER (await) and step OUTCOME (ok/fail) off this.
+export type InjectionOutcome = 'completed' | 'failed' | 'dropped'
 
 export interface SessionInjection {
   // The event body in the model's words (NOT yet wrapped — the bus wraps it). Keep it self-contained: what
@@ -238,7 +242,9 @@ class SessionBus {
       try {
         const ret = s.deliver(note, key || undefined)
         void Promise.resolve(ret).then(
-          (outcome) => items.forEach((i) => i.settled(outcome === 'dropped' ? 'dropped' : 'settled')),
+          // Pass a real outcome through; a legacy void-returning closure can't know how the consuming
+          // turn ended, so it keeps the old fire-and-forget meaning ('completed' on delivery).
+          (outcome) => items.forEach((i) => i.settled(outcome === 'dropped' || outcome === 'failed' ? outcome : 'completed')),
           (err) => {
             console.warn(`[session-bus] delivery for conv ${convId} rejected:`, err)
             items.forEach((i) => i.settled('dropped'))

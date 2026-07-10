@@ -64,7 +64,7 @@ export const installSkillTool = buildTool({
     if (!dir) return { data: { ok: false as const, error: 'No folder was chosen — ask the user for the skill folder (or to pick it when the confirmation dialog opens).' } }
     if (!existsSync(join(dir, SKILL_FILE))) return { data: { ok: false as const, error: `No ${SKILL_FILE} in ${dir}. Ask the user for the folder that directly contains ${SKILL_FILE}.` } }
     try {
-      const dto = skillService.add({ source: 'imported', dirPath: dir, scope: input.scope ?? 'all', enabled: true })
+      const dto = await skillService.add({ source: 'imported', dirPath: dir, scope: input.scope ?? 'all', enabled: true })
       return { data: { ok: true as const, summary: `Skill "${dto.name}" installed (id ${dto.id}) — copied into Studio's extensions store and active for ${dto.scope === 'all' ? 'all experts' : (dto.scope as string[]).join(', ')}.` } }
     } catch (e) {
       return { data: { ok: false as const, error: e instanceof Error ? e.message : String(e) } }

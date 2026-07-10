@@ -83,7 +83,7 @@ export async function add(input: McpServerInput, ownerPluginId?: string): Promis
   let cwd: string | null = null
   if (input.sourceDir) {
     if (input.transport !== 'stdio') throw new Error('sourceDir applies only to stdio servers')
-    cwd = materializeDirCopy('mcp', id, input.sourceDir)
+    cwd = await materializeDirCopy('mcp', id, input.sourceDir)
   }
   let row: McpServerRow
   try {

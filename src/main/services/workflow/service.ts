@@ -482,6 +482,11 @@ export function createFromDraft(req: { convId: string; draftId: string; script: 
     if (existing) return existing
     // the created workflow was deleted since — fall through and create it again (explicit user click)
   }
+  // A superseded draft is REFUSED here, in main — the UI grays the old card out, but a second window
+  // (or one the patch broadcast hasn't reached yet) could still click its button; the DB payload is the
+  // truth, not the button's visibility. Order matters: an already-CONFIRMED card stays idempotent above
+  // even if a later revision superseded it afterwards.
+  if (payload.superseded) throw new Error('this draft was superseded by a newer one — confirm the latest card')
   const script = typeof payload.script === 'string' && payload.script ? payload.script : req.script
   const l = gateOrThrow(script) // same gate as any save — roles may have been disabled since the card landed
   const clash = repo.getByName(l.name as string)

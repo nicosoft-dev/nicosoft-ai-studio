@@ -1,8 +1,9 @@
 import * as roleRepo from '../repos/role.repo'
 import * as memoryRepo from '../repos/memory.repo'
 import * as convRepo from '../repos/conversation.repo'
+import * as convService from './conversation.service'
 import { transaction } from '../db/connection'
-import { AGENT_ROLE_IDS } from '@shared/roles'
+import { AGENT_ROLE_IDS, ROLE_DISPLAY_NAMES } from '@shared/roles'
 import { DISPATCHABLE_ROLE_IDS } from '../agent/roles/prompts'
 import type {
   CustomRoleCreateDto,
@@ -93,16 +94,27 @@ export function setState(
     : { roleId, enabled: safePatch.enabled ?? true, selfLearningEnabled: safePatch.selfLearningEnabled ?? true }
 }
 
-// Delete a role and cascade its data atomically: role-layer memories + the role's conversations
-// (messages, summaries, extraction_state cascade via FK) + bindings + state + the custom-role row.
-// Shared memory is global and intentionally kept.
+// Delete a role and cascade its data: role-layer memories + the role's conversations + bindings +
+// state + the custom-role row. Shared memory is global and intentionally kept.
 export function remove(roleId: string): void {
   // Only custom roles can be deleted — never cascade-delete a built-in role's conversations/memory,
   // even if an IPC caller asks. Built-ins aren't in custom_roles, so getCustom gates them out.
   if (!roleRepo.getCustom(roleId)) return
+  // Conversations go through conversation.service.remove — the ONE place that runs the full cleanup
+  // fan-out (assignments, monitor/self-rhythm/hook/file-watch disposal, async ops, pipeline todos,
+  // media files, on-disk session dirs). The old raw removeByRole cascade skipped all of it, leaving
+  // orphaned assignment rows, armed watchers, and media/transcripts on disk (lifecycle review
+  // 2026-07-10). Live runs are aborted at the IPC layer BEFORE this (roles.handler), same as project
+  // deletion. Best-effort per conversation: one failed cleanup must not strand the role itself.
+  for (const convId of convRepo.listIdsByRole(roleId)) {
+    try {
+      convService.remove(convId)
+    } catch (e) {
+      console.warn('[roles] failed to remove a conversation during role delete:', e instanceof Error ? e.message : e)
+    }
+  }
   transaction(() => {
     memoryRepo.removeByRole(roleId)
-    convRepo.removeByRole(roleId)
     roleRepo.removeBinding(roleId)
     roleRepo.removeState(roleId)
     roleRepo.removeCustom(roleId)
@@ -152,12 +164,27 @@ export function listCustom(): CustomRoleDto[] {
   return roleRepo.listCustom().map(toCustomDto)
 }
 
+// Role names are ROUTING IDENTITY, not just display: Danny routes by name, @mentions match by name,
+// and roleIdFromName resolves a duplicate to one winner (built-in first, then the first agent twin) —
+// so a second role with the same name is silently unreachable. Reject the collision at the write gate
+// (case-insensitive, against built-in display names AND other custom roles); existing duplicates in
+// the wild keep working under the prefer-agent rule, we just stop minting new ambiguity.
+function assertNameFree(name: string, selfId?: string): void {
+  const lower = name.toLowerCase()
+  if (Object.values(ROLE_DISPLAY_NAMES).some((n) => n.toLowerCase() === lower)) {
+    throw new Error(`"${name}" is a built-in expert's name — pick another`)
+  }
+  const twin = roleRepo.listCustom().find((r) => r.id !== selfId && r.name.trim().toLowerCase() === lower)
+  if (twin) throw new Error(`a custom role named "${name}" already exists — names must stay unique so @mentions and routing are unambiguous`)
+}
+
 // Create a new user-defined role. The fresh role starts ENABLED (no role_states row inserted; the
 // renderer treats "no row" as enabled). Bindings are set in a separate call once the user picks an
 // endpoint+model from the editor — keeps the create call cheap and idempotent.
 export function createCustom(input: CustomRoleCreateDto): CustomRoleDto {
   const trimmed = input.name?.trim()
   if (!trimmed) throw new Error('custom role name is required')
+  assertNameFree(trimmed)
   return toCustomDto(roleRepo.createCustom({ ...input, name: trimmed }))
 }
 
@@ -165,6 +192,7 @@ export function createCustom(input: CustomRoleCreateDto): CustomRoleDto {
 // built-in id is a silent no-op (returns null) — the IPC layer surfaces that as null to the caller.
 export function updateCustom(id: string, patch: CustomRoleUpdateDto): CustomRoleDto | null {
   const trimmed = patch.name?.trim()
+  if (trimmed) assertNameFree(trimmed, id) // renames pass the same uniqueness gate as create
   const safe = trimmed !== undefined ? { ...patch, name: trimmed || undefined } : patch
   const row = roleRepo.updateCustom(id, safe)
   return row ? toCustomDto(row) : null

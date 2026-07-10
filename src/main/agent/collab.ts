@@ -319,8 +319,8 @@ export class CollabSession {
           ran = true
           // The turn that consumed the drained external notes just finished — settle their injectors' waiters
           // (the scheduler awaits this to keep a live chain's steps ordered). An abort cut the turn short, so
-          // its notes did NOT run to completion → 'dropped'.
-          for (const settle of e.inFlightNotes.splice(0)) settle(signal.aborted ? 'dropped' : 'settled')
+          // its notes did NOT run to completion → 'dropped'; a clean turn end → 'completed'.
+          for (const settle of e.inFlightNotes.splice(0)) settle(signal.aborted ? 'dropped' : 'completed')
           if (signal.aborted) break
           if (e.mailbox.length) continue // mail arrived mid-turn → process it immediately
         }
@@ -394,9 +394,10 @@ export class CollabSession {
       }
     }
     e.exited = true // the loop is gone — injectExternal must not route a note here (it can never drain again)
-    // Notes whose consuming turn THREW (or that were drained but never ran because the loop exited first) did
-    // not run to completion — settle their waiters 'dropped' so an awaiting scheduler chain fails honestly.
-    for (const settle of e.inFlightNotes.splice(0)) settle('dropped')
+    // Notes in flight here were CONSUMED by the turn that then threw — the step ran and failed, which an
+    // awaiting scheduler chain records as a step failure ('failed'); never-consumed notes live in
+    // pendingResults and are rerouted below (or settle 'dropped' when no live peer remains).
+    for (const settle of e.inFlightNotes.splice(0)) settle('failed')
     // If the loop ERROR-exited with notes still queued (an inject landed while it was running, then the turn threw
     // before its pre-park drain), reroute them to a surviving live expert — `exited` is already set so they can't
     // route back here (waiters ride along with the entry). No live peer → routeNote settles them 'dropped'

@@ -80,7 +80,7 @@ export function registerPluginHooks(): void {
 export async function install(dirPath: string): Promise<PluginDto> {
   parsePlugin(dirPath) // validate the SOURCE (bad manifest / no components) before copying anything
   const id = newExtensionId()
-  const matDir = materializeDirCopy('plugins', id, dirPath)
+  const matDir = await materializeDirCopy('plugins', id, dirPath)
   let parsed: ReturnType<typeof parsePlugin>
   try {
     parsed = parsePlugin(matDir) // re-parse from the copy so every component path points inside it
@@ -103,7 +103,7 @@ export async function install(dirPath: string): Promise<PluginDto> {
   const rollback: Array<() => void | Promise<void>> = []
   try {
     for (const sk of parsed.skills) {
-      const dto = skillService.add({ source: 'imported', dirPath: sk.dirPath, scope: 'all', enabled: true }, row.id)
+      const dto = await skillService.add({ source: 'imported', dirPath: sk.dirPath, scope: 'all', enabled: true }, row.id)
       bundles.push({ type: 'skill', id: dto.id, name: dto.name })
       rollback.push(() => skillService.remove(dto.id))
     }

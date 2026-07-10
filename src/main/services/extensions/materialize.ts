@@ -14,7 +14,8 @@
 // Existing rows installed before this feature keep their external dir_path untouched (no migration —
 // design decision 2); only NEW installs are materialized.
 
-import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { cp, lstat, mkdir, rm } from 'node:fs/promises'
 import { basename, join, resolve, sep } from 'node:path'
 import { dataDir } from '../../db/connection'
 import { ulid } from '../../db/id'
@@ -49,19 +50,24 @@ export function isMaterializedPath(p: string): boolean {
 }
 
 // Deep-copy the user's source folder into extensions/<kind>/<id>/, replacing any prior copy for that id.
-// dereference:true resolves symlinks so the copy is self-contained; .git and .DS_Store are dead weight
-// for an installed extension and are skipped. Returns the internal path (what dir_path should store).
-export function materializeDirCopy(kind: ExtensionKind, id: string, srcDir: string): string {
+// SYMLINKS ARE SKIPPED OUTRIGHT (not dereferenced, not preserved): the old dereference:true would follow
+// a link pointing ANYWHERE — a skill folder containing `creds -> ~/.ssh` copied the target's CONTENT into
+// the app's data root — and copying the link itself would leave the materialized payload pointing outside
+// its own folder. Nothing in a self-contained copy may reference the world outside it. Async end to end:
+// this runs on install — sometimes from an agent tool mid-turn — and a large source folder must not block
+// the main process. .git and .DS_Store are dead weight and are skipped. Returns the internal path.
+export async function materializeDirCopy(kind: ExtensionKind, id: string, srcDir: string): Promise<string> {
   if (!existsSync(srcDir)) throw new Error(`source folder not found: ${srcDir}`)
   const dest = materializedDir(kind, id)
-  rmSync(dest, { recursive: true, force: true })
-  mkdirSync(dest, { recursive: true })
-  cpSync(srcDir, dest, {
+  await rm(dest, { recursive: true, force: true })
+  await mkdir(dest, { recursive: true })
+  await cp(srcDir, dest, {
     recursive: true,
-    dereference: true,
-    filter: (src) => {
+    dereference: false,
+    filter: async (src) => {
       const b = basename(src)
-      return b !== '.git' && b !== '.DS_Store'
+      if (b === '.git' || b === '.DS_Store') return false
+      return !(await lstat(src)).isSymbolicLink()
     }
   })
   return dest
