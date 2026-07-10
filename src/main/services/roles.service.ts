@@ -3,6 +3,7 @@ import * as memoryRepo from '../repos/memory.repo'
 import * as convRepo from '../repos/conversation.repo'
 import { transaction } from '../db/connection'
 import { AGENT_ROLE_IDS } from '@shared/roles'
+import { DISPATCHABLE_ROLE_IDS } from '../agent/roles/prompts'
 import type {
   CustomRoleCreateDto,
   CustomRoleDto,
@@ -138,6 +139,13 @@ export function getCustom(roleId: string): CustomRoleDto | null {
 // capability) carried to data-driven membership.
 export function runsAgentLoop(roleId: string): boolean {
   return AGENT_ROLE_IDS.has(roleId) || roleRepo.getCustom(roleId)?.agent === true
+}
+
+// Danny's routing universe (custom-agent-roles §8): the 8 built-in dispatchable roles (stable order —
+// generalist first, it is the router's degrade-fallback `enabled[0]`) + every agent-enabled custom role,
+// oldest first. Callers (route/facilitate) still subtract disabledRoleIds() themselves, same as before.
+export function dispatchableRoleIds(): string[] {
+  return [...DISPATCHABLE_ROLE_IDS, ...roleRepo.listCustom().filter((r) => r.agent).map((r) => r.id)]
 }
 
 export function listCustom(): CustomRoleDto[] {

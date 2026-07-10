@@ -26,14 +26,13 @@ import { ulid } from '../../db/id'
 import { chatOnce, endpointWithKey } from '../llm-once'
 import { resolveDepth } from '../../llm/thinking'
 import { LlmError, type ChatMessage } from '../../llm/types'
-import { COORDINATOR_FACILITATOR_PROMPT, DISPATCHABLE_ROLE_IDS, displayName, roleIdFromName } from '../../agent/roles/prompts'
+import { COORDINATOR_FACILITATOR_PROMPT, displayName, roleIdFromName } from '../../agent/roles/prompts'
 import { detectE2EIntent, disabledRoleIds, route, routeNeedsPlan } from './route'
 import { emitCoordinatorIntro, emitWorkflowLaunchCard, runRoleStep, type RunStepOptions } from './step'
 import * as workflowService from '../workflow/service'
 import { resetPipelineTodos } from '../pipeline-todos'
 import { runGatedRoleStep, runGateBFailFollowUp } from './gate-b'
 import { chooseVerifierRole, runVerifierStep } from '../lens/verifier'
-import { AGENT_ROLE_IDS } from '../agent-dispatch'
 import { submitGateC } from './gate-c'
 import { runCollaboration } from './collab'
 import {
@@ -671,7 +670,7 @@ async function facilitate(question: string, positions: { role: string; text: str
   const available =
     panel.length >= MAX_PANEL
       ? []
-      : DISPATCHABLE_ROLE_IDS.filter((r) => !disabled.has(r) && !panel.includes(r) && !!rolesService.getBinding(r)?.endpointId)
+      : rolesService.dispatchableRoleIds().filter((r) => !disabled.has(r) && !panel.includes(r) && !!rolesService.getBinding(r)?.endpointId)
   const messages: ChatMessage[] = [
     { role: 'system', content: COORDINATOR_FACILITATOR_PROMPT },
     { role: 'user', content: buildFacilitateInput(question, positions, panel, available) }

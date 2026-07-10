@@ -14,7 +14,7 @@ import { MAIN_DISPATCH_STALL_TIMEOUT_MS, runAgent, type AgentEvent, type AgentRe
 import { drainAgentRun } from './agent-dispatch'
 import type { ServerToolSchema } from '../agent/types'
 import type { MessageAttachmentDto } from '../ipc/contracts'
-import { displayName, ROLE_BLURB } from '../agent/roles/prompts'
+import { displayName, roleBlurb } from '../agent/roles/prompts'
 import { sendMessageTool, assignTaskTool, waitTool, electLensDriverTool } from '../agent/tools/consult'
 import { CollabSession, type ExpertSpec, type CollabEvent } from '../agent/collab'
 import { runHooks } from '../agent/hooks/engine'
@@ -97,7 +97,7 @@ function buildCollabSystem(roleId: string, teammates: { id: string; name: string
   // Roster lists each teammate by NAME + a domain blurb (what they do) — NEVER the role_id. The model addresses
   // teammates by name everywhere (prose, todos, and the consult tools, which take a name). Exposing the role_id
   // here made a weak model parrot it ("the frontend teammate" instead of "Shuri").
-  const roster = teammates.map((t) => `- ${t.name} — ${ROLE_BLURB[t.id] ?? 'specialist'}`).join('\n')
+  const roster = teammates.map((t) => `- ${t.name} — ${roleBlurb(t.id)}`).join('\n')
   return (
     base +
     '\n\n## Working as a team\n' +

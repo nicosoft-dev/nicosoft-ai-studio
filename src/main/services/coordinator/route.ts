@@ -16,7 +16,8 @@ import * as rolesService from '../roles.service'
 import { chatOnce } from '../llm-once'
 import { resolveDepth } from '../../llm/thinking'
 import type { ChatMessage } from '../../llm/types'
-import { COORDINATOR_ROUTER_PROMPT, COORDINATOR_INVESTIGATION_PROMPT, DISPATCHABLE_ROLE_IDS, displayName, roleIdFromName } from '../../agent/roles/prompts'
+import { COORDINATOR_ROUTER_PROMPT, COORDINATOR_INVESTIGATION_PROMPT, displayName, roleIdFromName } from '../../agent/roles/prompts'
+import { CUSTOM_AGENT_TOOL_GROUPS } from '../agent-tools'
 import { COORDINATOR_INVESTIGATION_TOOLS } from '../agent-tools'
 import { classifyHeuristic } from '../assignment-classify'
 import { buildTool, type Tool } from '../../agent/tool'
@@ -43,19 +44,20 @@ export interface RouteContext {
 
 export async function route(userInput: string, history: convRepo.MessageRow[], ctx: RouteContext = {}, signal?: AbortSignal, cb?: CoordinatorCallbacks): Promise<RouteDecision> {
   const disabled = disabledRoleIds()
-  const enabled = DISPATCHABLE_ROLE_IDS.filter((r) => !disabled.has(r))
+  // Routing universe = built-in dispatchables + agent-enabled custom roles (custom-agent-roles §8),
+  // minus disabled. Custom names ride the roster via customExpertLines below; chat-only personas stay
+  // outside the routing universe entirely (users reach them by clicking the sidebar).
+  const enabled = rolesService.dispatchableRoleIds().filter((r) => !disabled.has(r))
   if (enabled.length === 0) return { mode: 'single', role: 'generalist', reason: 'no roles enabled', needsPlan: isNonTrivialTask(userInput) }
 
-  // 0. @mention 0-LLM fast path — user explicitly named a built-in role. Must be currently enabled;
-  //    a disabled @mention falls through to the LLM router. v0.1 LIMITATION: custom roles cannot be
-  //    routed by Coordinator — neither via @mention (the router only knows the 7 built-in ids, see
-  //    COORDINATOR_ROUTER_PROMPT) nor via the LLM router. Users reach custom roles by clicking them in the
-  //    sidebar (direct chat path). Extending Coordinator to dispatch into custom roles requires plumbing
-  //    custom-role names into the router prompt + buildRolePrompt fallback for arbitrary ids.
+  // 0. @mention 0-LLM fast path — user explicitly named a role (built-in OR agent-enabled custom; the
+  //    dynamic roleIdFromName resolves custom names to their ids, built-ins winning a name collision).
+  //    Must be currently enabled; a disabled/unknown/chat-only @mention falls through to the LLM router.
+  //    Single-word letter names only (\p{L}+) — a custom name with spaces/digits routes via the roster.
   const mention = /^@(\p{L}+)/u.exec(userInput)
   if (mention) {
-    const id = roleIdFromName(mention[1]) // accepts the display name (@Flynn) or the raw id (@engineer)
-    if (enabled.includes(id as (typeof enabled)[number])) {
+    const id = roleIdFromName(mention[1]) // accepts a display name (@Flynn / @Nova) or the raw id (@engineer)
+    if (enabled.includes(id)) {
       // Assignments: the 0-LLM fast path has no router judgment, so work-vs-chat falls to the SAME
       // conservative heuristic the solo fallback uses ("@Flynn fix the login" is 接活 like any other) —
       // classified on the message with the mention stripped, so the leading @name can't skew it.
@@ -175,6 +177,7 @@ async function routeAsAgent(
     const memoryIndex = await agentMemoryIndexText(cwd)
     const system =
       `${COORDINATOR_INVESTIGATION_PROMPT}\n\nCurrently available experts: ${enabled.map(displayName).join(', ')}. Route ONLY to these — others are disabled.` +
+      customExpertLines(enabled) +
       workflowListingBlock(workflows) +
       (memoryIndex ? `\n\n${memoryIndex}` : '')
 
@@ -270,6 +273,25 @@ function buildInvestigationBrief(
   return parts.join('\n\n')
 }
 
+// Roster lines for the agent-enabled CUSTOM roles in the routing universe (custom-agent-roles §8,
+// decision 5): `<Name> — <first line of their system prompt, ≤80 chars> (agent tools: <groups>)`. The
+// static COORDINATOR_ROUTER_PROMPT describes only the built-ins, so this block is the router's ONLY
+// knowledge of what a custom expert does — capability fit stays the router's judgment (no hard checks).
+// Exported for the deterministic e2e pin.
+export function customExpertLines(enabled: readonly string[]): string {
+  const lines: string[] = []
+  for (const r of enabled) {
+    const c = rolesService.getCustom(r)
+    if (!c) continue
+    const first = c.systemPrompt?.split('\n').map((l) => l.trim()).find(Boolean)?.slice(0, 80)
+    const groups = c.tools.filter((k) => k in CUSTOM_AGENT_TOOL_GROUPS)
+    if (groups.includes('write') && !groups.includes('read')) groups.unshift('read') // assembly backstop parity
+    lines.push(`- ${c.name}${first ? ` — ${first}` : ''} (agent tools: ${groups.join('/') || 'none'})`)
+  }
+  if (!lines.length) return ''
+  return `\nUser-defined experts — route to them BY NAME exactly like the built-ins when their description fits the request:\n${lines.join('\n')}`
+}
+
 function buildRouterMessages(
   userInput: string,
   history: convRepo.MessageRow[],
@@ -279,7 +301,7 @@ function buildRouterMessages(
   const sysParts = [
     COORDINATOR_ROUTER_PROMPT,
     '',
-    `Currently available experts: ${enabled.map(displayName).join(', ')}. Route ONLY to these — others are disabled.` + workflowListingBlock(workflows)
+    `Currently available experts: ${enabled.map(displayName).join(', ')}. Route ONLY to these — others are disabled.` + customExpertLines(enabled) + workflowListingBlock(workflows)
   ]
   const messages: ChatMessage[] = [{ role: 'system', content: sysParts.join('\n') }]
   // Recent context: the last N USER turns (skip assistants entirely — past expert names in their

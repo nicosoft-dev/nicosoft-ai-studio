@@ -4,6 +4,7 @@ import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactElement, 
 import { createPortal } from 'react-dom'
 import { Icons } from './icons'
 import { STUDIO_DATA } from '@/data/studio-data'
+import { useAllExperts } from '@/lib/all-experts'
 import { useAnchoredMenu } from '@/lib/use-anchored-menu'
 import type { Expert } from '@/types'
 
@@ -79,15 +80,17 @@ export function HealthDot({ status }: { status: string }): ReactElement {
 /* — Syntax highlighter (lightweight, Python + TSX) — */
 /* — Dispatch badge for collaboration — */
 export function DispatchBadge({ chain }: { chain: string[] }): ReactElement {
-  const { EXPERT_BY_ID } = STUDIO_DATA
-  const coordinator = EXPERT_BY_ID.coordinator
+  // useAllExperts (not STUDIO_DATA): a dispatched CUSTOM agent's chain node renders name + color instead
+  // of being silently skipped (custom-agent-roles 批3 — Danny routes to custom roles now).
+  const { byId } = useAllExperts()
+  const coordinator = byId.coordinator
   return (
     <div className="dispatch">
       <span className="d-node d-lead">
         <span className="d-dot" style={{ background: coordinator.color }} /> {coordinator.name} · routing
       </span>
       {chain.map((id) => {
-        const e = EXPERT_BY_ID[id]
+        const e = byId[id]
         if (!e) return null // skip non-expert ids in the chain (e.g. a tool like 'studio_lens') — a badge must never crash on a stray id
         return (
           <Fragment key={id}>

@@ -3,8 +3,8 @@
 // off-Electron harness pins the decision semantics directly — same carve-out pattern as workflow/rules.ts
 // (route.ts keeps the LLM calls / investigation agent and re-exports this surface).
 
-import { AGENT_ROLE_IDS } from '@shared/roles'
 import { displayName, roleIdFromName } from '../../agent/roles/prompts'
+import * as rolesService from '../roles.service'
 import { PROJECT_MAP_MAX_CHARS } from '../memory/project-map' // shared clamp — same bound as remember_project_map (§4.6)
 import * as workflowService from '../workflow/service'
 import type { RouteDecision } from './types'
@@ -126,10 +126,11 @@ export function decisionFromObject(
   }
   if (obj.mode === 'collaborate' && Array.isArray(obj.roles)) {
     const rids = obj.roles.filter((r): r is string => typeof r === 'string').map(roleIdFromName)
-    // Collaboration experts must be AGENT roles (they need tools + the consult tools); 2-3 like the
-    // other multi-expert modes. A non-agent role (designer/translator/…) can't run the collab loop, so
-    // a decision naming one falls through to the caller's fallback.
-    if (rids.length >= 2 && rids.length <= 3 && rids.every((r) => enabled.includes(r) && AGENT_ROLE_IDS.has(r))) {
+    // Collaboration experts must RUN THE AGENT LOOP (they need tools + the consult tools); 2-3 like the
+    // other multi-expert modes. runsAgentLoop = built-ins ∪ agent-enabled customs (custom-agent-roles §5)
+    // — an Agent-on custom role can build alongside Flynn; a chat-only persona still falls through to
+    // the caller's fallback.
+    if (rids.length >= 2 && rids.length <= 3 && rids.every((r) => enabled.includes(r) && rolesService.runsAgentLoop(r))) {
       return { mode: 'collaborate', roles: rids, reason, intro, needsPlan, ...extra }
     }
   }

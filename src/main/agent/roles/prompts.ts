@@ -13,12 +13,41 @@
 
 import { COMMON_PREAMBLE, CHAT_MODE_NOTE, SAFETY_PREAMBLE } from './common-preamble'
 
-// Display names live in @shared/roles (single source with the renderer's expert roster) — re-exported here
-// so the rest of main keeps importing them from the prompts module they conceptually belong to. ROLE_DISPLAY_NAMES
+// Display names live in @shared/roles (single source with the renderer's expert roster). ROLE_DISPLAY_NAMES
 // is imported as `N` and INTERPOLATED into every prompt below (never hardcode "Danny"/"Flynn"/… — a surface-name
 // change in @shared/roles then propagates to the prompts at module load, with no stale literal left behind).
-import { ROLE_DISPLAY_NAMES as N } from '@shared/roles'
-export { displayName, roleIdFromName } from '@shared/roles'
+// displayName / roleIdFromName are main's naming AUTHORITY (every coordinator/collab caller imports them
+// from HERE): unlike the pure @shared versions they also resolve CUSTOM roles (custom-agent-roles §8) —
+// a custom name maps to its ulid and a ulid maps back to its name. Built-ins win a name collision (a
+// custom role named "Flynn" never shadows the engineer). Runtime-only repo reads; nothing at module load.
+import { ROLE_DISPLAY_NAMES as N, ROLE_DISPLAY_NAMES, roleIdFromName as builtinRoleIdFromName } from '@shared/roles'
+import * as roleRepo from '../../repos/role.repo'
+
+export function displayName(roleId: string): string {
+  return ROLE_DISPLAY_NAMES[roleId] ?? roleRepo.getCustom(roleId)?.name ?? roleId
+}
+
+// Accepts a display name (@Flynn / @Nova), a raw built-in id (@engineer), or a custom role's ulid.
+// Precedence: built-in name/id → custom id (verbatim) → custom name (case-insensitive) → lowercased
+// passthrough (the @shared behavior, so unknown names keep failing enabled-set checks downstream).
+export function roleIdFromName(name: string): string {
+  const builtin = builtinRoleIdFromName(name)
+  if (ROLE_DISPLAY_NAMES[builtin]) return builtin
+  const raw = name.trim()
+  const lower = raw.toLowerCase()
+  const hit = roleRepo.listCustom().find((r) => r.id === raw || r.name.trim().toLowerCase() === lower)
+  return hit?.id ?? builtin
+}
+
+// One-line domain blurb for a roster row: built-ins from ROLE_BLURB; customs from the first line of
+// their user-authored system prompt (the collab roster shows `<name> — <blurb>`).
+export function roleBlurb(roleId: string): string {
+  const builtin = ROLE_BLURB[roleId]
+  if (builtin) return builtin
+  const custom = roleRepo.getCustom(roleId)
+  const first = custom?.systemPrompt?.split('\n').map((l) => l.trim()).find(Boolean)
+  return first ? first.slice(0, 80) : 'user-defined specialist'
+}
 
 // One-line DOMAIN descriptor per role (what each one DOES). Keyed by role_id but the VALUES are pure
 // human-readable descriptions — used to tell a model who handles what WITHOUT exposing the role_id as an
@@ -492,7 +521,10 @@ const ROLE_SECTIONS: Record<string, string> = {
   scheduler: SCHEDULER_PROMPT
 }
 
-// Dispatched role ids (everything Danny can route to — Danny itself is the router, not a destination).
+// BUILT-IN dispatchable role ids (Danny itself is the router, not a destination). The full routing
+// universe is rolesService.dispatchableRoleIds() = this list + agent-enabled custom roles — route /
+// facilitate consume THAT; this constant only seeds it. Order matters: generalist first is the router's
+// degrade fallback (`enabled[0]`).
 export const DISPATCHABLE_ROLE_IDS = ['generalist', 'engineer', 'frontend', 'designer', 'translator', 'editor', 'analyst', 'scheduler'] as const
 
 // Assemble the full system prompt for a role: COMMON_PREAMBLE + role section. Returns null for an
