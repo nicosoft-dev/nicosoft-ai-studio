@@ -170,7 +170,16 @@ export function dispatchableRoleIds(): string[] {
 // in step.ts). Capability surfaces (workflow lint, profile pages) deliberately do NOT use this —
 // readiness is transient config, not identity; only the live dispatch pool filters by it.
 // frontend inherits engineer's binding via getBinding, so Shuri stays ready whenever Flynn is.
+// A role the user turned OFF cannot run a step right now. Coordinator is the router and can never be
+// disabled (defensive belt alongside the UI lockout), mirroring disabledRoleIds() in route.ts. Single-row
+// read of role_states (getState maps enabled → boolean; no row = enabled by default).
+export function isDisabled(roleId: string): boolean {
+  if (roleId === COORDINATOR_ROLE_ID) return false
+  return roleRepo.getState(roleId)?.enabled === false
+}
+
 export function isDispatchReady(roleId: string): boolean {
+  if (isDisabled(roleId)) return false // a disabled role can't run a step — keep it out of every dispatch/verifier pick
   const b = getBinding(roleId)
   if (!b?.endpointId || !b.model) return false
   const ep = endpointRepo.getById(b.endpointId)

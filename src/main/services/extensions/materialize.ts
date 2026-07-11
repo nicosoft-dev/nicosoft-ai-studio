@@ -14,7 +14,7 @@
 // Existing rows installed before this feature keep their external dir_path untouched (no migration —
 // design decision 2); only NEW installs are materialized.
 
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { cp, lstat, mkdir, rename, rm } from 'node:fs/promises'
 import { basename, join, resolve, sep } from 'node:path'
 import { dataDir } from '../../db/connection'
@@ -110,10 +110,14 @@ async function doMaterializeDirCopy(kind: ExtensionKind, id: string, srcDir: str
   // the rm(old) below deletes the ONLY surviving copy (the deterministic-name "self-healing" was in fact
   // destructive here). After the restore `.old` is gone, so the rm is a no-op and the fresh copy replaces it.
   if (!existsSync(dest) && existsSync(old)) {
-    await rename(old, dest).catch(() => {})
+    // Do NOT swallow this and fall through to rm(old) — that would delete the ONLY surviving copy. Let it
+    // throw so the install aborts with .old intact for the next attempt / the boot sweep to recover.
+    await rename(old, dest)
   }
   await rm(tmp, { recursive: true, force: true })
-  await rm(old, { recursive: true, force: true })
+  // Drop a leftover .old ONLY when dest is safely present (recovery above succeeded, or dest was never
+  // gone). If a recovery rename threw we never reach here, so .old is preserved for the next attempt.
+  if (existsSync(dest)) await rm(old, { recursive: true, force: true })
   const maxFiles = opts?.maxFiles ?? MATERIALIZE_MAX_FILES
   const maxBytes = opts?.maxBytes ?? MATERIALIZE_MAX_BYTES
   let files = 0
@@ -167,13 +171,54 @@ async function doMaterializeDirCopy(kind: ExtensionKind, id: string, srcDir: str
 // Remove an extension's materialized payload (dir + the mcp manifest file). Best-effort by design: a
 // missing entry (legacy row, or a mirror that failed to write) is a no-op, and removal must never block
 // the DB delete it accompanies.
-export function removeMaterialized(kind: ExtensionKind, id: string): void {
+export function removeMaterialized(kind: ExtensionKind, id: string): Promise<void> {
   const safe = safeSegment(id)
-  try {
-    rmSync(join(extensionsRoot(), kind, safe), { recursive: true, force: true })
-    if (kind === 'mcp') rmSync(join(extensionsRoot(), 'mcp', `${safe}.json`), { force: true })
-  } catch (e) {
-    console.error('[extensions] failed to remove materialized payload', kind, id, e)
+  // Through the SAME per-id lock as materializeDirCopy: a remove must not race a running copy's swap and
+  // delete `dest` mid-rename. Best-effort (the DB delete already happened) — errors are logged, not thrown.
+  return withIdLock(`${kind}/${safe}`, async () => {
+    try {
+      rmSync(join(extensionsRoot(), kind, safe), { recursive: true, force: true })
+      if (kind === 'mcp') rmSync(join(extensionsRoot(), 'mcp', `${safe}.json`), { force: true })
+    } catch (e) {
+      console.error('[extensions] failed to remove materialized payload', kind, id, e)
+    }
+  })
+}
+
+// Boot-time sweep: heal any materialize interrupted by a crash. For each `.old-<id>` whose real dest is
+// missing (a process death mid-swap after dest→.old), restore it; drop orphaned `.tmp-<id>` staging (a
+// crashed copy) and any `.old-<id>` whose dest is already present (a stale leftover). Best-effort — a
+// failure here logs and moves on, never blocks boot. Runs at startup so recovery isn't deferred to the
+// next materialize of that same id (which might never come — the extension stays broken until then).
+// SYNCHRONOUS (rmSync/renameSync): it runs inline in the boot sequence before loadSkills/connectMcp read
+// the dirs, and there is no concurrency at boot to serialize against.
+export function recoverMaterializeLeftovers(): void {
+  for (const kind of ['skills', 'plugins', 'mcp'] as ExtensionKind[]) {
+    const base = join(extensionsRoot(), kind)
+    let entries: string[]
+    try {
+      entries = readdirSync(base)
+    } catch {
+      continue // that kind's dir doesn't exist yet — nothing to sweep
+    }
+    for (const name of entries) {
+      try {
+        if (name.startsWith('.tmp-')) {
+          rmSync(join(base, name), { recursive: true, force: true })
+        } else if (name.startsWith('.old-')) {
+          const rawId = name.slice('.old-'.length)
+          if (!/^[0-9A-Za-z_-]+$/.test(rawId)) {
+            rmSync(join(base, name), { recursive: true, force: true }) // not one of ours (crafted name) — drop it
+            continue
+          }
+          const dest = join(base, rawId)
+          if (existsSync(dest)) rmSync(join(base, name), { recursive: true, force: true })
+          else renameSync(join(base, name), dest) // restore the mid-swap-crash payload
+        }
+      } catch (e) {
+        console.error('[extensions] materialize leftover sweep failed for', join(kind, name), e)
+      }
+    }
   }
 }
 

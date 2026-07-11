@@ -531,7 +531,12 @@ async function integrateSubjectClosures(
       const reVerdict = await runVerifierStep(implementerRoleId, opts, gate, followUp.text, signal, { key: lv.key, focus, stepId, quiet: true, reverify: true })
       inputTokens += reVerdict.inputTokens
       outputTokens += reVerdict.outputTokens
-      outcomes.set(lv.key, { outcome: reVerdict.passed ? 'fixed' : 'unresolved', evidence: reVerdict.feedback, handlerRoleId })
+      // A re-verify that SKIPPED (no independent, dispatch-ready verifier — verifier.ts returns passed:true,
+      // skipped:true) or hit an INFRA fault did NOT actually confirm the fix. Record it 'unverified', never
+      // 'fixed' (mirrors the floor path's `verdict.skipped ? 'unverified' : ...`) — reading reVerdict.passed
+      // alone wrote a skipped re-verify as fixed once #5 made not-ready verifiers skip instead of throw.
+      const settled: GateOutcome = reVerdict.skipped || reVerdict.infraFailure ? 'unverified' : reVerdict.passed ? 'fixed' : 'unresolved'
+      outcomes.set(lv.key, { outcome: settled, evidence: reVerdict.feedback, handlerRoleId })
     }
   }
   return { outcomes, inputTokens, outputTokens }

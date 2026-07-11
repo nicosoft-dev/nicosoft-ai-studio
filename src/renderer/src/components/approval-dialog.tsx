@@ -166,7 +166,11 @@ function InstallApproval({
   // (matches the tool + prompt) — so the user sees, previews, and gates on the SAME absolute path the
   // install will use.
   const [dir, setDir] = useState<string>(resolveInstallDir(String((isMcp ? input.source_dir : input.dir_path) ?? ''), cwd))
-  const [preview, setPreview] = useState<InstallPreview | null>(null)
+  // Preview is tagged with the dir it was computed FOR; the Confirm gate requires previewState.dir === dir
+  // (see the derived `preview` below), so a stale preview from a just-changed folder can't enable Confirm
+  // even for the single render between setDir and the effect re-fetching (approve-B-while-reading-A's-
+  // manifest, review 2026-07-12).
+  const [previewState, setPreview] = useState<{ dir: string; result: InstallPreview } | null>(null)
   const [secrets, setSecrets] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
   // cwd gate (design §5.3, re-anchored 2026-07-11): the install source is the conversation's working
@@ -197,7 +201,7 @@ function InstallApproval({
     const payload = isMcp ? { ...input, source_dir: dir } : { ...input, dir_path: dir }
     void window.api.extensions.previewInstall(kind, payload).then(
       (p) => {
-        if (alive) setPreview(p)
+        if (alive) setPreview({ dir, result: p }) // tag with the dir this preview is FOR (closure-captured)
       },
       () => {
         if (alive) setPreview(null)
@@ -208,6 +212,10 @@ function InstallApproval({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- input is stable for a given prompt
   }, [kind, dir])
+
+  // Only trust a preview computed for the CURRENT dir: a stale one (folder just changed/picked) resolves to
+  // null → Confirm disabled + no manifest shown, so you can never confirm against another folder's preview.
+  const preview: InstallPreview | null = previewState && previewState.dir === dir ? previewState.result : null
 
   const pick = async (): Promise<void> => {
     const chosen = await window.api.extensions.pickDir()

@@ -99,7 +99,7 @@ export async function add(input: McpServerInput, ownerPluginId?: string): Promis
       ownerPluginId: ownerPluginId ?? null
     })
   } catch (e) {
-    if (cwd) removeMaterialized('mcp', id) // never leave an orphan copy behind a failed insert
+    if (cwd) await removeMaterialized('mcp', id) // never leave an orphan copy behind a failed insert
     throw e
   }
   setSecrets(row.id, input.secrets)
@@ -131,7 +131,7 @@ export async function remove(id: string): Promise<void> {
   await manager.disconnect(id)
   keychain.deleteApiKey(secretKey(id))
   mcpRepo.remove(id)
-  removeMaterialized('mcp', id) // manifest + any local-folder copy; no-op for legacy rows
+  await removeMaterialized('mcp', id) // manifest + any local-folder copy; no-op for legacy rows
 }
 
 // Toggle only the enabled flag, connecting/disconnecting accordingly (plugin enable/disable cascade).

@@ -51,15 +51,16 @@ export async function route(userInput: string, history: convRepo.MessageRow[], c
   if (enabled.length === 0) return { mode: 'single', role: 'generalist', reason: 'no roles enabled', needsPlan: isNonTrivialTask(userInput) }
 
   // 0. @mention 0-LLM fast path — user explicitly named a role (built-in OR agent-enabled custom).
-  //    Matched against the ENABLED roster's full display names (and raw built-in ids), longest name
-  //    first, so "@Flynn Pro …" hits the custom "Flynn Pro" instead of prefix-capturing built-in Flynn,
-  //    and names with digits/spaces ("@Ada2") resolve instead of being truncated at the first non-letter.
-  //    Only a FULL name followed by a boundary (end / non-alphanumeric) takes the fast path; a partial,
-  //    disabled, unknown or chat-only @mention falls through to the LLM router.
-  //    Deliberately NOT readiness-filtered: an @mention is the user explicitly addressing a role —
-  //    dispatching it and failing with the actionable "no endpoint binding" error beats silently
-  //    rerouting their explicit choice to someone else.
-  const mention = matchMention(userInput, enabled)
+  //    Matched against the FULL dispatchable roster INCLUDING disabled roles (longest name first, so
+  //    "@Flynn Pro …" hits the custom "Flynn Pro" instead of prefix-capturing built-in Flynn; names with
+  //    digits/spaces resolve instead of truncating at the first non-letter). Only a FULL name followed by a
+  //    boundary takes the fast path; a partial / unknown / chat-only @mention still falls through to the
+  //    LLM router. Deliberately NOT readiness-filtered AND NOT disabled-filtered: an @mention is the user
+  //    explicitly addressing a role, so dispatching it and failing with an actionable error (step.ts:
+  //    "no endpoint binding" / "role is disabled — re-enable it") beats SILENTLY rerouting their explicit
+  //    choice to someone else. Matching against `enabled` (disabled dropped) used to send a disabled
+  //    @mention to the router, which rerouted it invisibly (review 2026-07-12) — hence the full roster here.
+  const mention = matchMention(userInput, rolesService.dispatchableRoleIds())
   if (mention) {
     // Assignments: the 0-LLM fast path has no router judgment, so work-vs-chat falls to the SAME
     // conservative heuristic the solo fallback uses ("@Flynn fix the login" is 接活 like any other) —

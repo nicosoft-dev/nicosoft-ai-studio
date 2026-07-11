@@ -110,7 +110,7 @@ async function createImported(input: SkillInput, ownerPluginId?: string): Promis
       ownerPluginId: ownerPluginId ?? null
     })
   } catch (e) {
-    if (materialize) removeMaterialized('skills', id) // never leave an orphan copy behind a failed insert
+    if (materialize) await removeMaterialized('skills', id) // never leave an orphan copy behind a failed insert
     throw e
   }
 }
@@ -258,12 +258,13 @@ export function setEnabled(id: string, enabled: boolean): SkillDto | null {
   return toDto(updated)
 }
 
-export function remove(id: string): void {
+export async function remove(id: string): Promise<void> {
   manager.remove(id)
   skillRepo.remove(id)
   // Drop the materialized payload (imported copy / builtin mirror). No-op for legacy external rows and
   // for plugin-owned skills — their folder lives inside the PLUGIN's copy, removed by plugin uninstall.
-  removeMaterialized('skills', id)
+  // Awaited so the payload is gone (through the per-id lock) before the caller/UI moves on.
+  await removeMaterialized('skills', id)
 }
 
 // App boot: register every enabled skill so a role's agent sees it on the first run.

@@ -85,7 +85,7 @@ export async function install(dirPath: string): Promise<PluginDto> {
   try {
     parsed = parsePlugin(matDir) // re-parse from the copy so every component path points inside it
   } catch (e) {
-    removeMaterialized('plugins', id)
+    await removeMaterialized('plugins', id)
     throw e
   }
   const m = parsed.manifest
@@ -133,7 +133,7 @@ export async function install(dirPath: string): Promise<PluginDto> {
       }
     }
     pluginRepo.remove(row.id)
-    removeMaterialized('plugins', id)
+    await removeMaterialized('plugins', id)
     throw e
   }
   return toDto(pluginRepo.update(row.id, { bundles }) as PluginRow)
@@ -145,7 +145,7 @@ export async function uninstall(id: string): Promise<void> {
   if (!row) return
   for (const b of row.bundles) {
     try {
-      if (b.type === 'skill') skillService.remove(b.id)
+      if (b.type === 'skill') await skillService.remove(b.id)
       else if (b.type === 'mcp') await mcpService.remove(b.id)
       else if (b.type === 'role') rolesService.remove(b.id)
     } catch {
@@ -153,7 +153,7 @@ export async function uninstall(id: string): Promise<void> {
     }
   }
   pluginRepo.remove(id)
-  removeMaterialized('plugins', id) // drop the copy (owned skills' folders live inside it); legacy no-op
+  await removeMaterialized('plugins', id) // drop the copy (owned skills' folders live inside it); legacy no-op
 }
 
 // Enable/disable: cascade onto the plugin's owned skills + MCP servers. Roles aren't toggled — custom

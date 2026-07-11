@@ -9,6 +9,7 @@ import { registerMediaProtocol, MEDIA_PRIVILEGED_SCHEME } from './media/protocol
 import { startMemoryMaintenance } from './services/memory/service'
 import { connectEnabled as connectMcpServers } from './services/extensions/mcp'
 import { loadEnabled as loadSkills } from './services/extensions/skill'
+import { recoverMaterializeLeftovers } from './services/extensions/materialize'
 import { schedulerEngine } from './agent/scheduler/engine'
 import { scheduledTaskStore } from './agent/scheduler/store'
 import { disposeAllPlaywrightSessions } from './agent/tools/playwright-browser'
@@ -277,6 +278,10 @@ ipcMain.handle('theme:set', (_e, pref: string) => applyThemePref(pref))
 
 app.whenReady().then(() => {
   getDb() // open SQLite + run migrations (idempotent) before any IPC handler can hit it
+  // Heal any materialize interrupted by a crash (restore a mid-swap-crash .old, drop orphaned staging)
+  // BEFORE loadSkills/connectMcp read the extension dirs — so a broken extension recovers this boot, not
+  // whenever its id next happens to be re-materialized.
+  recoverMaterializeLeftovers()
   // Assignments boot sweep: nothing can be live yet, so any in_progress row is a crash/force-quit orphan —
   // settle it as stopped (honest; never a fake done) before the first window can read the ledger.
   const orphaned = sweepOrphanAssignments()
