@@ -68,7 +68,10 @@ export async function route(userInput: string, history: convRepo.MessageRow[], c
     // classified on the message with the mention stripped, so the leading @name can't skew it.
     const stripped = userInput.slice(mention.matchedLen).trim()
     const w = classifyHeuristic(stripped || userInput)
-    return { mode: 'single', role: mention.id, reason: 'explicit @mention', needsPlan: isNonTrivialTask(userInput), ...(w.isWork ? { isWork: true, taskTitle: w.title } : {}) }
+    // R5.1: carry the resolved target so coordinator.service records it as THIS user turn's audit identity —
+    // main is the sole writer (the renderer no longer predicts one against the all-experts roster).
+    const explicitTarget = { roleId: mention.id, matchedText: userInput.slice(0, mention.matchedLen), matchedLen: mention.matchedLen }
+    return { mode: 'single', role: mention.id, reason: 'explicit @mention', needsPlan: isNonTrivialTask(userInput), explicitTarget, ...(w.isWork ? { isWork: true, taskTitle: w.title } : {}) }
   }
 
   // No mention AND every dispatchable role disabled → degrade to the generalist (its dispatch error tells the

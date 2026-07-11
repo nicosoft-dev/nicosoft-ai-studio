@@ -16,7 +16,7 @@ import { WorkflowDraftCard } from '@/components/workflow-draft-card'
 import { Icons } from '@/components/icons'
 import { useT, useLocale } from '@/stores/locale'
 import { isSynthesis, groupRuns, sameChain, segmentFolds, roleIsCoordinator } from '@/stores/chat-helpers'
-import { useChat } from '@/stores/chat'
+import { useChat, roleHasAgent } from '@/stores/chat'
 import { useRoles } from '@/stores/roles'
 import { matchLeadingMention } from '@/lib/conversation-participants'
 import type { Expert } from '@/types'
@@ -89,27 +89,30 @@ function SegActions({
 // (P3 — purely visual, so you can see at a glance who a message was directed to). Everywhere else, and when
 // the leading token isn't a real routable expert, the text renders verbatim. Mirrors the server's
 // matchMention boundary rules (matchLeadingMention), so the chip appears exactly when the mention routes.
-function UserMessageText({ text, coordinator, experts, targetRoleId }: { text: string; coordinator: boolean; experts: Record<string, Expert>; targetRoleId?: string | null }): ReactElement {
-  // The chip is a STABLE AUDIT FACT. For a NEW message it renders from target_role_id — the mention target
-  // the composer resolved and PERSISTED at send — so it no longer drifts as the role is later renamed or
-  // deleted (P2-5; it used to re-derive from the live roster every render, and P2-C only stabilized it across
-  // enable/disable). Prefix: an exact roster match when the role still exists under its send-time name, else
-  // the leading @token (renamed/deleted). Color: by id (rename-safe) or a neutral chip (deleted).
-  //   targetRoleId null/undefined → no mention, OR a LEGACY row (column absent): fall back to the old
-  //   live-roster derivation — correct for both (no-mention text yields no chip; a legacy mention still
-  //   highlights as before, drift and all). The backend rejects a disabled @mention outright, so a leading
-  //   @Name always WAS addressed to that role — the chip is accurate whether or not it is currently enabled.
+function UserMessageText({ text, coordinator, experts, targetRoleId, targetMentionLen, optimistic }: { text: string; coordinator: boolean; experts: Record<string, Expert>; targetRoleId?: string | null; targetMentionLen?: number | null; optimistic?: boolean }): ReactElement {
+  // The chip is a STABLE AUDIT FACT written by MAIN (R5.1): target_role_id + the matched span length, resolved
+  // in route() against the DISPATCHABLE roster and persisted onto the user turn — so it never drifts as the role
+  // is later renamed or deleted, and a multi-word deleted name keeps its FULL span (the persisted length, not a
+  // live re-derivation that would lose the vanished name).
+  //   targetRoleId set → PERSISTED path: span = targetMentionLen (main-written); a legacy row without the length
+  //     column falls back to an exact roster match, then the leading @-token boundary. Color by id (rename-safe).
+  //   targetRoleId null/undefined → no persisted mention. Re-derive LIVE ONLY for the OPTIMISTIC current turn
+  //     (main hasn't written the target yet) — over the DISPATCHABLE roster (roleHasAgent), the SAME roster main's
+  //     matchMention uses, so a chat-only @mention shows NO chip and the live chip matches what main will persist.
+  //     A PERSISTED row with target=null is main's authoritative "no dispatchable mention": it renders no chip and
+  //     NEVER re-derives, so a chat-only @mention can't grow a chip later when its role gains agent capability
+  //     (adversarial-review drift). A legacy null row likewise shows no chip — a legacy @dispatchable mention has
+  //     a non-null persisted target and takes the stable path above.
   let chip: { len: number; color: string } | null = null
   if (coordinator && targetRoleId) {
     const exact = matchLeadingMention(text, Object.values(experts)) // exact prefix while the role still exists under its send-time name
-    // Fallback for a renamed/deleted target (the exact roster match fails): highlight the leading @-token using
-    // the SAME letter/number boundary matchLeadingMention uses, so trailing punctuation is NOT swallowed
-    // ("@Flynn," → "@Flynn"). A multi-word custom name ("@Data Scientist") is single-token-approximated here
-    // (its exact span isn't persisted) — a cosmetic under-highlight confined to the deleted/renamed path.
-    const len = exact?.matchedLen ?? (/^@[\p{L}\p{N}]+/u.exec(text)?.[0].length ?? 0)
+    // Span priority: the PERSISTED length (survives a multi-word rename/delete) → an exact roster match → the
+    // leading @-token boundary (so trailing punctuation "@Flynn," isn't swallowed). The persisted length is why
+    // a deleted "@Data Scientist" still highlights whole instead of collapsing to "@Data".
+    const len = targetMentionLen ?? exact?.matchedLen ?? (/^@[\p{L}\p{N}]+/u.exec(text)?.[0].length ?? 0)
     if (len > 0) chip = { len, color: experts[targetRoleId]?.color ?? 'var(--text-3)' }
-  } else if (coordinator) {
-    const m = matchLeadingMention(text, Object.values(experts))
+  } else if (coordinator && optimistic) {
+    const m = matchLeadingMention(text, Object.values(experts).filter((e) => roleHasAgent(e.id)))
     if (m) chip = { len: m.matchedLen, color: m.color }
   }
   if (!chip) return <p className="user-msg-text">{text}</p>
@@ -551,7 +554,7 @@ export function ChatSegment({
       <div ref={bodyRef} className={'seg-body' + (isUser || synthesis ? ' primary' : '') + (windowed ? ' fold-window' : '')}>
         {isUser ? (
           <>
-            {first.text ? <UserMessageText text={first.text} coordinator={roleIsCoordinator(expert.id)} experts={expertById} targetRoleId={first.targetRoleId} /> : null}
+            {first.text ? <UserMessageText text={first.text} coordinator={roleIsCoordinator(expert.id)} experts={expertById} targetRoleId={first.targetRoleId} targetMentionLen={first.targetMentionLen} optimistic={first.optimistic} /> : null}
             {first.images && first.images.length > 0 ? (
               <div className="msg-images">
                 {first.images.map((img, i) => (

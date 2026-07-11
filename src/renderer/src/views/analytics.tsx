@@ -20,13 +20,14 @@ const FAMILY_COLOR: Record<string, string> = {
 
 // Verification-gate outcome colors (same restrained oklch family as FAMILY_COLOR): verified-good in
 // green, recovered (fixed after a FAIL) in amber, a misjudging verifier in neutral, unresolved in red,
-// unverified (infra) in dim.
+// unverified (infra) in dim, aborted (a user Stop — an operation terminal, not a quality signal) in dim blue.
 const GATE_COLOR: Record<string, string> = {
   pass: "oklch(0.75 0.10 158)",
   fixed: "oklch(0.76 0.10 50)",
   "false-positive": "var(--text-3)",
   unresolved: "oklch(0.68 0.12 25)",
   unverified: "var(--text-4)",
+  aborted: "oklch(0.68 0.05 240)",
   PASS: "oklch(0.75 0.10 158)",
   FAIL: "oklch(0.68 0.12 25)",
   BLOCKED: "oklch(0.76 0.10 50)",
@@ -257,7 +258,7 @@ export function StatsPage(): ReactElement {
       <div className="an-section">
         <div className="an-section-head">Verification <span className="an-section-note">— does the work hold up</span></div>
         <div className="an-grid">
-          <AnCard title="Gated steps" sub={gateBTotal + " verified"}>
+          <AnCard title="Gated outcomes" sub={gateBTotal + " recorded"}>
             {gateBRows.length ? <BarList rows={gateBRows} /> : <div className="an-mini-label">No gated runs yet — dispatch a code-change task to see verification outcomes.</div>}
             {gateCTotal > 0 && (
               <>

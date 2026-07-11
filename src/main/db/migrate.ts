@@ -19,6 +19,10 @@ export function runMigrations(db: DatabaseSync): void {
   // STABLE audit fact of who the message addressed, so the mention chip no longer drifts as roles are later
   // renamed/deleted (it used to re-derive from the live roster every render). NULL = no mention / legacy row.
   ensureColumn(db, 'messages', 'target_role_id', 'TEXT')
+  // R5.1: the @mention target's matched text + length, PERSISTED by main (route) — the chip's stable span
+  // survives a multi-word role rename/delete (a live re-derivation would lose the name → a wrong/empty span).
+  ensureColumn(db, 'messages', 'target_mention_text', 'TEXT')
+  ensureColumn(db, 'messages', 'target_mention_len', 'INTEGER')
   ensureColumn(db, 'mcp_servers', 'args', "TEXT NOT NULL DEFAULT '[]'")
   ensureColumn(db, 'skills', 'when_to_use', 'TEXT')
   ensureColumn(db, 'skills', 'body', 'TEXT')

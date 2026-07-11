@@ -41,7 +41,9 @@ export interface MessageRow {
   dispatch: string[] | null
   runId: string | null
   segmentKind: string | null
-  targetRoleId: string | null // P2-5: @mention target resolved at send (a user turn's stable audit identity)
+  targetRoleId: string | null // P2-5/R5.1: @mention target resolved by MAIN at route (a user turn's stable audit identity)
+  targetMentionText: string | null // R5.1: the matched "@Name" text (persisted span, survives rename/delete)
+  targetMentionLen: number | null // R5.1: matched length incl. the leading '@' — the chip highlights text.slice(0, len)
   createdAt: string
 }
 
@@ -90,6 +92,8 @@ interface MessageRaw {
   run_id: string | null
   segment_kind: string | null
   target_role_id: string | null
+  target_mention_text: string | null
+  target_mention_len: number | null
   created_at: string
 }
 
@@ -125,6 +129,8 @@ function mapMessage(raw: MessageRaw): MessageRow {
     runId: raw.run_id,
     segmentKind: raw.segment_kind,
     targetRoleId: raw.target_role_id,
+    targetMentionText: raw.target_mention_text,
+    targetMentionLen: raw.target_mention_len,
     createdAt: raw.created_at
   }
 }
@@ -278,6 +284,8 @@ export function append(conversationId: string, input: MessageAppendInput): Messa
     runId,
     segmentKind,
     targetRoleId,
+    targetMentionText: null, // R5.1: main sets the audit target AFTER route() via setMessageTarget, not at append
+    targetMentionLen: null,
     createdAt
   }
 }
@@ -287,6 +295,17 @@ export function append(conversationId: string, input: MessageAppendInput): Messa
 // createdWorkflowId flags), and the service layer restricts it to segmentKind='workflow-draft' rows.
 export function updateMessageContent(id: string, content: string): boolean {
   return getDb().prepare('UPDATE messages SET content = ? WHERE id = ?').run(content, id).changes > 0
+}
+
+// R5.1: MAIN writes the audit identity of a coordinator user turn AFTER route() resolves it — the renderer no
+// longer submits a predicted target (a chat-only @mention would mislabel the turn; only the dispatchable roster
+// route() actually matches is authoritative). Pass null to clear it (no dispatchable @mention → no chip, even
+// when the LLM router later picks a single role). The matched span is persisted so the chip survives a later
+// rename/delete of the addressed role.
+export function setMessageTarget(id: string, roleId: string | null, mentionText: string | null, mentionLen: number | null): boolean {
+  return getDb()
+    .prepare('UPDATE messages SET target_role_id = ?, target_mention_text = ?, target_mention_len = ? WHERE id = ?')
+    .run(roleId, mentionText, mentionLen, id).changes > 0
 }
 
 // CARD rows — segmentKind marks the content as a machine JSON payload rendered as a UI card (a /workflow

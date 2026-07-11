@@ -32,7 +32,7 @@ import { emitCoordinatorIntro, emitWorkflowLaunchCard, runRoleStep, type RunStep
 import * as workflowService from '../workflow/service'
 import { resetPipelineTodos } from '../pipeline-todos'
 import { runGatedRoleStep, runGateBFailFollowUp } from './gate-b'
-import { chooseVerifierRole, runVerifierStep } from '../lens/verifier'
+import { runVerifierStep } from '../lens/verifier'
 import { submitGateC } from './gate-c'
 import { runCollaboration } from './collab'
 import {
@@ -96,8 +96,9 @@ async function runCollabReview(
   const gate = { originalPrompt: input.prompt, acceptance: [] as string[] }
   try {
     // The independent final audit: a reviewer INDEPENDENT of every collaborator runs the project's own
-    // build/typecheck on the combined delta. Attribution uses the SAME chooseVerifierRole the step picks internally.
-    const floorReviewer = chooseVerifierRole(roles)
+    // build/typecheck on the combined delta. R5.2: attribution comes from the verdict's OWN reviewerRoleId (the
+    // role runVerifierStep actually picked), so a config change between the audit and the re-audit can't make the
+    // note name a reviewer that didn't run that pass.
     const v = await runVerifierStep(roles, opts, gate, implementationText, signal)
     if (signal.aborted || v.kind === 'aborted') throw new LlmError('network', 'aborted mid-collab-review')
     let inTok = v.inputTokens
@@ -106,13 +107,13 @@ async function runCollabReview(
     if (v.kind === 'unverified') {
       note = UNVERIFIED // ran but produced no verdict (no independent verifier / infra fault) → close honestly as unverified
     } else if (v.kind === 'pass') {
-      note = `Independent reviewer ${displayName(floorReviewer)} ran the project's own checks on the combined result — VERDICT: PASS.\n${v.feedback.slice(0, 2000)}`
+      note = `Independent reviewer ${displayName(v.reviewerRoleId)} ran the project's own checks on the combined result — VERDICT: PASS.\n${v.feedback.slice(0, 2000)}`
     } else {
       // collab-review-flow: the final audit FAILED → route its findings back to an IMPLEMENTER for ONE fix round
       // ("谁写谁修", never the independent reviewer), then RE-AUDIT once, then close with that verdict. This is the
       // SECOND and LAST fix round — the team already self-checked + fixed one round (the driver's lens) during the
       // build. Exactly one round here; NO fix-until-clean loop (a residue surviving it is reported honestly, not looped).
-      const leadImplementer = roles.find((r) => r !== floorReviewer) ?? roles[0]
+      const leadImplementer = roles.find((r) => r !== v.reviewerRoleId) ?? roles[0]
       const fix = await runGateBFailFollowUp(leadImplementer, opts, gate, implementationText, v.feedback, signal)
       inTok += fix.inputTokens
       outTok += fix.outputTokens
@@ -126,7 +127,7 @@ async function runCollabReview(
       // if it were the re-audit's own verdict (that read as "re-audited → FAIL" for a fix we never re-checked).
       note = reAudit.kind === 'unverified'
         ? UNVERIFIED
-        : `Independent reviewer ${displayName(floorReviewer)} re-audited the combined result after one fix round — VERDICT: ${reAudit.kind === 'pass' ? 'PASS' : 'FAIL'}.\n${reAudit.feedback.slice(0, 2000)}`
+        : `Independent reviewer ${displayName(reAudit.reviewerRoleId)} re-audited the combined result after one fix round — VERDICT: ${reAudit.kind === 'pass' ? 'PASS' : 'FAIL'}.\n${reAudit.feedback.slice(0, 2000)}`
     }
     return { note, inputTokens: inTok, outputTokens: outTok }
   } catch (e) {
@@ -203,6 +204,21 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
   const decision = await route(input.prompt, history, { cwd: input.cwd || undefined, convId: input.convId }, signal, cb)
   console.log(`[coordinator] route ${JSON.stringify({ mode: decision.mode, role: (decision as { role?: string }).role, roles: (decision as { roles?: string[] }).roles, reason: decision.reason, needsPlan: decision.needsPlan })}`)
   if (signal.aborted) throw new LlmError('network', 'aborted before dispatch')
+
+  // R5.1: MAIN is the sole authority for this user turn's audit identity. route() resolved the @mention against
+  // the DISPATCHABLE roster (a chat-only @mention doesn't match → explicitTarget absent → target stays null,
+  // never the misroute the renderer's all-experts prediction would have recorded). Persist it onto THIS turn's
+  // user message (the last user row — the renderer appended it before calling run). Best-effort: an audit write
+  // must never fail the turn.
+  try {
+    const userMsg = [...history].reverse().find((m) => m.author === 'user')
+    if (userMsg) {
+      const et = decision.explicitTarget
+      convRepo.setMessageTarget(userMsg.id, et?.roleId ?? null, et?.matchedText ?? null, et?.matchedLen ?? null)
+    }
+  } catch (e) {
+    console.warn('[coordinator] persist user-turn target failed:', e instanceof Error ? e.message : e)
+  }
 
   // Gate C (Block 2): the e2e signal is INDEPENDENT — it depends only on what the user explicitly asked
   // for, never on the routed roles (no decision.roles.includes('frontend')) and never on gateEnabled (Gate B).
@@ -328,14 +344,19 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
       cb,
       signal
     }, { enabled: gateEnabled, originalPrompt: input.prompt }, signal)
+    // A user Stop during the gate loop comes back as gateOutcome 'aborted' (the verifier detected the abort and
+    // did NOT scan its partial output into a phantom verdict). Check it BEFORE closing the assignment (R1.4/R1.6):
+    // the implementer often finished (reason:'completed') before the Stop landed in the verifier, so
+    // statusForRunReason would wrongly close the row 'done' and the SQL in_progress-guard would then block the
+    // turn-end backstop from correcting it to 'stopped'. Close 'stopped' here and propagate (throws) — never a
+    // "Delivered"/"NOT delivered" beat for a turn the user stopped.
+    if (signal.aborted || out.gateOutcome === 'aborted') {
+      if (assignmentId) assignmentService.close(assignmentId, 'stopped')
+      throw new LlmError('network', 'aborted mid-single dispatch')
+    }
     // The assignment window covers the step AND its gate loop. Delivered → the run's own terminal; an
     // unresolved gate (verification failed, the follow-up didn't fix it) means the work did NOT land → failed.
     if (assignmentId) assignmentService.close(assignmentId, out.gateOutcome === 'unresolved' ? 'failed' : assignmentService.statusForRunReason(out.reason))
-    // A user Stop during the gate loop comes back as gateOutcome 'aborted' (the verifier detected the abort
-    // and did NOT scan its partial output into a phantom verdict). Propagate it the way every other mode does
-    // — never fall through to a "Delivered"/"NOT delivered" beat for a turn the user stopped (the handler ends
-    // the turn as aborted). Single was the ONLY mode missing this post-step abort throw.
-    if (signal.aborted || out.gateOutcome === 'aborted') throw new LlmError('network', 'aborted mid-single dispatch')
     // Closing-voice invariant (see GateOutcome): a gated conversation must END on the verifier's own
     // report ('pass'/'fixed' — the analyst message is naturally last) or an explicit coordinator
     // verdict — NEVER on the implementer/handler's note, which reads as a normal done and hides the
@@ -585,6 +606,11 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
       cb,
       signal
     }, { enabled: gateEnabled, originalPrompt: input.prompt }, signal)
+    // A user Stop during this step's gate loop → propagate BEFORE any side effect (assignment close, downstream
+    // push, coordinator note). The implementer may have finished (reason:'completed') before the Stop reached the
+    // verifier, so closing on statusForRunReason would lock the row 'done' and block the backstop's 'stopped'.
+    // Leave the row open — the turn-end backstop settles the batch 'stopped'; downstream steps never run.
+    if (signal.aborted || out.gateOutcome === 'aborted') throw new LlmError('network', 'aborted mid-pipeline')
     if (!out.text) {
       // Empty step output would feed garbage downstream — better to surface the failure and let the
       // user retry than silently continue. Subsequent steps would have no real input to chain on.

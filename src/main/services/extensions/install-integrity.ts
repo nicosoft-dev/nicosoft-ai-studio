@@ -9,7 +9,7 @@
 //              something other than what was approved.
 
 import { createHash } from 'node:crypto'
-import { readFile, readdir, realpath } from 'node:fs/promises'
+import { readFile, readdir, realpath, lstat } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 import { MATERIALIZE_MAX_BYTES, MATERIALIZE_MAX_FILES } from './materialize'
 
@@ -48,18 +48,33 @@ export async function digestDir(dir: string): Promise<string> {
   }
   await walk(dir)
   rels.sort()
+  // Canonical, UNAMBIGUOUS framing: LENGTH-PREFIX every field so file boundaries can't be forged by content that
+  // contains the separator. Without it a single file `a`="x\0b\0y" and two files `a`="x",`b`="y" both feed the
+  // byte stream `a\0x\0b\0y\0` and collide. The file COUNT + each field's u32 length prefix make the stream
+  // self-delimiting; the mode is folded in so an executable-bit flip (which changes run behavior) changes the
+  // digest too. Still content-addressed sha256 — only the framing changed (the value is not persisted across
+  // versions, only compared preview↔install within one run, so re-framing needs no migration).
   const h = createHash('sha256')
+  const u32 = (n: number): Buffer => { const b = Buffer.allocUnsafe(4); b.writeUInt32BE(n >>> 0, 0); return b }
+  h.update(u32(rels.length))
   let bytes = 0
   for (const rel of rels) {
-    const buf = await readFile(join(dir, rel)) // node's join treats the posix '/' in rel as a separator on every OS
+    const abs = join(dir, rel) // node's join treats the posix '/' in rel as a separator on every OS
+    // Enforce the single-file cap from lstat.size BEFORE reading, so a single ~2 GiB file is never pulled fully
+    // into the main process just to discover it's over the limit (the count cap already tripped in the walk).
+    const st = await lstat(abs)
+    if (st.size > MATERIALIZE_MAX_BYTES) {
+      throw new Error(`source folder exceeds the install limit (${Math.round(MATERIALIZE_MAX_BYTES / (1024 * 1024))} MB) — point the install at the extension's own folder, not a parent directory`)
+    }
+    const buf = await readFile(abs)
     bytes += buf.length
     if (bytes > MATERIALIZE_MAX_BYTES) {
       throw new Error(`source folder exceeds the install limit (${Math.round(MATERIALIZE_MAX_BYTES / (1024 * 1024))} MB) — point the install at the extension's own folder, not a parent directory`)
     }
-    h.update(rel)
-    h.update('\0')
-    h.update(buf)
-    h.update('\0')
+    const relBuf = Buffer.from(rel, 'utf8')
+    h.update(u32(relBuf.length)); h.update(relBuf)
+    h.update(u32(st.mode))
+    h.update(u32(buf.length)); h.update(buf)
   }
   return h.digest('hex')
 }

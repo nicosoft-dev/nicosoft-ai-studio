@@ -1009,7 +1009,9 @@ export interface MessageDto {
   sentTokens: number // cumulative billing input for this turn incl. cache (0 if unknown / user message) — billing/accounting only, never displayed (no settled per-turn readout)
   dispatch: string[] | null // coordinator pipeline chain; null for single-expert / direct chat / agent turns
   segmentKind: string | null // closure-loop: 'verifier' = independent Gate B reviewer segment (→ "· Verifier" badge); null = normal step
-  targetRoleId: string | null // P2-5: @mention target resolved + persisted at send (a user turn's stable audit identity); null = no mention / legacy row
+  targetRoleId: string | null // P2-5/R5.1: @mention target resolved + persisted by MAIN at route (audit identity); null = no dispatchable mention / legacy row
+  targetMentionText: string | null // R5.1: the matched "@Name" span text (persisted, survives rename/delete)
+  targetMentionLen: number | null // R5.1: matched length incl. '@' — the chip highlights text.slice(0, len)
   createdAt: string
 }
 export interface MessageAppendDto {
@@ -1118,13 +1120,14 @@ export interface McpTestResult {
 // folder mcp); a raw-command / http mcp has no source folder, so they're absent there.
 export type InstallPreview =
   | { ok: false; error: string }
-  | { ok: true; kind: 'skill'; name: string; description: string; whenToUse: string; bodyPreview: string; resolvedPath: string; digest: string }
+  | { ok: true; kind: 'skill'; name: string; description: string; whenToUse: string; bodyPreview: string; resolvedPath: string; resolvedCwd?: string; digest: string }
   | {
       ok: true
       kind: 'plugin'
       name: string
       version: string
       resolvedPath: string
+      resolvedCwd?: string
       digest: string
       // Full consequence manifest (not just names): what each component RUNS / GRANTS, so the user approves a
       // complete picture. MCP servers show their command/url, hooks show their commands, roles show their tools.
@@ -1145,6 +1148,7 @@ export type InstallPreview =
       netWarning: boolean // remote http / net-fetching command (npx …) — the red line in the dialog
       secretKeys: string[]
       resolvedPath?: string // present only for a local-folder (sourceDir) server
+      resolvedCwd?: string // R4.1: canonical cwd (main realpath) so the renderer's in-cwd gate compares canonical-vs-canonical
       digest?: string
     }
 

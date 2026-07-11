@@ -198,7 +198,7 @@ function InstallApproval({
     // reading A's contents. A REJECTED preview also clears (the old `.then` had no rejection arm, so a
     // failed lookup left the stale ok in place), so a failed preview disables Confirm instead of misleading.
     setPreview(null)
-    const payload = isMcp ? { ...input, source_dir: dir } : { ...input, dir_path: dir }
+    const payload = isMcp ? { ...input, source_dir: dir, cwd } : { ...input, dir_path: dir, cwd }
     void window.api.extensions.previewInstall(kind, payload).then(
       (p) => {
         if (alive) setPreview({ dir, result: p }) // tag with the dir this preview is FOR (closure-captured)
@@ -226,7 +226,16 @@ function InstallApproval({
   }
 
   const secretKeys = isMcp && preview?.ok && preview.kind === 'mcp' ? preview.secretKeys : []
-  const gateBlocked = installDirBlocked(dir, cwd, pickedByUser) // outside the working folder + not hand-picked → re-pick
+  // R4.1: gate on the CANONICAL real paths (main's realpath of BOTH source and cwd), not the raw strings. A
+  // symlink sitting INSIDE the working folder resolves to a real target OUTSIDE it — isInsideCwd's string check
+  // can't see through it, so a cwd-internal symlink would clear the gate and silently install external content.
+  // BOTH sides must be canonicalized in one space: canonicalizing only the source and comparing it against a raw
+  // cwd that itself sits under a symlink (/tmp→/private/tmp, /var/folders temp roots) would wrongly BLOCK a legit
+  // inside-cwd install. Gate on the preview's resolved paths once they land; until then gate on the raw strings
+  // (Confirm stays disabled while the preview loads anyway).
+  const canonicalDir = preview?.ok && 'resolvedPath' in preview && preview.resolvedPath ? preview.resolvedPath : dir
+  const canonicalCwd = preview?.ok && preview.resolvedCwd ? preview.resolvedCwd : cwd
+  const gateBlocked = installDirBlocked(canonicalDir, canonicalCwd, pickedByUser) // outside the working folder + not hand-picked → re-pick
   const canConfirm =
     !busy && !gateBlocked && (needsDir ? !!dir && preview?.ok === true : preview?.ok === true && !(preview.kind === 'mcp' && preview.sourceDirMissing))
 

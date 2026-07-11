@@ -26,6 +26,11 @@ interface RouteBase {
   isWork?: boolean
   taskTitle?: string
   roleTitles?: Record<string, string>
+  // R5.1: the EXPLICIT @mention target resolved by matchMention against the DISPATCHABLE roster (the only
+  // authoritative source — a chat-only @mention doesn't match, so it stays absent). Present only when the user
+  // named a dispatchable role; coordinator.service persists it onto the user turn as the audit identity. Absent
+  // → no dispatchable @mention (target stays null even if the LLM router later picks a single role).
+  explicitTarget?: { roleId: string; matchedText: string; matchedLen: number }
 }
 
 // Discriminated on `mode`, so the dispatch branches narrow to the fields their constructor guaranteed

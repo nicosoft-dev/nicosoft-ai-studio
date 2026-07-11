@@ -790,7 +790,9 @@ export const useChat = create<ChatState>((set, get) => {
           expertId: m.author === 'user' ? null : m.expertId,
           dispatch: m.dispatch,
           segmentKind: m.author === 'user' ? null : m.segmentKind,
-          targetRoleId: m.targetRoleId, // P2-5: the persisted @mention target (user turns) — the chip's stable audit source
+          targetRoleId: m.targetRoleId, // R5.1: the persisted @mention target (user turns) — main-written audit source
+          targetMentionText: m.targetMentionText,
+          targetMentionLen: m.targetMentionLen,
           runId: m.author === 'user' ? null : m.runId,
           inputTokens: m.author !== 'user' && m.inputTokens > 0 ? m.inputTokens : undefined,
           cacheReadTokens: m.author !== 'user' && m.cacheReadTokens > 0 ? m.cacheReadTokens : undefined,
@@ -895,7 +897,7 @@ export const useChat = create<ChatState>((set, get) => {
       })
     },
 
-    send: async ({ expertId, endpointId, model, thinking, text, images, cwd, contextWindow, permissionMode, imageModel, targetRoleId }) => {
+    send: async ({ expertId, endpointId, model, thinking, text, images, cwd, contextWindow, permissionMode, imageModel }) => {
       ensureListeners()
       let convId = get().activeConv
       const isNew = !convId
@@ -946,7 +948,7 @@ export const useChat = create<ChatState>((set, get) => {
             ...s.byConversation,
             [cid]: [
               ...prev,
-              { id: uid(), createdAt: Date.now(), role: 'user', text, images: userImages.length ? userImages : undefined, targetRoleId: targetRoleId ?? null },
+              { id: uid(), createdAt: Date.now(), role: 'user', text, images: userImages.length ? userImages : undefined, optimistic: true },
               { id: uid(), createdAt: Date.now(), role: 'assistant', text: '', streaming: true }
             ]
           },
@@ -980,8 +982,9 @@ export const useChat = create<ChatState>((set, get) => {
             author: 'user',
             expertId,
             content: text,
-            attachments: userImages.map((i) => ({ url: i.url, name: i.name })),
-            targetRoleId // P2-5: persist the @mention target the composer resolved → the chip's stable audit fact
+            attachments: userImages.map((i) => ({ url: i.url, name: i.name }))
+            // R5.1: no target here — main resolves + persists the @mention audit identity in route()
+            // (setMessageTarget) against the dispatchable roster, so a chat-only @mention never mislabels the turn.
           })
           // cwd = THIS conversation's own working dir (per-conversation); every dispatched / collab expert
           // operates in it (collaborators share one project dir). modeByRole stays per-expert (the workspace

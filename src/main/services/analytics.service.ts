@@ -10,6 +10,7 @@ import type { AnalyticsSummary, AppInfo } from '../ipc/contracts'
 import * as analyticsRepo from '../repos/analytics.repo'
 import * as convRepo from '../repos/conversation.repo'
 import * as gateOutcomeRepo from '../repos/gate-outcome.repo'
+import { QUALITY_OUTCOMES, OPERATION_OUTCOMES } from '../repos/gate-outcome.repo'
 import * as memoryRepo from '../repos/memory.repo'
 
 // created_at is stored as UTC ISO (new Date().toISOString()); local-midnight N days ago as that same UTC ISO.
@@ -90,7 +91,10 @@ export function getSummary(): AnalyticsSummary {
   // ended verified-good (pass, fixed, or proven false positive).
   const outcomeRows = gateOutcomeRepo.countByOutcome()
   const gateCount = (gate: 'B' | 'C', outcome: string): number => outcomeRows.find((r) => r.gate === gate && r.outcome === outcome)?.v ?? 0
-  const gateB = ['pass', 'fixed', 'false-positive', 'unresolved', 'unverified'].map((o) => ({ outcome: o, v: gateCount('B', o) }))
+  // Distribution shows the QUALITY terminals + the OPERATION terminal (aborted) so a user Stop is VISIBLE for
+  // run reliability — while the per-expert pass rate below (countByRole) excludes it, so a Stop never reads as a
+  // quality miss. Both sides read the SAME shared outcome lists (gate-outcome.repo), never a copied string list.
+  const gateB = [...QUALITY_OUTCOMES, ...OPERATION_OUTCOMES].map((o) => ({ outcome: o, v: gateCount('B', o) }))
   const gateC = ['PASS', 'FAIL', 'BLOCKED', 'SKIP'].map((o) => ({ outcome: o, v: gateCount('C', o) }))
   const OK_OUTCOMES = new Set(['pass', 'fixed', 'false-positive'])
   const byRoleMap = new Map<string, { total: number; ok: number }>()

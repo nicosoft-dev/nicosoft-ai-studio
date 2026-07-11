@@ -44,6 +44,12 @@ function hookRun(config: unknown): string {
 export function registerExtensionInstallHandlers(): void {
   ipcMain.handle('extensions:previewInstall', async (_e, kind: string, payload: Record<string, unknown>): Promise<InstallPreview> => {
     try {
+      // R4.1: canonicalize the CWD too (not just the source) so the renderer's in-cwd gate compares BOTH paths in
+      // ONE canonical space. A cwd under a symlink (macOS /tmp→/private/tmp, the /var/folders temp roots dogfood
+      // uses) would otherwise fail the string-prefix test against a realpath'd source and wrongly BLOCK a legit
+      // inside-cwd install (adversarial review: canonical-source-vs-raw-cwd half-fix).
+      const rawCwd = String(payload.cwd ?? '')
+      const resolvedCwd = rawCwd ? await realDir(rawCwd).catch(() => rawCwd) : undefined
       if (kind === 'install_skill') {
         const dir = String(payload.dir_path ?? '')
         if (!dir) return { ok: false, error: 'No folder chosen yet' }
@@ -52,7 +58,7 @@ export function registerExtensionInstallHandlers(): void {
         // "no SKILL.md" domain error rather than a bare ENOENT.
         const rp = await realDir(dir).catch(() => dir)
         const parsed = loadSkillDir(rp)
-        return { ok: true, kind: 'skill', name: parsed.name, description: parsed.description, whenToUse: parsed.whenToUse, bodyPreview: parsed.body.slice(0, 500), resolvedPath: rp, digest: await digestDir(rp) }
+        return { ok: true, kind: 'skill', name: parsed.name, description: parsed.description, whenToUse: parsed.whenToUse, bodyPreview: parsed.body.slice(0, 500), resolvedPath: rp, resolvedCwd, digest: await digestDir(rp) }
       }
       if (kind === 'install_plugin') {
         const dir = String(payload.dir_path ?? '')
@@ -71,6 +77,7 @@ export function registerExtensionInstallHandlers(): void {
           name: m.name,
           version: m.version ?? '',
           resolvedPath: rp,
+          resolvedCwd,
           digest: await digestDir(rp),
           // Per-skill description (loaded from each skill's own SKILL.md), so the plugin's skills aren't bare names.
           skills: parsed.skills.map((s) => {
@@ -108,6 +115,7 @@ export function registerExtensionInstallHandlers(): void {
           sourceDirMissing,
           netWarning,
           secretKeys: (payload.secret_keys as string[]) ?? [],
+          resolvedCwd,
           ...(rp ? { resolvedPath: rp, digest: await digestDir(rp) } : {})
         }
       }

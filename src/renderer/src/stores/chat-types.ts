@@ -57,10 +57,20 @@ export interface ChatMessage {
   expertId?: string | null
   dispatch?: string[] | null
   segmentKind?: string | null // closure-loop: 'verifier' = an independent Gate B reviewer step → renders a "· Verifier" identity badge (live + across reload)
-  // P2-5: on a USER turn in a coordinator conversation, the @mention target resolved + persisted at send —
-  // the STABLE audit identity the mention chip renders from (so it survives the role being renamed/deleted,
-  // instead of re-deriving from the live roster every render). undefined = legacy row / not a mention.
+  // R5.1: on a USER turn in a coordinator conversation, the @mention target resolved + persisted BY MAIN at
+  // route — the STABLE audit identity the mention chip renders from (survives the role being renamed/deleted).
+  // The renderer no longer predicts this; it's null until main writes it (the live chip falls back to a
+  // dispatchable-roster re-derivation for the optimistic turn — the SAME roster main matches, so no jump).
+  // undefined = legacy row / not a mention. targetMentionLen freezes the chip span so a deleted multi-word name
+  // stays whole (a live re-derivation would lose the vanished name and collapse the span).
   targetRoleId?: string | null
+  targetMentionText?: string | null
+  targetMentionLen?: number | null
+  // R5.1: true ONLY on the optimistic user row of the CURRENT turn (before main persists the audit target); a
+  // persisted/reloaded row is never optimistic. The mention chip's LIVE fallback (chat-segment) runs ONLY for an
+  // optimistic row — a persisted row with target=null is main's authoritative "no dispatchable @mention" and must
+  // stay chip-less, so a chat-only @mention can't grow a chip later when its role gains agent capability.
+  optimistic?: boolean
   // The agent run this message belongs to — the TURN identity for chain-less messages (canMerge's run
   // boundary: a wake/resume run renders as its own turn, never smeared into the previous reply). Live
   // turns stamp the streamId, reload stamps the persisted run_id — both unique per run, compared only
@@ -125,7 +135,9 @@ export interface SendOpts {
   contextWindow?: number // agent roles pass the model's context window (drives compaction)
   permissionMode?: AgentMode // agent roles: initial permission mode (default / plan / bypass)
   imageModel?: string // designer image backend slug (image-tool roles only)
-  targetRoleId?: string // P2-5: coordinator conversations — the @mention target the composer resolved for THIS turn (persisted as the chip's stable audit identity)
+  // R5.1: no targetRoleId — the renderer no longer predicts the @mention target. Main resolves it against the
+  // dispatchable roster in route() and persists it (a renderer prediction over the all-experts roster would
+  // mislabel a chat-only @mention that main never routes there).
 }
 
 export interface ChatState {

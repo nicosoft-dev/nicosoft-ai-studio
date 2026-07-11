@@ -9,6 +9,13 @@ import { getDb } from '../db/connection'
 
 export type GateKind = 'B' | 'C'
 
+// R6: quality vs operation terminals. A user Stop ('aborted') is an OPERATION outcome — it measures run
+// reliability, not the expert's quality — so it stays OUT of the per-expert pass-rate denominator (a Stop is not
+// a quality failure) while remaining VISIBLE in the overall distribution. One definition the SQL below and the
+// renderer both read, so the "which outcomes count" list is never copied out of sync (the R6 root cause).
+export const QUALITY_OUTCOMES = ['pass', 'fixed', 'false-positive', 'unresolved', 'unverified'] as const
+export const OPERATION_OUTCOMES = ['aborted'] as const
+
 export interface GateOutcomeInput {
   convId: string
   gate: GateKind
@@ -68,10 +75,13 @@ export interface RoleGateCount {
 
 // Gate B per-implementer outcome counts — the per-expert pass-rate source (Gate C runs are per-task
 // e2e verdicts; attributing them to one implementer would mislead, so byExpert is B-only).
+// Per-implementer QUALITY outcomes only — OPERATION_OUTCOMES (a user Stop) are excluded so the pass-rate
+// denominator counts verification results, not stopped turns (R6: a Stop must not lower an expert's pass rate).
 export function countByRole(): RoleGateCount[] {
+  const ops = OPERATION_OUTCOMES.map(() => '?').join(', ')
   return getDb()
-    .prepare(`SELECT role_id roleId, outcome, COUNT(*) v FROM gate_outcomes WHERE gate = 'B' AND (row_kind = 'floor' OR row_kind IS NULL) GROUP BY role_id, outcome`)
-    .all() as unknown as RoleGateCount[]
+    .prepare(`SELECT role_id roleId, outcome, COUNT(*) v FROM gate_outcomes WHERE gate = 'B' AND (row_kind = 'floor' OR row_kind IS NULL) AND outcome NOT IN (${ops}) GROUP BY role_id, outcome`)
+    .all(...OPERATION_OUTCOMES) as unknown as RoleGateCount[]
 }
 
 export interface SubjectGateCount {

@@ -59,6 +59,8 @@ function toMsgDto(r: convRepo.MessageRow): MessageDto {
     dispatch: r.dispatch,
     segmentKind: r.segmentKind,
     targetRoleId: r.targetRoleId,
+    targetMentionText: r.targetMentionText,
+    targetMentionLen: r.targetMentionLen,
     createdAt: r.createdAt
   }
 }

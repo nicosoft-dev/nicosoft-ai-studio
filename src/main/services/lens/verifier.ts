@@ -71,7 +71,10 @@ export interface SubjectContext {
 //                infra fault (the LLM call failed / returned empty). Deliver, but the caller MUST say so.
 //   aborted    — the user stopped the turn mid-verification. NOT a verdict and NOT a delivery: the caller
 //                must not emit any "Delivered" beat, and must not scan partial output for a verdict.
-export type VerifierVerdict = { feedback: string; inputTokens: number; outputTokens: number } & (
+// reviewerRoleId (R5.2): the role runVerifierStep ACTUALLY selected for THIS pass (chooseVerifierRole is
+// re-evaluated each call). Every consumer attributes the verdict to this — never a separately-recomputed guess —
+// so a config change between an audit and a re-audit can't name a reviewer that didn't run that pass.
+export type VerifierVerdict = { feedback: string; reviewerRoleId: string; inputTokens: number; outputTokens: number } & (
   | { kind: 'pass' }
   | { kind: 'fail' }
   | { kind: 'unverified' }
@@ -88,7 +91,7 @@ export async function runVerifierStep(implementerRoleId: string | string[], opts
   // falls back to 'generalist' when no independent ready role exists, and that fallback is — BY CONSTRUCTION —
   // either an implementer or not dispatch-ready. Without this check a not-ready generalist would be RUN and
   // throw a bad_request infra error at dispatch time, instead of degrading honestly to "no independent verifier".
-  if (implementers.includes(verifierRoleId) || !rolesService.isDispatchReady(verifierRoleId)) return { kind: 'unverified', feedback: 'Independent verification skipped: no independent, dispatch-ready verifier role bound (only the implementer is available); result delivered unverified.', inputTokens: 0, outputTokens: 0 }
+  if (implementers.includes(verifierRoleId) || !rolesService.isDispatchReady(verifierRoleId)) return { kind: 'unverified', feedback: 'Independent verification skipped: no independent, dispatch-ready verifier role bound (only the implementer is available); result delivered unverified.', reviewerRoleId: verifierRoleId, inputTokens: 0, outputTokens: 0 }
   // closure-loop §3.2: presentation split by role.
   //   FLOOR (no subject) → renders as the independent "<verifier> · Verifier" SEGMENT (its verdict prose IS the
   //     body). It emits NO sub_tool card — the segment is the presentation, eliminating the old double (a card on
@@ -161,14 +164,14 @@ export async function runVerifierStep(implementerRoleId: string | string[], opts
     // delivering an "unverified" note for a turn the user stopped.
     if (signal?.aborted) {
       if (emitCard) opts.cb.onToolEvent?.(verifierRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId, name: 'Subject', isError: true, result: 'aborted' })
-      return { kind: 'aborted', feedback: 'Independent verification aborted — the turn was stopped mid-check.', inputTokens: 0, outputTokens: 0 }
+      return { kind: 'aborted', feedback: 'Independent verification aborted — the turn was stopped mid-check.', reviewerRoleId: verifierRoleId, inputTokens: 0, outputTokens: 0 }
     }
     // Otherwise the verifier's own LLM call failed (upstream empty-response / channel fault — round8): an
     // infrastructure failure, not a verdict → 'unverified' so the caller skips the fail handler and says so.
     const msg = err instanceof Error ? err.message : String(err)
     const feedback = `verifier LLM call failed: ${msg}`
     if (emitCard) opts.cb.onToolEvent?.(verifierRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId, name: 'Subject', isError: true, result: feedback })
-    return { kind: 'unverified', feedback, inputTokens: 0, outputTokens: 0 }
+    return { kind: 'unverified', feedback, reviewerRoleId: verifierRoleId, inputTokens: 0, outputTokens: 0 }
   }
   // A user abort comes back as a NORMAL return with reason:'aborted' (the loop RETURNS, it does not throw)
   // and PARTIAL text. Detect it BEFORE scanning that text — otherwise the classifier reads a phantom
@@ -176,7 +179,7 @@ export async function runVerifierStep(implementerRoleId: string | string[], opts
   // pass/fail/unverified verdict; it is its own terminal.
   if (signal?.aborted || verifier.reason === 'aborted') {
     if (emitCard) opts.cb.onToolEvent?.(verifierRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId, name: 'Subject', isError: true, result: 'aborted' })
-    return { kind: 'aborted', feedback: 'Independent verification aborted — the turn was stopped mid-check.', inputTokens: verifier.inputTokens, outputTokens: verifier.outputTokens }
+    return { kind: 'aborted', feedback: 'Independent verification aborted — the turn was stopped mid-check.', reviewerRoleId: verifierRoleId, inputTokens: verifier.inputTokens, outputTokens: verifier.outputTokens }
   }
   const text = verifier.text.trim()
   // Contracted verdict line first: persona + user message both demand a FINAL `VERDICT: PASS|FAIL`
@@ -189,6 +192,6 @@ export async function runVerifierStep(implementerRoleId: string | string[], opts
   if (emitCard) opts.cb.onToolEvent?.(verifierRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId, name: 'Subject', isError: !passed, result: text })
   // Empty text = the verifier ran but produced nothing (belt to the loop's empty-turn guard) — an ABSENT
   // verdict, not a FAIL with evidence: 'unverified' so the caller doesn't dispatch the fail handler.
-  if (!text) return { kind: 'unverified', feedback: 'Verifier returned no verdict.', inputTokens: verifier.inputTokens, outputTokens: verifier.outputTokens }
-  return { kind: passed ? 'pass' : 'fail', feedback: text, inputTokens: verifier.inputTokens, outputTokens: verifier.outputTokens }
+  if (!text) return { kind: 'unverified', feedback: 'Verifier returned no verdict.', reviewerRoleId: verifierRoleId, inputTokens: verifier.inputTokens, outputTokens: verifier.outputTokens }
+  return { kind: passed ? 'pass' : 'fail', feedback: text, reviewerRoleId: verifierRoleId, inputTokens: verifier.inputTokens, outputTokens: verifier.outputTokens }
 }

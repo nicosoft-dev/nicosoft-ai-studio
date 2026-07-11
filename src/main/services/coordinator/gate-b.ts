@@ -10,6 +10,7 @@ import { displayName } from '../../agent/roles/prompts'
 import { deriveAcceptanceCriteria } from './route'
 import { gitHead, changedPathsSince } from '../lens/diff'
 import type { WrittenFile } from '../../agent/context'
+import type { AgentResult } from '../../agent/loop'
 import { describeSnapshot, snapshotWorkspace } from '../workspace/git-snapshot'
 import { emitCoordinatorIntro, runRoleStep, type RunStepOptions } from './step'
 import { ulid } from '../../db/id'
@@ -67,7 +68,9 @@ const MAX_FIX_ROUNDS = 3
 // to a per-subject outcome map). Floor keeps its holistic handler + false-positive path.
 interface FloorClosure {
   handlerRoleId: string
-  outcome: Extract<GateOutcome, 'fixed' | 'false-positive' | 'unresolved' | 'unverified'>
+  // 'aborted' rides here so a user Stop during the fix/re-verify is a distinct terminal, never folded into
+  // 'unverified' (R1.3): runGatedRoleStep short-circuits on it and records the floor as 'aborted' exactly once.
+  outcome: Extract<GateOutcome, 'fixed' | 'false-positive' | 'unresolved' | 'unverified' | 'aborted'>
   failureFeedback: string // the original floor failure (the learning loop's "verdict")
   evidence: string // the closure result (handler text or re-verify feedback)
   inputTokens: number
@@ -179,14 +182,21 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
   let inputTokens = result.inputTokens + verdict.inputTokens
   let outputTokens = result.outputTokens + verdict.outputTokens
 
-  // The user STOPPED the turn during verification (the verifier returned 'aborted' rather than scanning its
-  // partial output into a phantom verdict). Short-circuit BEFORE the panel/closure — running them on a
-  // stopped turn only spends more aborted sub-runs. Record it distinctly; the caller sees signal.aborted and
-  // propagates (throws), so this gateOutcome is a marker, never a "Delivered" beat.
-  if (verdict.kind === 'aborted') {
-    recordOutcome('aborted', 1, verdict.feedback)
-    return { ...result, inputTokens, outputTokens, gateOutcome: 'aborted', gateEvidence: verdict.feedback }
+  // ONE abort terminal for the whole gated step (R1): any sub-stage below (floor verifier / lens amplification /
+  // floor closure / subject closure) the user Stops during short-circuits HERE — record the floor 'aborted'
+  // exactly once and return, BEFORE that stage's delivery side effects (aggregate/subject rows, quality lessons,
+  // closing note). abort is monotone: it never maps to pass/fail/unverified/unresolved. The consumer sees
+  // signal.aborted / gateOutcome==='aborted' and propagates (throws) — never a "Delivered" beat.
+  const abortSignal = signal ?? opts.signal
+  const abortedReturn = (evidence: string): GatedStepResult => {
+    recordOutcome('aborted', 1, evidence)
+    return { ...result, inputTokens, outputTokens, gateOutcome: 'aborted', gateEvidence: evidence }
   }
+
+  // The user STOPPED the turn during the floor verification (the verifier returned 'aborted' rather than scanning
+  // its partial output into a phantom verdict). Short-circuit BEFORE the panel/closure — running them on a stopped
+  // turn only spends more aborted sub-runs.
+  if (verdict.kind === 'aborted') return abortedReturn(verdict.feedback)
 
   // Verification could not JUDGE — no independent dispatch-ready verifier is bound, OR an infra fault (LLM
   // call failed / no verdict at all). Either way there is no defect evidence to act on, and the subjects share
@@ -224,6 +234,10 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
     inputTokens += lv.inputTokens
     outputTokens += lv.outputTokens
   }
+  // R1.1: runLensReview swallows an abort into [] (catch → non-blocking). A Stop during the lens fan-out must NOT
+  // fall through to the pass branch and record 'pass' on the floor verdict — short-circuit to the single aborted
+  // terminal before any outcome is recorded.
+  if (abortSignal?.aborted) return abortedReturn('Turn stopped during lens amplification.')
   // confirmed FAIL = produced, failed, AND not refuted by the skeptics → drives closure. A REFUTED subject is a
   // proven false alarm (recorded false-positive, folds as such); a DROPPED subject has no usable verdict (recorded
   // unverified, not folded). Neither enters closure.
@@ -268,6 +282,9 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
     inputTokens += floorClosure.inputTokens
     outputTokens += floorClosure.outputTokens
   }
+  // R1: closeFloor returns 'aborted' when the fix/re-verify was Stopped — short-circuit before the subject
+  // integrator + all outcome recording, so a stopped floor never records unresolved/unverified or a lesson.
+  if (floorClosure?.outcome === 'aborted' || abortSignal?.aborted) return abortedReturn(floorClosure?.evidence ?? 'Turn stopped during floor closure.')
   const subjectRoundsBudget = MAX_FIX_ROUNDS - (floorFailed ? 1 : 0)
   // Narrate the examine → fix hand-off in Danny's voice — the SAME emitCoordinatorIntro beat every other gate
   // transition uses (persisted, so it survives reload). Without it the transition is invisible: the verifier's
@@ -286,6 +303,9 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
   inputTokens += integrated.inputTokens
   outputTokens += integrated.outputTokens
   const subjectClosures = integrated.outcomes
+  // R1: a Stop during subject closure (integrate marks the in-flight finding 'aborted') → the single aborted
+  // terminal, before the fold / aggregate row / per-finding lessons / closing note.
+  if (abortSignal?.aborted || [...subjectClosures.values()].some((c) => c.outcome === 'aborted')) return abortedReturn('Turn stopped during subject closure.')
 
   // Floor row — outcome from the floor verdict ALONE (inv3: independent of subjects, written before the fold),
   // so the floor pass-rate stays byte-identical to the single-verifier era (the readers' WHERE row_kind='floor').
@@ -409,7 +429,7 @@ export async function runGateBFailFollowUp(
   feedback: string,
   signal?: AbortSignal,
   presetHandler?: string
-): Promise<{ handlerRoleId: string; text: string; inputTokens: number; outputTokens: number; writtenFiles: WrittenFile[] }> {
+): Promise<{ handlerRoleId: string; text: string; reason: AgentResult['reason']; inputTokens: number; outputTokens: number; writtenFiles: WrittenFile[] }> {
   // closure-loop decision ② "谁写谁修": the implementer who wrote the change fixes it — no domain re-routing to
   // another owning expert. presetHandler is retained only as an explicit override (currently always the
   // implementer too). The fix runs as the implementer's OWN visible segment (③ in §3.2), NOT a sub_tool card on
@@ -438,7 +458,7 @@ export async function runGateBFailFollowUp(
     expectsFileChanges: true,
     signal: signal ?? opts.signal
   })
-  return { handlerRoleId, text: handler.text, inputTokens: handler.inputTokens, outputTokens: handler.outputTokens, writtenFiles: handler.writtenFiles }
+  return { handlerRoleId, text: handler.text, reason: handler.reason, inputTokens: handler.inputTokens, outputTokens: handler.outputTokens, writtenFiles: handler.writtenFiles }
 }
 
 // Close the FLOOR domain end-to-end (the holistic verdict): dispatch its owning handler to fix the defect (or
@@ -457,6 +477,10 @@ async function closeFloor(
   let inputTokens = followUp.inputTokens
   let outputTokens = followUp.outputTokens
   const base = { handlerRoleId: followUp.handlerRoleId, failureFeedback: feedback }
+  // R1.2: the fix handler RETURNS reason:'aborted' with partial text on a user Stop — detect it BEFORE scanning
+  // for CLOSURE: (partial output could carry a stray "CLOSURE: FALSE-POSITIVE" that would wrongly close the
+  // floor). An abort is its own terminal; runGatedRoleStep records the floor 'aborted' once and short-circuits.
+  if (followUp.reason === 'aborted' || signal?.aborted) return { ...base, outcome: 'aborted', evidence: 'Turn stopped mid-fix.', inputTokens, outputTokens }
   // Contract-ONLY classification (memory: a verdict/closure must NEVER free-text scan — "not a false positive"
   // and "not fixed" both contain the trigger word). The handler prompt mandates a final `CLOSURE:` line; ABSENT
   // → unresolved (fail-safe; dogfood 2026-06-11: a zero-work handler must not pass silently).
@@ -467,9 +491,9 @@ async function closeFloor(
     inputTokens += reVerdict.inputTokens
     outputTokens += reVerdict.outputTokens
     // Read the DISCRIMINATED kind, never `.passed` alone: a re-verify that could not judge (no independent
-    // verifier / infra fault) or was aborted did NOT confirm the claimed fix → 'unverified', never 'fixed'
-    // (mirrors the subject re-verify in integrateSubjectClosures — the bug once a skip returned pass:true).
-    const outcome = reVerdict.kind === 'pass' ? 'fixed' : reVerdict.kind === 'fail' ? 'unresolved' : 'unverified'
+    // verifier / infra fault) → 'unverified', never 'fixed'; a user Stop → 'aborted' — its OWN terminal, never
+    // folded into 'unverified' (R1.3). Mirrors the subject re-verify in integrateSubjectClosures.
+    const outcome = reVerdict.kind === 'pass' ? 'fixed' : reVerdict.kind === 'fail' ? 'unresolved' : reVerdict.kind === 'aborted' ? 'aborted' : 'unverified'
     return { ...base, outcome, evidence: reVerdict.feedback, inputTokens, outputTokens }
   }
   return { ...base, outcome: 'unresolved', evidence: followUp.text, inputTokens, outputTokens }
@@ -524,6 +548,9 @@ async function integrateSubjectClosures(
     console.warn(`[studio-lens] step ${stepId}: ${groups.length} owning-expert fix groups exceed budget ${roundsBudget} — fixing ${groupsToFix.length}, ${groups.length - groupsToFix.length} surfaced unresolved (backstop §3.1-6)`)
   }
 
+  // A user Stop propagates as an abort terminal: mark the in-flight group 'aborted' and stop the remaining
+  // groups (abort is global — re-verifying later groups is wasted work; runGatedRoleStep short-circuits anyway).
+  let aborted = false
   for (const [handlerRoleId, lvs] of groupsToFix) {
     // ONE consolidated fix dispatch for this expert: every finding it owns, per-finding delimited so each is
     // addressed (the dispatch is merged for COHERENCE; learning + outcomes stay per-finding, never a blob).
@@ -531,6 +558,12 @@ async function integrateSubjectClosures(
     const followUp = await runGateBFailFollowUp(implementerRoleId, opts, gate, implementationText, merged, signal, handlerRoleId)
     inputTokens += followUp.inputTokens
     outputTokens += followUp.outputTokens
+    // R1: a user Stop during the consolidated fix (reason:'aborted') is a terminal — mark every finding in this
+    // group 'aborted' and stop; do NOT re-verify (an aborted sub-run) or leave a finding looking 'unverified'.
+    if (followUp.reason === 'aborted' || signal?.aborted) {
+      for (const lv of lvs) outcomes.set(lv.key, { outcome: 'aborted', evidence: 'Turn stopped mid-fix.', handlerRoleId })
+      break
+    }
     // Each re-verify subject self-fetches the diff (`git diff`) like a Workflow agent — no shared build to inject.
     for (const lv of lvs) {
       const focus = lv.focus ?? lv.key // the lens carries its own model-authored focus (always set; key is the fallback)
@@ -552,11 +585,13 @@ async function integrateSubjectClosures(
       inputTokens += reVerdict.inputTokens
       outputTokens += reVerdict.outputTokens
       // Read the DISCRIMINATED kind, never `.passed` alone: a re-verify that could not judge (no independent,
-      // dispatch-ready verifier / infra fault) or was aborted did NOT actually confirm the fix → 'unverified',
-      // never 'fixed'. pass → fixed; fail → the claimed fix didn't hold.
-      const settled: GateOutcome = reVerdict.kind === 'pass' ? 'fixed' : reVerdict.kind === 'fail' ? 'unresolved' : 'unverified'
+      // dispatch-ready verifier / infra fault) → 'unverified'; a user Stop → 'aborted' (its own terminal, never
+      // folded into unverified — R1.3). pass → fixed; fail → the claimed fix didn't hold.
+      const settled: GateOutcome = reVerdict.kind === 'pass' ? 'fixed' : reVerdict.kind === 'fail' ? 'unresolved' : reVerdict.kind === 'aborted' ? 'aborted' : 'unverified'
       outcomes.set(lv.key, { outcome: settled, evidence: reVerdict.feedback, handlerRoleId })
+      if (settled === 'aborted') { aborted = true; break }
     }
+    if (aborted) break
   }
   return { outcomes, inputTokens, outputTokens }
 }
