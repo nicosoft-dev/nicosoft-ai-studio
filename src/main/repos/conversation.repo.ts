@@ -60,7 +60,8 @@ export interface MessageAppendInput {
   dispatch?: string[]
   runId?: string
   segmentKind?: string
-  targetRoleId?: string
+  // #6b: no targetRoleId on the append input — appendMessage never writes a target; setMessageTarget is the sole
+  // writer (MAIN, post-route), so main is the single source of a message's persisted @mention target.
 }
 
 interface ConversationRaw {
@@ -244,7 +245,9 @@ export function append(conversationId: string, input: MessageAppendInput): Messa
   const sentTokens = input.sentTokens ?? 0
   const runId = input.runId ?? null
   const segmentKind = input.segmentKind ?? null
-  const targetRoleId = input.targetRoleId ?? null
+  // #6b: append NEVER writes a target — setMessageTarget (MAIN, post-route) is the sole writer. The INSERT column
+  // below is always null here; the target is set later by route(), so no append caller can plant a renderer guess.
+  const targetRoleId: string | null = null
   getDb()
     .prepare(
       `INSERT INTO messages (id, conversation_id, author, expert_id, model, content, attachments, in_tokens, cache_read_tokens, out_tokens, sent_tokens, dispatch, run_id, segment_kind, target_role_id, created_at)

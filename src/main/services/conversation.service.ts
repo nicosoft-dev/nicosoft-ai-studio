@@ -105,8 +105,9 @@ export function append(convId: string, input: MessageAppendDto): MessageDto {
     outTokens: input.outputTokens,
     sentTokens: input.sentTokens,
     dispatch: input.dispatch,
-    segmentKind: input.segmentKind,
-    targetRoleId: input.targetRoleId
+    segmentKind: input.segmentKind
+    // #6b: no targetRoleId forwarded here — the append IPC no longer carries a target. setMessageTarget (post-route,
+    // main-only) is the sole writer, so a renderer-supplied target can never reach the row.
   })
   convRepo.touch(convId) // bump updated_at so the history list re-sorts
   return toMsgDto(row)

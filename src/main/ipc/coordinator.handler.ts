@@ -220,7 +220,8 @@ export function registerCoordinatorHandlers(): void {
         controller.signal
       )
       .then((r) => {
-        const ev: CoordinatorDoneDto = { streamId, inputTokens: r.inputTokens, outputTokens: r.outputTokens, reason: r.reason }
+        // #6a: carry MAIN's persisted @mention target so the renderer backfills the optimistic user row (no reload).
+        const ev: CoordinatorDoneDto = { streamId, inputTokens: r.inputTokens, outputTokens: r.outputTokens, reason: r.reason, targetRoleId: r.target.roleId, targetMentionText: r.target.mentionText, targetMentionLen: r.target.mentionLen }
         lanes.flushAll()
         send('coordinator:done', ev)
       })

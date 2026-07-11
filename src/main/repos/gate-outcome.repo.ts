@@ -75,13 +75,15 @@ export interface RoleGateCount {
 
 // Gate B per-implementer outcome counts — the per-expert pass-rate source (Gate C runs are per-task
 // e2e verdicts; attributing them to one implementer would mislead, so byExpert is B-only).
-// Per-implementer QUALITY outcomes only — OPERATION_OUTCOMES (a user Stop) are excluded so the pass-rate
-// denominator counts verification results, not stopped turns (R6: a Stop must not lower an expert's pass rate).
+// Per-implementer QUALITY outcomes only, by ALLOW-LIST (outcome IN QUALITY_OUTCOMES) not deny-list (#7): a future
+// OPERATION terminal — or stray/legacy outcome text — must never leak into the pass-rate denominator just by not
+// being in the excluded set. Only the explicitly-graded quality terminals count (R6: a user Stop, and anything
+// that isn't a quality result, must not lower an expert's pass rate).
 export function countByRole(): RoleGateCount[] {
-  const ops = OPERATION_OUTCOMES.map(() => '?').join(', ')
+  const quality = QUALITY_OUTCOMES.map(() => '?').join(', ')
   return getDb()
-    .prepare(`SELECT role_id roleId, outcome, COUNT(*) v FROM gate_outcomes WHERE gate = 'B' AND (row_kind = 'floor' OR row_kind IS NULL) AND outcome NOT IN (${ops}) GROUP BY role_id, outcome`)
-    .all(...OPERATION_OUTCOMES) as unknown as RoleGateCount[]
+    .prepare(`SELECT role_id roleId, outcome, COUNT(*) v FROM gate_outcomes WHERE gate = 'B' AND (row_kind = 'floor' OR row_kind IS NULL) AND outcome IN (${quality}) GROUP BY role_id, outcome`)
+    .all(...QUALITY_OUTCOMES) as unknown as RoleGateCount[]
 }
 
 export interface SubjectGateCount {

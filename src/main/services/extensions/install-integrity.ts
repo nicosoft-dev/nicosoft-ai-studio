@@ -9,7 +9,8 @@
 //              something other than what was approved.
 
 import { createHash } from 'node:crypto'
-import { readFile, readdir, realpath, lstat } from 'node:fs/promises'
+import { readdir, realpath, lstat } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { MATERIALIZE_MAX_BYTES, MATERIALIZE_MAX_FILES } from './materialize'
 
@@ -66,15 +67,27 @@ export async function digestDir(dir: string): Promise<string> {
     if (st.size > MATERIALIZE_MAX_BYTES) {
       throw new Error(`source folder exceeds the install limit (${Math.round(MATERIALIZE_MAX_BYTES / (1024 * 1024))} MB) — point the install at the extension's own folder, not a parent directory`)
     }
-    const buf = await readFile(abs)
-    bytes += buf.length
-    if (bytes > MATERIALIZE_MAX_BYTES) {
-      throw new Error(`source folder exceeds the install limit (${Math.round(MATERIALIZE_MAX_BYTES / (1024 * 1024))} MB) — point the install at the extension's own folder, not a parent directory`)
-    }
+    // Length-prefixed framing (unchanged shape, still unambiguous): rel-path, mode, then the CONTENT length + bytes.
+    // The content length is st.size (known from the lstat above), so the file is STREAMED chunk-by-chunk into the
+    // hash — never buffered whole into the main process. That keeps peak memory at one chunk, so a legitimately
+    // large file (up to the cap) can't spike RSS / freeze the app (#2). For a stable file st.size === bytes-read,
+    // so the digest is byte-identical to the old readFile framing; a mid-read size change is a TOCTOU that the
+    // preview↔install digest comparison is meant to catch anyway.
     const relBuf = Buffer.from(rel, 'utf8')
     h.update(u32(relBuf.length)); h.update(relBuf)
     h.update(u32(st.mode))
-    h.update(u32(buf.length)); h.update(buf)
+    h.update(u32(st.size))
+    let fileBytes = 0
+    await new Promise<void>((resolve, reject) => {
+      const stream = createReadStream(abs)
+      stream.on('data', (chunk: Buffer) => { h.update(chunk); fileBytes += chunk.length })
+      stream.on('error', reject)
+      stream.on('end', resolve)
+    })
+    bytes += fileBytes
+    if (bytes > MATERIALIZE_MAX_BYTES) {
+      throw new Error(`source folder exceeds the install limit (${Math.round(MATERIALIZE_MAX_BYTES / (1024 * 1024))} MB) — point the install at the extension's own folder, not a parent directory`)
+    }
   }
   return h.digest('hex')
 }

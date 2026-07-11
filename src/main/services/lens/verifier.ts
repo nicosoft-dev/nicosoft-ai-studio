@@ -84,7 +84,17 @@ export type VerifierVerdict = { feedback: string; reviewerRoleId: string; inputT
 export async function runVerifierStep(implementerRoleId: string | string[], opts: RunStepOptions, gate: { originalPrompt: string; approvedPlan?: string; acceptance?: string[] }, implementationText: string, signal?: AbortSignal, subject?: SubjectContext): Promise<VerifierVerdict> {
   // Implementer(s): a single string for floor/panel (byte-identical), a SET in collaborate (exclude every builder).
   const implementers = Array.isArray(implementerRoleId) ? implementerRoleId : [implementerRoleId]
+  // Normalize the abort source ONCE (sig): every abort check in this function reads `sig` — the SAME signal
+  // handed to runRoleStep below. A caller that passes signal=undefined and drives the Stop through opts.signal
+  // must be seen by every chokepoint here; a bare `signal?.aborted` would miss it and re-open #1 on that caller.
+  const sig = signal ?? opts.signal
   const verifierRoleId = chooseVerifierRole(implementerRoleId)
+  // #1 (R1): a user Stop must WIN over the no-independent-verifier skip below. If the turn is already aborted,
+  // return the abort terminal FIRST — the skip-return records 'unverified' unconditionally, so a Stop that
+  // coincides with "only the implementer is dispatch-ready" would otherwise be laundered into a quality outcome
+  // ('unverified') by EVERY caller (floor verify, closeFloor re-verify, subject re-verify). This check sits
+  // before the skip so abort stays monotone — its own terminal, never unverified — on every verifier path.
+  if (sig?.aborted) return { kind: 'aborted', feedback: 'Independent verification aborted — the turn was stopped before it could run.', reviewerRoleId: verifierRoleId, inputTokens: 0, outputTokens: 0 }
   // No independent, dispatch-ready agent role besides the implementer(s) → there's no one to verify. Don't
   // FAIL/throw the turn over a config gap; deliver the result with an explicit skipped marker so the caller
   // labels the outcome 'unverified' (never a silent pass). The `!isDispatchReady` arm matters: chooseVerifierRole
@@ -156,13 +166,13 @@ export async function runVerifierStep(implementerRoleId: string | string[], opts
       // P4 watchdog: bound a panel SUBJECT (finder/skeptic) run so a frozen LLM stream can't hang the find/refute
       // barrier forever. The FLOOR verifier (no subject) is exempt — it may run a long, silent build.
       stallTimeoutMs: subject ? EXAMINE_SUBJECT_STALL_MS : undefined,
-      signal: signal ?? opts.signal
+      signal: sig
     })
   } catch (err) {
     // An ABORT can surface here as a thrown error (the loop rethrows during retry backoff once the signal
     // fires) — that is NOT an infra fault. Surface it as 'aborted' so the caller stops cleanly instead of
     // delivering an "unverified" note for a turn the user stopped.
-    if (signal?.aborted) {
+    if (sig?.aborted) {
       if (emitCard) opts.cb.onToolEvent?.(verifierRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId, name: 'Subject', isError: true, result: 'aborted' })
       return { kind: 'aborted', feedback: 'Independent verification aborted — the turn was stopped mid-check.', reviewerRoleId: verifierRoleId, inputTokens: 0, outputTokens: 0 }
     }
@@ -177,7 +187,7 @@ export async function runVerifierStep(implementerRoleId: string | string[], opts
   // and PARTIAL text. Detect it BEFORE scanning that text — otherwise the classifier reads a phantom
   // VERDICT out of half-written output and the caller "delivers" a stopped turn. An abort is never a
   // pass/fail/unverified verdict; it is its own terminal.
-  if (signal?.aborted || verifier.reason === 'aborted') {
+  if (sig?.aborted || verifier.reason === 'aborted') {
     if (emitCard) opts.cb.onToolEvent?.(verifierRoleId, { type: 'sub_tool_done', toolUseId: toolId, parentToolId, name: 'Subject', isError: true, result: 'aborted' })
     return { kind: 'aborted', feedback: 'Independent verification aborted — the turn was stopped mid-check.', reviewerRoleId: verifierRoleId, inputTokens: verifier.inputTokens, outputTokens: verifier.outputTokens }
   }

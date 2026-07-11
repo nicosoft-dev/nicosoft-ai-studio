@@ -410,6 +410,17 @@ export const useChat = create<ChatState>((set, get) => {
       if (!meta) return
       set((s) => {
         const msgs = (s.byConversation[meta.convId] ?? []).map((m) => ({ ...m }))
+        // #6a: backfill the optimistic user row with MAIN's persisted @mention target (carried on coordinator:done)
+        // and clear `optimistic`, so its chip stops LIVE re-deriving without waiting for a reload. Only a coordinator
+        // turn has a routed target; pin THIS turn's last optimistic user row to that authoritative truth.
+        if (meta.kind === 'coordinator') {
+          for (let i = msgs.length - 1; i >= 0; i--) {
+            if (msgs[i].role === 'user' && msgs[i].optimistic) {
+              msgs[i] = { ...msgs[i], targetRoleId: d.targetRoleId ?? null, targetMentionText: d.targetMentionText ?? null, targetMentionLen: d.targetMentionLen ?? null, optimistic: false }
+              break
+            }
+          }
+        }
         // Belt-and-suspenders: clear streaming flag on the last assistant (in case step:done was missed).
         const cur = msgs[msgs.length - 1]
         if (cur && cur.role === 'assistant') {

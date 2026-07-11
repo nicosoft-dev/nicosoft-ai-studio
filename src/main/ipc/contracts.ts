@@ -631,6 +631,12 @@ export interface CoordinatorDoneDto {
   // the dogfood verdict tell a non-clean finish from a phantom DONE. Mirrors AgentResult.reason — kept a literal
   // union so the IPC contract layer does not import main/agent.
   reason?: 'completed' | 'max_turns' | 'aborted' | 'thrash_stop' | 'incomplete' | 'refusal'
+  // #6a: MAIN's persisted @mention audit identity for THIS turn's user message (resolved in route() against the
+  // dispatchable roster). The renderer backfills the optimistic user row with these + clears `optimistic`, so its
+  // chip stops live-re-deriving without a reload. null = no dispatchable @mention on the turn.
+  targetRoleId?: string | null
+  targetMentionText?: string | null
+  targetMentionLen?: number | null
 }
 export interface CoordinatorErrorDto {
   streamId: string
@@ -1027,7 +1033,9 @@ export interface MessageAppendDto {
   sentTokens?: number // cumulative billing input incl. cache (assistant messages) — billing/accounting record (not the ↑ display)
   dispatch?: string[] // set by coordinator.service for pipeline steps; renderer reads it via MessageDto.dispatch
   segmentKind?: string // closure-loop: 'verifier' marks an independent Gate B reviewer step → "· Verifier" identity badge
-  targetRoleId?: string // P2-5: the @mention target the renderer resolved for a coordinator-conversation user turn
+  // #6b: NO targetRoleId here. The renderer must NOT resolve/send an @mention target on append. MAIN sets it
+  // exclusively via setMessageTarget AFTER routing (repo.setMessageTarget), so main is the single writer and the
+  // persisted target is always the routed truth — never a renderer prediction. Read it back via MessageDto.targetRoleId.
 }
 export interface ConversationTitleInput {
   convId: string

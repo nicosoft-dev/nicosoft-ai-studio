@@ -195,7 +195,7 @@ function planAssignments(decision: RouteDecision, input: CoordinatorRunInput): A
 // Top-level entrypoint. Always called from coordinator.handler; the user turn is already persisted by the
 // renderer (chat-path style — see chat store `send`). Throws on configuration errors so the handler
 // turns them into a single `coordinator:error` event.
-export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, signal: AbortSignal): Promise<{ inputTokens: number; outputTokens: number; reason: AgentResult['reason'] }> {
+export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, signal: AbortSignal): Promise<{ inputTokens: number; outputTokens: number; reason: AgentResult['reason']; target: { roleId: string | null; mentionText: string | null; mentionLen: number | null } }> {
   resetPipelineTodos(input.convId) // a new coordinator turn = a new pipeline → start its shared todo list fresh
   const history = convRepo.listByConversation(input.convId)
   // L1 (coordinator dispatch §3): hand route() the coordinator's project folder + the conv id so it can
@@ -210,11 +210,15 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
   // never the misroute the renderer's all-experts prediction would have recorded). Persist it onto THIS turn's
   // user message (the last user row — the renderer appended it before calling run). Best-effort: an audit write
   // must never fail the turn.
+  // #6a: function-scoped so run()'s single outer return can hand the persisted @mention target to coordinator:done,
+  // whose renderer handler backfills the OPTIMISTIC user row in place (no reload) and clears its live chip re-derive.
+  let turnTarget: { roleId: string | null; mentionText: string | null; mentionLen: number | null } = { roleId: null, mentionText: null, mentionLen: null }
   try {
     const userMsg = [...history].reverse().find((m) => m.author === 'user')
     if (userMsg) {
       const et = decision.explicitTarget
       convRepo.setMessageTarget(userMsg.id, et?.roleId ?? null, et?.matchedText ?? null, et?.matchedLen ?? null)
+      turnTarget = { roleId: et?.roleId ?? null, mentionText: et?.matchedText ?? null, mentionLen: et?.matchedLen ?? null }
     }
   } catch (e) {
     console.warn('[coordinator] persist user-turn target failed:', e instanceof Error ? e.message : e)
@@ -683,7 +687,8 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
   // `coordinator:done` fires and Danny ends his turn; the verdict arrives later via the queue's onDone.
   if (needsE2E) submitGateC(input, decision, cb)
 
-  return result
+  // #6a: carry the persisted @mention target out so coordinator:done can backfill the optimistic user row in place.
+  return { ...result, target: turnTarget }
 }
 
 // B3: after each council round Coordinator facilitates — returns the next move (converge / continue / add a

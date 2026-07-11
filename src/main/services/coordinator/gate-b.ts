@@ -157,6 +157,19 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
   }
   gate.approvedPlan = result.text
 
+  // #1 (R1) FIRST abort chokepoint — right after the implementer returns, BEFORE the verifier runs. abortSignal
+  // is hoisted here (was defined only after the verifier) so a Stop DURING the implementer's own run short-circuits
+  // to the single aborted terminal immediately. Without this, a Stop that coincides with "no independent verifier
+  // bound" reaches runVerifierStep, whose no-reviewer skip-return precedes its own abort check and hands back
+  // 'unverified' → the step is recorded 'unverified', laundering a user Stop into a quality outcome. abort is
+  // monotone: its own terminal, never pass/fail/unverified/unresolved.
+  const abortSignal = signal ?? opts.signal
+  if (abortSignal?.aborted || result.reason === 'aborted') {
+    const evidence = 'Turn stopped during the implementer step.'
+    recordOutcome('aborted', 1, evidence)
+    return { ...result, gateOutcome: 'aborted', gateEvidence: evidence }
+  }
+
   // Model REFUSAL short-circuit (mirrors the verifier-infra-failure guard below): the implementer's loop ended on
   // a refusal (stop_reason: 'refusal') — the model declined to act on this request as framed. Running the verifier
   // + closure loop is futile: every re-dispatch carries the SAME context and refuses identically (the dogfood saw
@@ -178,16 +191,16 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
   // self-tests inside its own agent loop, so no blanket "retry N times" here. One verification of the
   // implementer's result; on FAIL, one fail-handler closure; the ONLY extra verifier pass is checking a
   // handler's "已修复/fixed" CLAIM — validating closure, not looping rework (rework loops are Gate C's job).
-  const verdict = await runVerifierStep(roleId, opts, gate, result.text, signal)
+  const verdict = await runVerifierStep(roleId, opts, gate, result.text, abortSignal)
   let inputTokens = result.inputTokens + verdict.inputTokens
   let outputTokens = result.outputTokens + verdict.outputTokens
 
-  // ONE abort terminal for the whole gated step (R1): any sub-stage below (floor verifier / lens amplification /
-  // floor closure / subject closure) the user Stops during short-circuits HERE — record the floor 'aborted'
-  // exactly once and return, BEFORE that stage's delivery side effects (aggregate/subject rows, quality lessons,
-  // closing note). abort is monotone: it never maps to pass/fail/unverified/unresolved. The consumer sees
-  // signal.aborted / gateOutcome==='aborted' and propagates (throws) — never a "Delivered" beat.
-  const abortSignal = signal ?? opts.signal
+  // ONE abort terminal for every sub-stage below (floor verifier / lens amplification / floor closure / subject
+  // closure): a user Stop during any of them short-circuits via abortedReturn — record the floor 'aborted' exactly
+  // once and return, BEFORE that stage's delivery side effects (aggregate/subject rows, quality lessons, closing
+  // note). abort is monotone: it never maps to pass/fail/unverified/unresolved. The consumer sees signal.aborted /
+  // gateOutcome==='aborted' and propagates (throws) — never a "Delivered" beat. abortSignal was hoisted above (the
+  // #1 chokepoint right after the implementer); this helper folds in the verifier's tokens accumulated since.
   const abortedReturn = (evidence: string): GatedStepResult => {
     recordOutcome('aborted', 1, evidence)
     return { ...result, inputTokens, outputTokens, gateOutcome: 'aborted', gateEvidence: evidence }
@@ -228,7 +241,7 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
     // The escalation throttle (M1: was decideEscalation here) now lives INSIDE the engine — review.yaml's
     // conservative `escalate` step gates `select`, so a non-substantial change fans out no lenses → []. Gate-B
     // hands the engine the floor verdict + the written files it judges from.
-    subjectFindings = await runLensReview(roleId, opts, gate, result.text, stepId, baseRef, baseChanged, result.writtenFiles, verdict.feedback, signal)
+    subjectFindings = await runLensReview(roleId, opts, gate, result.text, stepId, baseRef, baseChanged, result.writtenFiles, verdict.feedback, abortSignal)
   }
   for (const lv of subjectFindings) {
     inputTokens += lv.inputTokens
@@ -277,7 +290,7 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
 
   // Floor closure (1 fix round if it failed) — independent of subjects (inv3). The subject integrator then gets
   // the REMAINING round budget (inv6 backstop). closeFloor/integrate run SERIALLY — handlers edit the shared tree.
-  const floorClosure = floorFailed ? await closeFloor(roleId, opts, gate, result.text, verdict.feedback, signal) : undefined
+  const floorClosure = floorFailed ? await closeFloor(roleId, opts, gate, result.text, verdict.feedback, abortSignal) : undefined
   if (floorClosure) {
     inputTokens += floorClosure.inputTokens
     outputTokens += floorClosure.outputTokens
@@ -299,7 +312,7 @@ export async function runGatedRoleStep(roleId: string, prompt: string, opts: Run
       opts.cb
     )
   }
-  const integrated = await integrateSubjectClosures(roleId, opts, gate, result.text, failedSubjects, subjectRoundsBudget, stepId, signal)
+  const integrated = await integrateSubjectClosures(roleId, opts, gate, result.text, failedSubjects, subjectRoundsBudget, stepId, abortSignal)
   inputTokens += integrated.inputTokens
   outputTokens += integrated.outputTokens
   const subjectClosures = integrated.outcomes
@@ -473,21 +486,24 @@ async function closeFloor(
   feedback: string,
   signal?: AbortSignal
 ): Promise<FloorClosure> {
-  const followUp = await runGateBFailFollowUp(implementerRoleId, opts, gate, implementationText, feedback, signal)
+  // Method B (self-normalize): every abort check + downstream dispatch reads `sig` (signal ?? opts.signal), so a
+  // Stop driven only through opts.signal is caught here too — correctness never depends on the caller pre-normalizing.
+  const sig = signal ?? opts.signal
+  const followUp = await runGateBFailFollowUp(implementerRoleId, opts, gate, implementationText, feedback, sig)
   let inputTokens = followUp.inputTokens
   let outputTokens = followUp.outputTokens
   const base = { handlerRoleId: followUp.handlerRoleId, failureFeedback: feedback }
   // R1.2: the fix handler RETURNS reason:'aborted' with partial text on a user Stop — detect it BEFORE scanning
   // for CLOSURE: (partial output could carry a stray "CLOSURE: FALSE-POSITIVE" that would wrongly close the
   // floor). An abort is its own terminal; runGatedRoleStep records the floor 'aborted' once and short-circuits.
-  if (followUp.reason === 'aborted' || signal?.aborted) return { ...base, outcome: 'aborted', evidence: 'Turn stopped mid-fix.', inputTokens, outputTokens }
+  if (followUp.reason === 'aborted' || sig?.aborted) return { ...base, outcome: 'aborted', evidence: 'Turn stopped mid-fix.', inputTokens, outputTokens }
   // Contract-ONLY classification (memory: a verdict/closure must NEVER free-text scan — "not a false positive"
   // and "not fixed" both contain the trigger word). The handler prompt mandates a final `CLOSURE:` line; ABSENT
   // → unresolved (fail-safe; dogfood 2026-06-11: a zero-work handler must not pass silently).
   const closure = [...followUp.text.matchAll(/^\s*[#*>•-]*\s*CLOSURE:\s*(FIXED|FALSE[- ]?POSITIVE)\b/gim)].pop()?.[1]?.toUpperCase()
   if (closure?.startsWith('FALSE')) return { ...base, outcome: 'false-positive', evidence: followUp.text, inputTokens, outputTokens }
   if (closure === 'FIXED') {
-    const reVerdict = await runVerifierStep(implementerRoleId, opts, gate, followUp.text, signal) // floor persona, own build
+    const reVerdict = await runVerifierStep(implementerRoleId, opts, gate, followUp.text, sig) // floor persona, own build
     inputTokens += reVerdict.inputTokens
     outputTokens += reVerdict.outputTokens
     // Read the DISCRIMINATED kind, never `.passed` alone: a re-verify that could not judge (no independent
@@ -523,6 +539,9 @@ async function integrateSubjectClosures(
   stepId: string,
   signal?: AbortSignal
 ): Promise<{ outcomes: Map<string, SubjectClosure>; inputTokens: number; outputTokens: number }> {
+  // Method B (self-normalize): abort checks + downstream dispatches all read `sig` (signal ?? opts.signal) — same
+  // rule as closeFloor / verifier.ts, so a Stop driven only through opts.signal can't slip past (the #1 class).
+  const sig = signal ?? opts.signal
   const outcomes = new Map<string, SubjectClosure>()
   let inputTokens = 0
   let outputTokens = 0
@@ -555,12 +574,12 @@ async function integrateSubjectClosures(
     // ONE consolidated fix dispatch for this expert: every finding it owns, per-finding delimited so each is
     // addressed (the dispatch is merged for COHERENCE; learning + outcomes stay per-finding, never a blob).
     const merged = lvs.map((lv, i) => `Finding ${i + 1} — ${lv.key} dimension:\n${lv.feedback}`).join('\n\n———\n\n')
-    const followUp = await runGateBFailFollowUp(implementerRoleId, opts, gate, implementationText, merged, signal, handlerRoleId)
+    const followUp = await runGateBFailFollowUp(implementerRoleId, opts, gate, implementationText, merged, sig, handlerRoleId)
     inputTokens += followUp.inputTokens
     outputTokens += followUp.outputTokens
     // R1: a user Stop during the consolidated fix (reason:'aborted') is a terminal — mark every finding in this
     // group 'aborted' and stop; do NOT re-verify (an aborted sub-run) or leave a finding looking 'unverified'.
-    if (followUp.reason === 'aborted' || signal?.aborted) {
+    if (followUp.reason === 'aborted' || sig?.aborted) {
       for (const lv of lvs) outcomes.set(lv.key, { outcome: 'aborted', evidence: 'Turn stopped mid-fix.', handlerRoleId })
       break
     }
@@ -581,7 +600,7 @@ async function integrateSubjectClosures(
       // quiet: reuses the subject's stable toolUseId; an event would clobber the original FAIL row the panel
       // card keeps (the resolved outcome is re-emitted via emitSubjectFinal). reverify: narrow binary fix-confirm
       // persona (NOT the aggressive FIND prompt) so a fresh weak candidate can't flip a real fix to 'unresolved'.
-      const reVerdict = await runVerifierStep(implementerRoleId, opts, gate, followUp.text, signal, { key: lv.key, focus, stepId, quiet: true, reverify: true })
+      const reVerdict = await runVerifierStep(implementerRoleId, opts, gate, followUp.text, sig, { key: lv.key, focus, stepId, quiet: true, reverify: true })
       inputTokens += reVerdict.inputTokens
       outputTokens += reVerdict.outputTokens
       // Read the DISCRIMINATED kind, never `.passed` alone: a re-verify that could not judge (no independent,
