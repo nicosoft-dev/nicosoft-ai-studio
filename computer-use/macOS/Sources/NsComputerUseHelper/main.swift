@@ -1,26 +1,16 @@
 import AppKit
-import Darwin
-import Foundation
 
 // MARK: - Entry point
 //
-// The helper runs as a long-lived accessory application: it needs an AppKit run
-// loop on the main thread for the overlay window and the Esc monitor, while the
-// JSON-RPC server accepts connections on its own background queue.
+// A long-lived accessory application: an AppKit run loop on the main thread drives the overlay window and
+// the Esc monitor, while the JSON-RPC server accepts connections on its own background queue. Each step's
+// detail lives in a Support/ type; this file is just the wiring.
 
-// A write to a peer that has closed the socket must never raise SIGPIPE.
-signal(SIGPIPE, SIG_IGN)
+let socketPath = SocketPath.resolve()
 
-/// Resolve the socket path: `NSAI_CUA_SOCKET` override, else the fixed
-/// per-user path that keeps the TCC grant stable across launches. The socket
-/// lives beside the installed helper, under ~/.nsai/computer-use/.
-let socketPath: String = {
-    let env = ProcessInfo.processInfo.environment["NSAI_CUA_SOCKET"]
-    if let env, !env.isEmpty {
-        return (env as NSString).expandingTildeInPath
-    }
-    return NSHomeDirectory() + "/.nsai/computer-use/sock/nscu.sock"
-}()
+// Refuse a second launch (a raced `open -g`, or a relaunch before the previous instance died) — one
+// helper per socket endpoint. Exits cleanly if another instance already holds the lock.
+SingleInstance.acquireOrExit(lockPath: socketPath + ".lock")
 
 let server = Server(socketPath: socketPath)
 do {
@@ -29,28 +19,13 @@ do {
     Log.error("failed to start: \(error)")
     exit(1)
 }
-
 Log.info("\(Version.displayName) \(Version.string) ready — socket \(socketPath)")
 
-// Clean shutdown: remove the socket file and exit on SIGINT/SIGTERM. A plain
-// signal handler can do very little safely, so route the signal through GCD.
-var signalSources: [DispatchSourceSignal] = []
-func installSignalHandler(_ sig: Int32) {
-    signal(sig, SIG_IGN)
-    let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
-    source.setEventHandler {
-        Log.info("received signal \(sig) — shutting down")
-        server.stop()
-        exit(0)
-    }
-    source.resume()
-    signalSources.append(source)
-}
-installSignalHandler(SIGINT)
-installSignalHandler(SIGTERM)
+// SIGINT/SIGTERM → stop the server (removes the socket) and exit; SIGPIPE ignored.
+SignalHandlers.install(stopping: server)
 
-// Accessory policy: no Dock icon, but windows (the overlay) may still appear.
-// When packaged, Info.plist's LSUIElement=true has the same effect.
+// Accessory policy: no Dock icon, but the overlay window may still appear. When packaged, Info.plist's
+// LSUIElement=true has the same effect.
 let application = NSApplication.shared
 application.setActivationPolicy(.accessory)
 application.run()
