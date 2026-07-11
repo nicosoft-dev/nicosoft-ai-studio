@@ -8,7 +8,7 @@
 // Windows has no TCC: screen capture and input synthesis need no per-app grant, so there's no
 // permission dance, no `open -g` LaunchServices attribution, and no signature-preserving copy.
 
-import { execFile, spawn } from 'node:child_process'
+import { execFile, execFileSync, spawn } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -96,6 +96,17 @@ async function quit(): Promise<void> {
   }
 }
 
+// before-quit path: the helper was spawned detached+unref, so it deliberately outlives Studio — and an
+// async taskkill fired mid-quit may never spawn before the process dies. Synchronous with a hard
+// timeout so a quit can never hang on it.
+function quitSync(): void {
+  try {
+    execFileSync('taskkill', ['/f', '/im', HELPER_EXE_NAME], { timeout: 3_000 })
+  } catch {
+    // taskkill exits non-zero when no matching process — already not running.
+  }
+}
+
 export const win32Platform: ComputerUsePlatform = {
   supported: true,
   helperLabel: HELPER_EXE_NAME,
@@ -106,4 +117,5 @@ export const win32Platform: ComputerUsePlatform = {
   install,
   launch,
   quit,
+  quitSync,
 }

@@ -367,11 +367,15 @@ export function releaseComputerUse(runId: string | undefined): void {
   void client.call('stop_capture', {}, { timeoutMs: 1_500 }).catch(() => undefined)
 }
 
-// App-quit backstop (main/index.ts before-quit): drop the banner + stop any stream if we were mid-run.
+// App-quit backstop (main/index.ts before-quit): the helper's lifetime follows Studio's — it exists
+// solely for Studio, and the lifecycle promise above ("stays up until the user disables OR Studio
+// quits") had only the first half implemented: the helper is an INDEPENDENT process on both platforms —
+// (LaunchServices `open -g` / detached+unref spawn), so without an explicit kill it orphaned past app
+// exit (user report 2026-07-11). quitSync (pkill/taskkill, sync — an async kill may never spawn inside
+// the quit window) takes banner, streams and process down in one stroke; startComputerUseIfEnabled
+// relaunches it on the next start while the switch stays on.
 export function disposeComputerUse(): void {
   activeRuns.clear()
-  if (!client.connected()) return
-  void client.call('set_active', { active: false }, { timeoutMs: 500 }).catch(() => undefined)
-  void client.call('stop_capture', {}, { timeoutMs: 500 }).catch(() => undefined)
-  client.disconnect()
+  if (client.connected()) client.disconnect()
+  if (platform.supported) platform.quitSync()
 }

@@ -37,6 +37,10 @@ export interface ComputerUsePlatform {
   launch(path: string): Promise<void>
   // Stop the helper process (macOS pkill -f; Windows taskkill /f /im).
   quit(): Promise<void>
+  // Synchronous stop for the app's before-quit window: the helper is an INDEPENDENT process on both
+  // platforms (`open -g` via LaunchServices / detached+unref spawn), so it does NOT die with Studio —
+  // and an async pkill fired during quit may never even spawn before the Electron process exits.
+  quitSync(): void
 }
 
 // Deferred imports of the two implementations. Both modules are bundled on every platform, but their
@@ -63,6 +67,9 @@ const unsupportedPlatform: ComputerUsePlatform = {
     throw new Error('computer use is not supported on this platform')
   },
   quit: async () => {
+    /* no-op */
+  },
+  quitSync: () => {
     /* no-op */
   },
 }

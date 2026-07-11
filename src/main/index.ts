@@ -378,5 +378,5 @@ app.on('before-quit', () => {
   monitorService.disposeAll() // stop every Monitor watcher so no probe interval outlives the app
   selfRhythmService.disposeAll() // cancel every pending self-wakeup timer
   fileWatchManager.disposeAll() // close every hook file watcher
-  disposeComputerUse() // drop the computer-use overlay banner + close the helper socket if we held one
+  disposeComputerUse() // stop the helper PROCESS too (independent of Studio — `open -g`/detached spawn — it orphaned past quit before); sync pkill/taskkill, 3s-bounded
 })

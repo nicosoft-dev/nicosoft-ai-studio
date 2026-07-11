@@ -5,7 +5,7 @@
 // primitives (transport path, install/launch/quit); the JSON-RPC transport, lifecycle orchestration,
 // and overlay refcount live in the neutral computer-use.ts.
 
-import { execFile } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -92,6 +92,17 @@ async function quit(): Promise<void> {
   }
 }
 
+// before-quit path: the helper was launched via LaunchServices (`open -g`), so it is NOT Studio's child
+// and survives Studio's exit — and an async pkill fired mid-quit may never spawn before the process
+// dies. Synchronous with a hard timeout so a quit can never hang on it.
+function quitSync(): void {
+  try {
+    execFileSync('pkill', ['-f', HELPER_PKILL_PATTERN], { timeout: 3_000 })
+  } catch {
+    // pkill exits 1 when nothing matched — already not running.
+  }
+}
+
 export const darwinPlatform: ComputerUsePlatform = {
   supported: true,
   helperLabel: HELPER_APP_NAME,
@@ -102,4 +113,5 @@ export const darwinPlatform: ComputerUsePlatform = {
   install,
   launch,
   quit,
+  quitSync,
 }
