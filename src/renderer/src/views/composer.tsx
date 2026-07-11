@@ -2,21 +2,25 @@
    NicoSoft AI Studio — regular role conversation (real streaming via chat store)
    Composer (model + thinking + path + image attachments)
    ============================================================ */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, ClipboardEvent as ReactClipboardEvent, ReactElement } from 'react'
 import { Icons } from '@/components/icons'
 import { AttachmentStrip } from '@/components/attachment-strip'
 import { ModelPicker, ThinkingPicker, ImageModelPicker, ModePicker } from '@/components/composer-controls'
 import { CommandPalette, matchCommands, type SlashCommand } from '@/components/command-palette'
+import { MentionPalette, type MentionCandidate } from '@/components/mention-palette'
 import { parseWorkflowArgs, launchPayload, type WfCmdWorkflow } from '@/lib/workflow-command'
 import { resolveTarget } from '@/lib/command-routing'
 import { toast } from '@/stores/toast'
 import { PathBar } from '@/components/path-bar'
 import { GitStatusChip } from '@/components/git-status-chip'
 import { resolveConvCwd } from '@/lib/resolve-cwd'
+import { participantsOf } from '@/lib/conversation-participants'
+import { useAllExperts } from '@/lib/all-experts'
+import { useRoles } from '@/stores/roles'
 import { useWorkspace } from '@/stores/workspace'
 import { useMemoryCloud } from '@/stores/memory-cloud'
-import { useChat, roleHasAgent, roleHasImageGen, roleRunsAgentLoop } from '@/stores/chat'
+import { useChat, roleHasAgent, roleHasImageGen, roleRunsAgentLoop, roleIsCoordinator } from '@/stores/chat'
 import { useRoleBinding, type RoleBindingControls } from '@/lib/use-role-binding'
 import type { EndpointDto } from '@/lib/api'
 import { fileToImage, imagesFromClipboard, type ImageAttachment } from '@/lib/image'
@@ -112,6 +116,12 @@ export function Composer({
   const taRef = useRef<HTMLTextAreaElement>(null)
   const [attach, setAttach] = useState<ImageAttachment[]>([])
   const [cmdIndex, setCmdIndex] = useState(0)
+  const [mentionIndex, setMentionIndex] = useState(0)
+  // @-mention roster inputs (coordinator conversations): the full expert lookup + which roles are
+  // disabled/deleted right now, so the picker can dim (not drop) an unavailable participant.
+  const { experts: allExperts, byId: expertById } = useAllExperts()
+  const rolesDisabled = useRoles((s) => s.disabled)
+  const rolesDeleted = useRoles((s) => s.deleted)
 
   // A Refine action (from the image viewer) bumps focusNonce → pull focus into the composer.
   useEffect(() => {
@@ -253,6 +263,33 @@ export function Composer({
     }
     window.addEventListener('nsai:send-prompt', onPrompt)
     return () => window.removeEventListener('nsai:send-prompt', onPrompt)
+  }, [activeConv])
+  // A companion "Reply to <expert>" button (chat-segment) prefills the composer with `@<name> ` so the user
+  // answers that expert directly. Same fire-once, scoped-to-conversation pattern as nsai:send-prompt — a
+  // CustomEvent, NEVER a persistent store field, so it can't re-fire and clobber a draft (design §3.8 / R6).
+  // Prepend, never overwrite: an existing draft X becomes `@Name X` (mention stays at the line start); a
+  // mention prefix already present is REPLACED so clicking a second expert re-targets instead of stacking.
+  const prefillRef = useRef((_name: string): void => {})
+  prefillRef.current = (name: string): void => {
+    const rest = value.replace(/^@\S*\s*/, '')
+    const next = `@${name} ${rest}`
+    setValue(next)
+    setTimeout(() => {
+      grow()
+      const pos = name.length + 2 // @ + name + space → caret at the body start, ready to type the reply
+      taRef.current?.focus()
+      taRef.current?.setSelectionRange(pos, pos)
+    }, 0)
+  }
+  useEffect(() => {
+    const onPrefill = (e: Event): void => {
+      const d = (e as CustomEvent).detail as { convId?: string | null; name?: string } | null
+      if (!d || typeof d.name !== 'string' || !d.name.trim()) return
+      if ((d.convId ?? null) !== (activeConv ?? null)) return
+      prefillRef.current(d.name)
+    }
+    window.addEventListener('nsai:composer-prefill', onPrefill)
+    return () => window.removeEventListener('nsai:composer-prefill', onPrefill)
   }, [activeConv])
   // The chip reads the CONVERSATION's cwd (resolveConvCwd — the same resolver the Files/Diff panels use):
   // for a solo conv that IS the PathBar's cwd; for coordinator/collab convs it falls back to the first
@@ -466,6 +503,48 @@ export function Composer({
     setTimeout(grow, 0)
   }
 
+  // — @-mention expert picker (at-mention-expert-picker-design) — the GUI twin of the `/` palette above,
+  //   scoped to COORDINATOR conversations: type `@` at the START of a message to reach one of the experts
+  //   this conversation has been talking to. roleIsCoordinator is the ONLY gate that keeps solo chats 100%
+  //   untouched — a solo expert.id is never 'coordinator', so mentionMatch stays null and the whole branch
+  //   (palette, keydown interception, pick) never runs. The server already routes a leading @mention
+  //   (route.ts matchMention); this is pure renderer discoverability — send/routing are unchanged.
+  const mentionMatch = roleIsCoordinator(expert.id) && !value.includes('\n') ? /^@(\S*)$/.exec(value) : null
+  const mentionRelevant = mentionMatch !== null
+  const mentionQuery = mentionMatch ? mentionMatch[1] : ''
+  const disabledSet = useMemo(() => new Set(rolesDisabled), [rolesDisabled])
+  const deletedSet = useMemo(() => new Set(rolesDeleted), [rolesDeleted])
+  // Roster = this conversation's participants; empty (a brand-new coordinator conv, nothing dispatched yet)
+  // → fall back to the globally dispatchable enabled roles so the very first @ still offers candidates.
+  const mentionRoster = useMemo(
+    () => participantsOf(messages, expertById, { disabledIds: disabledSet, deletedIds: deletedSet }),
+    [messages, expertById, disabledSet, deletedSet]
+  )
+  const mentionFallback = useMemo(
+    () =>
+      allExperts
+        .filter((e) => !roleIsCoordinator(e.id) && roleHasAgent(e.id) && !disabledSet.has(e.id) && !deletedSet.has(e.id))
+        .map((e) => ({ id: e.id, name: e.name, color: e.color })),
+    [allExperts, disabledSet, deletedSet]
+  )
+  const mentionPool: MentionCandidate[] = mentionRoster.length ? mentionRoster : mentionFallback
+  const mentionMatches = mentionRelevant
+    ? mentionPool.filter((p) => p.name.toLowerCase().startsWith(mentionQuery.toLowerCase()))
+    : []
+  const mentionOpen = mentionMatches.length > 0
+  const pickMention = (c: MentionCandidate): void => {
+    const rest = value.replace(/^@\S*/, '').replace(/^\s+/, '') // drop the @prefix + any gap, keep the body
+    const next = `@${c.name} ${rest}`
+    setValue(next)
+    setMentionIndex(0)
+    setTimeout(() => {
+      grow()
+      const pos = c.name.length + 2 // @ + name + space → caret at the body start
+      taRef.current?.setSelectionRange(pos, pos)
+      taRef.current?.focus()
+    }, 0)
+  }
+
   return (
     <div className="input-dock">
       <div className="input-dock-inner">
@@ -528,20 +607,53 @@ export function Composer({
             </div>
           ) : null}
           {cmdOpen ? <CommandPalette matches={cmdMatches} index={cmdIndex} onPick={runCommand} /> : null}
+          {mentionOpen ? <MentionPalette matches={mentionMatches} index={mentionIndex} onPick={pickMention} /> : null}
           <textarea
             ref={taRef}
             className="cmp-textarea"
             rows={1}
             value={value}
-            placeholder={t('conv.askPlaceholder', { name: expert.name })}
+            placeholder={
+              roleIsCoordinator(expert.id)
+                ? t('conv.askCoordinatorPlaceholder', { name: expert.name })
+                : t('conv.askPlaceholder', { name: expert.name })
+            }
             onChange={(e) => {
               setValue(e.target.value)
               setCmdIndex(0)
+              setMentionIndex(0)
               grow()
             }}
             onPaste={onPaste}
             onKeyDown={(e) => {
               const native = e.nativeEvent as KeyboardEvent
+              // @-mention palette open: arrows navigate, Enter/Tab pick, Esc closes. Mutually exclusive with
+              // the `/` palette (a message starts with `@` OR `/`, never both), so this sits beside cmdOpen
+              // and the order is irrelevant. Only ever intercepts when mentionOpen — i.e. a coordinator
+              // conversation with a leading `@…` that matches a participant; every other keystroke path is
+              // byte-for-byte unchanged (solo chats never reach here — mentionOpen is always false there).
+              if (mentionOpen) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault()
+                  setMentionIndex((i) => Math.min(i + 1, mentionMatches.length - 1))
+                  return
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault()
+                  setMentionIndex((i) => Math.max(i - 1, 0))
+                  return
+                }
+                if ((e.key === 'Enter' || e.key === 'Tab') && !native.isComposing && native.keyCode !== 229) {
+                  e.preventDefault()
+                  pickMention(mentionMatches[mentionIndex])
+                  return
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault()
+                  setValue('')
+                  return
+                }
+              }
               // Command palette open: arrows navigate, Enter/Tab run the selected command, Esc closes.
               if (cmdOpen) {
                 if (e.key === 'ArrowDown') {

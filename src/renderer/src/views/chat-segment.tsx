@@ -15,7 +15,9 @@ import { WorkflowLaunchCard } from '@/components/workflow-launch-card'
 import { WorkflowDraftCard } from '@/components/workflow-draft-card'
 import { Icons } from '@/components/icons'
 import { useT, useLocale } from '@/stores/locale'
-import { isSynthesis, groupRuns, sameChain, segmentFolds } from '@/stores/chat-helpers'
+import { isSynthesis, groupRuns, sameChain, segmentFolds, roleIsCoordinator } from '@/stores/chat-helpers'
+import { useChat } from '@/stores/chat'
+import { matchLeadingMention } from '@/lib/conversation-participants'
 import type { Expert } from '@/types'
 
 // The segment-identity model (pure, JSX-free — see chat-helpers) re-exported for view-level consumers.
@@ -38,12 +40,22 @@ function relativeTime(ms: number, locale: string): string {
 // Hover meta under a settled message (Claude-Code style): a copy button + the message's relative time, revealed
 // only on segment hover (CSS). copyText is the message's own text; time comes from its createdAt. Renders
 // nothing when there's neither — a bare system card stays clean.
-function SegActions({ copyText, createdAt }: { copyText: string; createdAt?: number }): ReactElement | null {
+function SegActions({
+  copyText,
+  createdAt,
+  onReply,
+  replyLabel
+}: {
+  copyText: string
+  createdAt?: number
+  onReply?: () => void // companion "Reply to <expert>" — present only on a guest expert's segment in a coordinator conv
+  replyLabel?: string
+}): ReactElement | null {
   const t = useT()
   const locale = useLocale((s) => s.resolved)
   const [copied, setCopied] = useState(false)
   const hasText = copyText.trim().length > 0
-  if (!hasText && createdAt === undefined) return null
+  if (!hasText && createdAt === undefined && !onReply) return null
   const copy = (): void => {
     void navigator.clipboard
       .writeText(copyText)
@@ -55,6 +67,11 @@ function SegActions({ copyText, createdAt }: { copyText: string; createdAt?: num
   }
   return (
     <div className="seg-actions">
+      {onReply ? (
+        <button className="seg-act-btn" onClick={onReply} title={replyLabel} aria-label={replyLabel} type="button">
+          <Icons.cornerDownLeft size={12} />
+        </button>
+      ) : null}
       {hasText ? (
         <button className="seg-act-btn" onClick={copy} title={t('files.copy')} type="button">
           {copied ? <Icons.check size={12} /> : <Icons.copy size={12} />}
@@ -64,6 +81,21 @@ function SegActions({ copyText, createdAt }: { copyText: string; createdAt?: num
         <span className="seg-act-time" title={new Date(createdAt).toLocaleString()}>{relativeTime(createdAt, locale)}</span>
       ) : null}
     </div>
+  )
+}
+
+// A user message's text, with a leading @mention rendered as a colored chip in coordinator conversations
+// (P3 — purely visual, so you can see at a glance who a message was directed to). Everywhere else, and when
+// the leading token isn't a real routable expert, the text renders verbatim. Mirrors the server's
+// matchMention boundary rules (matchLeadingMention), so the chip appears exactly when the mention routes.
+function UserMessageText({ text, coordinator, experts }: { text: string; coordinator: boolean; experts: Record<string, Expert> }): ReactElement {
+  const m = coordinator ? matchLeadingMention(text, Object.values(experts)) : null
+  if (!m) return <p className="user-msg-text">{text}</p>
+  return (
+    <p className="user-msg-text">
+      <span className="mention-chip" style={{ '--chip': m.color } as CSSProperties}>{text.slice(0, m.matchedLen)}</span>
+      {text.slice(m.matchedLen)}
+    </p>
   )
 }
 
@@ -413,6 +445,11 @@ export function ChatSegment({
   const synthesis = isSynthesis(first)
   // closure-loop §3.2/§3.3: an independent Gate B reviewer step renders with its own "· Verifier" identity.
   const verifier = !isUser && first.segmentKind === 'verifier'
+  // Companion "Reply to <expert>" affordance (at-mention-expert-picker-design §3.8): only on a GUEST
+  // expert's segment in a COORDINATOR conversation (`expert` is the conversation's primary role — the id is
+  // 'coordinator' when Danny hosts). Danny's own synthesis (expertId 'coordinator') and every solo chat are
+  // excluded — you @-reply the dispatched experts, never the coordinator or yourself.
+  const replyTarget = roleIsCoordinator(expert.id) && !isUser && first.expertId && first.expertId !== 'coordinator' ? renderExpert : null
   const segColor = isUser ? 'var(--border-2)' : synthesis ? 'var(--accent)' : renderExpert.color
   // Foldable: every GUEST segment (expertId ≠ the conversation's primary role) renders in the fixed-height
   // scroll window; the HOST's own segments (Danny's intro / direct / investigation / synthesis in a
@@ -478,7 +515,7 @@ export function ChatSegment({
       <div ref={bodyRef} className={'seg-body' + (isUser || synthesis ? ' primary' : '') + (windowed ? ' fold-window' : '')}>
         {isUser ? (
           <>
-            {first.text ? <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{first.text}</p> : null}
+            {first.text ? <UserMessageText text={first.text} coordinator={roleIsCoordinator(expert.id)} experts={expertById} /> : null}
             {first.images && first.images.length > 0 ? (
               <div className="msg-images">
                 {first.images.map((img, i) => (
@@ -508,7 +545,21 @@ export function ChatSegment({
       {/* Hover meta: copy the message + its relative time — only once the segment has settled (while streaming the
           live readout above owns the footer). Copy is the message's own text (user prompt / assistant answer). */}
       {!segStreaming ? (
-        <SegActions copyText={isUser ? first.text ?? '' : msgs.map((m) => m.text).filter(Boolean).join('\n\n')} createdAt={first.createdAt} />
+        <SegActions
+          copyText={isUser ? first.text ?? '' : msgs.map((m) => m.text).filter(Boolean).join('\n\n')}
+          createdAt={first.createdAt}
+          onReply={
+            replyTarget
+              ? () =>
+                  window.dispatchEvent(
+                    new CustomEvent('nsai:composer-prefill', {
+                      detail: { convId: useChat.getState().activeConv, name: replyTarget.name }
+                    })
+                  )
+              : undefined
+          }
+          replyLabel={replyTarget ? t('conv.replyTo', { name: replyTarget.name }) : undefined}
+        />
       ) : null}
     </div>
   )
