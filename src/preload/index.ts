@@ -564,6 +564,13 @@ const api = {
       return () => ipcRenderer.off('workflow:run:event', h)
     }
   },
+  research: {
+    // Start a deep-research run for `question` in `convId`. The run drives a research-launch card over the
+    // conv:card channel (live progress + the final cited report); this returns only whether it started.
+    run: (input: { convId: string; question: string }): Promise<{ ok: true; runId: string } | { ok: false; error: string }> =>
+      ipcRenderer.invoke('research:run', input),
+    stop: (runId: string): Promise<boolean> => ipcRenderer.invoke('research:stop', runId)
+  },
   plugins: {
     list: (): Promise<PluginDto[]> => ipcRenderer.invoke('plugins:list'),
     install: (dirPath: string): Promise<PluginDto> => ipcRenderer.invoke('plugins:install', dirPath),

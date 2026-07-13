@@ -382,8 +382,8 @@ export function Composer({
   }
   const launchWorkflowRef = useRef(launchWorkflow)
   launchWorkflowRef.current = launchWorkflow
-  // §4/D10: the palette shows exactly TWO root commands for this domain — `/workflow` and `/schedule` —
-  // never a per-item expansion (no `/workflow <name>` rows). Both stay matched while an argument is typed
+  // §4/D10: the palette shows the root commands for this domain — `/workflow`, `/schedule`, `/research` —
+  // never a per-item expansion (no `/workflow <name>` rows). All stay matched while an argument is typed
   // (takesArg). The other built-in commands (/new, /compact, …) are unaffected. The lists are cached when
   // the palette is relevant so a command resolves synchronously (and can keep the input on a bad arg).
   const paletteRelevant = value.startsWith('/') && !value.includes('\n')
@@ -479,10 +479,50 @@ export function Composer({
   const runScheduleCommandRef = useRef(runScheduleCommand)
   runScheduleCommandRef.current = runScheduleCommand
 
-  // The two root commands, rebuilt each render (cheap) — their run handlers read the latest closures via refs.
+  // `/research <question>` — a deep-research run (fan-out web searches → fetch sources → adversarially verify
+  // claims → a cited report). The argument is FREE TEXT (no id/name resolution, unlike /workflow · /schedule);
+  // bare = usage. Mirrors launchWorkflow's ensure-conversation + persisted user-bubble discipline, then hands
+  // the question to research:run — the run surfaces as a research card in the conversation (live progress + the
+  // final report, driven over conv:card). A start-time failure (no research-capable expert) toasts.
+  const runResearchCommand = (arg?: string): boolean | undefined => {
+    const question = arg?.trim()
+    if (!question) {
+      setCmdOutput(['Usage:  /research <question>', 'Fan-out web research with adversarial verification → a cited report.'])
+      return
+    }
+    const rawCmd = value.trim() // the user's literal command line — persisted as their bubble
+    setCmdOutput(null)
+    void (async () => {
+      try {
+        // The research card + all its live patches arrive on the conv:card broadcast, whose renderer listener
+        // (onConvCard) is subscribed only inside ensureListeners(). A /research as the FIRST action of a session
+        // (greeting page, or a boot-restored conversation) never ran send(), so without this the card and the
+        // whole run are invisible live (only a reload surfaces the persisted card). Same guard launchWorkflow uses.
+        chat.ensureStreamListeners()
+        let convId = activeConv
+        if (!convId) {
+          const conv = await window.api.conversations.create({ kind: 'single', primaryRoleId: expert.id, title: rawCmd.slice(0, 60), cwd: effectiveCwd || '' })
+          convId = conv.id
+          chat.adoptConversation(conv)
+        }
+        const line = await window.api.conversations.append(convId, { author: 'user', content: rawCmd })
+        chat.insertUserLine(convId, { id: line.id, text: rawCmd }) // seeds byConversation so onConvCard's `if (!msgs) return` guard passes
+        const res = await window.api.research.run({ convId, question })
+        if (!res.ok) toast.error(res.error)
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err))
+      }
+    })()
+    return undefined
+  }
+  const runResearchCommandRef = useRef(runResearchCommand)
+  runResearchCommandRef.current = runResearchCommand
+
+  // The root commands, rebuilt each render (cheap) — their run handlers read the latest closures via refs.
   const rootCommands: SlashCommand[] = [
     { name: 'workflow', desc: 'Run a saved workflow — list, or <name> [key=value …]', takesArg: true, run: (_c, arg) => runWorkflowCommandRef.current(arg) },
-    { name: 'schedule', desc: 'Run a scheduled task now — list, or <id|name>', takesArg: true, run: (_c, arg) => runScheduleCommandRef.current(arg) }
+    { name: 'schedule', desc: 'Run a scheduled task now — list, or <id|name>', takesArg: true, run: (_c, arg) => runScheduleCommandRef.current(arg) },
+    { name: 'research', desc: 'Deep web research → a cited report — <question>', takesArg: true, run: (_c, arg) => runResearchCommandRef.current(arg) }
   ]
 
   // Slash-command palette (optimization E): `/` at the start (no space yet) opens a quick-action menu.

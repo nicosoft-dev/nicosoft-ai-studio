@@ -12,6 +12,7 @@ import { ToolRun, OMIT_WHEN_DONE, INLINE_SURFACE } from '@/components/tool-run'
 import { WidgetCard } from '@/components/widget-card'
 import { ChunkedMarkdown } from '@/components/markdown'
 import { WorkflowLaunchCard } from '@/components/workflow-launch-card'
+import { ResearchLaunchCard } from '@/components/research-launch-card'
 import { WorkflowDraftCard } from '@/components/workflow-draft-card'
 import { Icons } from '@/components/icons'
 import { useT, useLocale } from '@/stores/locale'
@@ -534,6 +535,18 @@ export function ChatSegment({
       <div className="segment wfd">
         {msgs.map((m) => (
           <WorkflowDraftCard key={m.id} content={m.text} expertId={m.expertId ?? null} />
+        ))}
+      </div>
+    )
+  }
+  // A `/research` run card (script-orchestration-alignment §4.1): one card carries the whole run — live phase/
+  // log while running, the cited report on done. Not an utterance (no avatar/readout). msgs.map like the draft
+  // card so two back-to-back research cards never collapse to one (canMerge folds same-kind same-role rows).
+  if (!isUser && first.segmentKind === 'research-launch') {
+    return (
+      <div className="segment research">
+        {msgs.map((m) => (
+          <ResearchLaunchCard key={m.id} content={m.text} />
         ))}
       </div>
     )

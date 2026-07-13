@@ -2219,3 +2219,26 @@ button.wf-last .wf-arr { color: var(--text-4); font-size: 10px; margin-left: 1px
 .wfd-warn { color: var(--text-amber, #b7791f); font-size: 11.5px; }
 .wfd-err { color: var(--error); font-size: 11.5px; }
 .wfd-actions { display: flex; gap: 8px; align-items: center; }
+
+/* research card — the /research run surface (script-orchestration-alignment §4.1): head (icon + question +
+   status dot + Stop while running), a live phase/log row while running, the cited ChunkedMarkdown report on
+   done. Mirrors .wfd-card + reuses .wf-dot / .wf-chip-mono so it speaks the existing card language. */
+.segment.research { padding: 2px 0; }
+.research-card {
+  display: flex; flex-direction: column; gap: 8px; width: 100%;
+  border: 1px solid var(--border-1); border-radius: var(--r-md); background: var(--bg-1);
+  padding: 10px 12px; font-size: 12.5px; color: var(--text-2); min-width: 0;
+}
+.research-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.research-icon { color: var(--text-4); display: inline-flex; flex-shrink: 0; }
+.research-q { color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.research-status { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11px; color: var(--text-3); margin-left: auto; flex-shrink: 0; }
+.research-stop {
+  background: none; border: 1px solid var(--border-2); border-radius: 5px; color: var(--text-3);
+  font-size: 11px; cursor: pointer; padding: 1px 8px; flex-shrink: 0;
+}
+.research-stop:hover { color: var(--error); border-color: color-mix(in srgb, var(--error) 45%, transparent); }
+.research-progress { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.research-note { color: var(--text-3); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.research-report { border-top: 1px solid var(--border-1); padding-top: 8px; }
+.research-err { color: var(--error); font-size: 11.5px; }

@@ -312,11 +312,12 @@ export function setMessageTarget(id: string, roleId: string | null, mentionText:
 }
 
 // CARD rows — segmentKind marks the content as a machine JSON payload rendered as a UI card (a /workflow
-// launch record, a workflow draft card), NOT an utterance. G10: machine protocol never rides the prose
-// channel — every model-visible surface (history seeds, chat/step replay, compaction summaries, memory
-// extraction) must skip these rows. Draft cards double the stakes: their payload is patched IN PLACE
-// (superseded/created flags), so replaying them would also mutate the prompt-cache prefix retroactively.
-export const CARD_SEGMENT_KINDS = new Set(['workflow-launch', 'workflow-draft'])
+// launch record, a workflow draft card, a /research run card), NOT an utterance. G10: machine protocol never
+// rides the prose channel — every model-visible surface (history seeds, chat/step replay, compaction summaries,
+// memory extraction) must skip these rows. Cards patched IN PLACE (workflow drafts' superseded/created flags,
+// research's running→report payload) double the stakes: replaying them would mutate the prompt-cache prefix
+// retroactively. A NEW card segmentKind MUST be added here — that is the single chokepoint the six faces read.
+export const CARD_SEGMENT_KINDS = new Set(['workflow-launch', 'workflow-draft', 'research-launch'])
 export function isCardRow(m: { segmentKind: string | null }): boolean {
   return m.segmentKind !== null && CARD_SEGMENT_KINDS.has(m.segmentKind)
 }
@@ -328,6 +329,16 @@ export function listByConversation(convId: string): MessageRow[] {
   const rows = getDb()
     .prepare('SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC, id ASC')
     .all(convId) as unknown as MessageRaw[]
+  return rows.map(mapMessage)
+}
+
+// All message rows of one segmentKind across every conversation — used by the research boot sweep to find
+// stale 'running' research-launch cards (a crash/quit mid-run leaves the card at 'running' with no run table
+// to reconcile against). Rare kinds only; not a hot path.
+export function listBySegmentKind(segmentKind: string): MessageRow[] {
+  const rows = getDb()
+    .prepare('SELECT * FROM messages WHERE segment_kind = ? ORDER BY created_at ASC, id ASC')
+    .all(segmentKind) as unknown as MessageRaw[]
   return rows.map(mapMessage)
 }
 
