@@ -16,7 +16,7 @@ import type { ApprovalCard, ChatMessage, ChatState, MsgBlock } from './chat-type
 
 // Re-export the store's public types + role predicates: consumers import them from '@/stores/chat' (the
 // store's API face) even though their definitions now live in chat-types.ts / chat-helpers.ts.
-export type { ToolCall, MsgBlock, ChatMessage, ServerNote, PermissionPrompt, QuestionPrompt, ApprovalCard } from './chat-types'
+export type { ToolCall, MsgBlock, ChatMessage, ServerNote, PermissionPrompt, QuestionPrompt, ApprovalCard, ContextBreakdown, ContextPart } from './chat-types'
 export { roleHasAgent, roleHasImageGen, roleRunsAgentLoop, roleIsCoordinator } from './chat-helpers'
 
 type Meta = { convId: string; expertId: string; endpointId: string; model: string }
@@ -271,6 +271,13 @@ export const useChat = create<ChatState>((set, get) => {
           liveCached: { ...s.liveCached, [d.convId]: 0 }
         }))
       }
+    })
+
+    // What the current prompt is made of → the composer's Context window panel. Trails the 'context' ping
+    // above (it is resolved off the turn's hot path), so the ring is already correct by the time this lands.
+    // Overwrite semantics, like contextTokens: it describes the LAST measured prompt, never an accumulation.
+    window.api.onConvBreakdown((d) => {
+      set((s) => ({ breakdown: { ...s.breakdown, [d.convId]: d.breakdown } }))
     })
 
     // Live generated images from an in-flight agent turn (Georgia's ns_generate_image, code_execution
@@ -747,6 +754,7 @@ export const useChat = create<ChatState>((set, get) => {
     question: {},
     approvals: {},
     contextTokens: {},
+    breakdown: {},
     liveInput: {},
     liveOutput: {},
     liveCached: {},
@@ -1211,11 +1219,17 @@ export const useChat = create<ChatState>((set, get) => {
             // replaced foldedTokens of history with a summaryTokens summary, so the measured context drops
             // by the difference now (the next turn's real count_tokens supersedes this estimate).
             const prev = s.contextTokens[convId] ?? 0
+            // The fold invalidates the panel's split (its Messages part counted the history that just got
+            // folded away). The total above can be corrected arithmetically; the parts cannot — so drop
+            // them and let the panel fall back to the total until the next turn re-measures. A stale
+            // breakdown would be a confidently wrong picture of the prompt.
+            const { [convId]: _dropped, ...restBreakdown } = s.breakdown
             return {
               byConversation: planted
                 ? { ...s.byConversation, [convId]: settlePending(s.byConversation[convId] ?? [], { kind: 'compaction', tokens: out.foldedTokens, auto: false, manual: true }) }
                 : s.byConversation,
-              contextTokens: prev > 0 ? { ...s.contextTokens, [convId]: Math.max(0, prev - out.foldedTokens + out.summaryTokens) } : s.contextTokens
+              contextTokens: prev > 0 ? { ...s.contextTokens, [convId]: Math.max(0, prev - out.foldedTokens + out.summaryTokens) } : s.contextTokens,
+              breakdown: restBreakdown
             }
           })
           if (!planted) toast.success(`Compacted — folded ${out.foldedMessages} messages (~${k} tokens) into the summary`)

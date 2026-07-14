@@ -5,6 +5,10 @@ import type { AgentLlmEvent } from '../agent/llm/anthropic'
 // Manual /compact result (agent:compact) — the renderer maps it to a receipt block / skip toast.
 export type { CompactOutcome, CompactSkipReason } from '../services/compression.service'
 
+// What the prompt is made of — the composer's Context window panel renders this (see ConvBreakdown).
+export type { ContextBreakdown, ContextPart } from '../services/token-count.service'
+import type { ContextBreakdown } from '../services/token-count.service'
+
 // DTOs crossing the IPC boundary (handlers ↔ preload ↔ renderer). The renderer-facing Endpoint
 // view carries `keyState` but never the key itself — secrets stay in the keychain.
 // 'ok' = usable · 'missing' = never configured · 'unreadable' = stored under a different app identity
@@ -153,6 +157,13 @@ export interface ConvUsage {
   // and a non-'coordinator' roleId is kept OUT of the composer "/ window" indicator (a small-context verifier
   // step must not shrink it — BUG 1). Absent on chat/agent single paths → conv-level behaviour, unchanged.
   roleId?: string
+}
+// What the current prompt is made of, for the composer's Context window panel. Arrives on its OWN channel,
+// not folded into ConvUsage: it is computed off the hot path and lands whenever it lands, while the
+// 'context' ping above must reach the readout the instant the turn starts.
+export interface ConvBreakdown {
+  convId: string
+  breakdown: ContextBreakdown
 }
 // The agent's live TodoWrite list, broadcast the moment the tool executes (mid-turn) so the workspace
 // Tasks panel tracks real progress instead of waiting for the whole turn to settle into the transcript

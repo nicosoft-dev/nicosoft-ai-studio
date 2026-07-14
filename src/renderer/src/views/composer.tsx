@@ -678,7 +678,7 @@ export function Composer({
             ) : null}
             <ThinkingPicker family={b.family} model={b.model} depth={effectiveDepth} onChange={b.onDepth} disabled={!ready} />
             {agent ? <ModePicker value={mode} onChange={(m) => setMode(expert.id, m)} disabled={!ready} /> : null}
-            <ContextIndicator used={usedTokens} max={b.contextLength} />
+            <ContextIndicator used={usedTokens} max={b.contextLength} breakdown={activeConv ? chat.breakdown[activeConv] : undefined} />
           </div>
           <AttachmentStrip items={attach} onRemove={(id) => setAttach((p) => p.filter((a) => a.id !== id))} />
           {cmdOutput ? (

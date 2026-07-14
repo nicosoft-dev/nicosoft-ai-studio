@@ -5,15 +5,67 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 import { Icons } from '@/components/icons'
+import { fmtContextTokens } from '@/lib/format'
 import { useAnchoredMenu } from '@/lib/use-anchored-menu'
 import { useT } from '@/stores/locale'
+import type { ContextBreakdown, ContextPart } from '@/stores/chat'
 import { ContextRing, readContext } from '@/components/context-ring'
+
+// Shade per part. CC derives its ladder from hsl lightness (+6 per step); that cannot port — Studio's
+// tokens are oklch, whose L is PERCEPTUAL, so the three bases sit at wildly different heights and dark
+// --warning (L 0.78) would hit the ceiling at the very first step. Fading toward the background instead
+// keeps every base, theme and part-count separable, and it is what Studio's own --accent-soft/-softer
+// already do. Free space is the remainder rather than a part, so it takes the faintest neutral — matching
+// CC's actual intent, where Free space is the LARGEST slice yet drawn the palest: least important, least ink.
+const shadeFor = (id: ContextPart, i: number): string =>
+  id === 'free' ? 'var(--border-1)' : `color-mix(in oklab, var(--ctx-base) ${100 - 15 * i}%, transparent)`
+
+/* — ContextParts: the stacked bar + its legend. Parts arrive biggest-first, so the heaviest gets the
+     densest shade and the eye lands on what is actually filling the window. — */
+function ContextParts({ breakdown }: { breakdown: ContextBreakdown }): ReactElement | null {
+  const t = useT()
+  const label: Record<ContextPart, string> = {
+    system: t('conv.ctxSystem'),
+    memory: t('conv.ctxMemory'),
+    tools: t('conv.ctxTools'),
+    messages: t('conv.ctxMessages'),
+    free: t('conv.ctxFree'),
+  }
+  // Percentages are of the WINDOW, not of the sum of the parts: the track IS the window, so Free space is
+  // literally what's left of it and the widths need no normalising. A window of 0 makes that meaningless
+  // (and every width infinite) — draw nothing rather than a lie.
+  const max = breakdown.max
+  if (max <= 0) return null
+  const shown = breakdown.parts.filter((p) => p.tokens > 0)
+  return (
+    <>
+      {/* Says "estimated" because it IS: the tool kit's share can only be priced locally — count_tokens
+          rejects a body carrying it — so the parts are honest about not being a measurement. */}
+      <div className="ctx-bar-note">{t('conv.ctxEstimated')}</div>
+      <div className="ctx-bar" role="presentation">
+        {shown.map((p, i) => (
+          <span key={p.id} className="ctx-bar-seg" style={{ width: `${(p.tokens / max) * 100}%`, background: shadeFor(p.id, i) }} />
+        ))}
+      </div>
+      <ul className="ctx-legend">
+        {shown.map((p, i) => (
+          <li key={p.id} className="ctx-legend-row">
+            <span className="ctx-legend-dot" style={{ background: shadeFor(p.id, i) }} />
+            <span className="ctx-legend-name">{label[p.id]}</span>
+            <span className="ctx-legend-tok">{fmtContextTokens(p.tokens)}</span>
+            <span className="ctx-legend-pct">{((p.tokens / max) * 100).toFixed(1)}%</span>
+          </li>
+        ))}
+      </ul>
+    </>
+  )
+}
 
 /* — ContextIndicator: the composer's readout — the ring, and the panel it opens.
      Studio PUSHES its context size (count_tokens rides back with each turn into chat.contextTokens), so
      unlike CC — which pulls on hover/focus through react-query — there is nothing to refetch here and no
      throttle to build. The ring is always the context percentage; there is no plan-usage mode. — */
-export function ContextIndicator({ used, max }: { used: number; max: number }): ReactElement | null {
+export function ContextIndicator({ used, max, breakdown }: { used: number; max: number; breakdown?: ContextBreakdown }): ReactElement | null {
   const t = useT()
   const [open, setOpen] = useState(false)
   // Lives with the composer (so it outlasts a close/reopen) but is never written to storage — a panel this
@@ -83,6 +135,7 @@ export function ContextIndicator({ used, max }: { used: number; max: number }): 
                 {expanded ? (
                   <div className="ctx-pop-body">
                     <div className="ctx-pop-total">{summary}</div>
+                    {breakdown ? <ContextParts breakdown={breakdown} /> : null}
                   </div>
                 ) : null}
               </div>

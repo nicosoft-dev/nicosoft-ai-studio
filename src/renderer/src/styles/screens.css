@@ -332,6 +332,20 @@
 .ctx-pop-body { padding: 2px 8px 8px 26px; } /* 26px lines the body up with the title, past the caret */
 .ctx-pop-total { font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 
+/* the stacked bar: one row, segments proportional to the WINDOW (so the track IS the window and the
+   trailing Free space segment is literally what's left of it). */
+.ctx-bar-note { font-size: 10.5px; color: var(--text-4); font-style: italic; margin-top: 7px; }
+.ctx-bar { display: flex; height: 8px; margin: 5px 0 9px; border-radius: 4px; overflow: hidden; background: var(--border-1); }
+.ctx-bar-seg { height: 100%; }
+.ctx-bar-seg + .ctx-bar-seg { box-shadow: inset 1px 0 0 var(--bg-2); } /* hairline so adjacent shades stay countable */
+
+.ctx-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.ctx-legend-row { display: flex; align-items: center; gap: 7px; font-size: 11.5px; }
+.ctx-legend-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.ctx-legend-name { color: var(--text-3); }
+.ctx-legend-tok { margin-left: auto; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.ctx-legend-pct { width: 42px; text-align: right; color: var(--text-4); font-variant-numeric: tabular-nums; }
+
 /* attachment strip */
 .cmp-attach-strip { display: flex; flex-wrap: wrap; gap: 8px; padding: 11px 12px 0; }
 .cmp-att-img { position: relative; }

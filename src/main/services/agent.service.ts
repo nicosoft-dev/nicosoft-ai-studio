@@ -36,7 +36,7 @@ import * as compressionService from './compression.service'
 import { pickSmallModel } from './model-select'
 import { recallText } from './memory/project-map'
 import { indexText as agentMemoryIndexText } from './memory/agent-memory'
-import { countContext } from './token-count.service'
+import { countBreakdown, countContext } from './token-count.service'
 import { manager as skillManager } from './extensions/skill'
 import { DEV_ROLES, ENGINEER_ROLE_ID, PLAYWRIGHT_TOOLS, SERVICE_TOOLS, SUBAGENT_TOOLS, toolsForAgentRole } from './agent-tools'
 import { buildAgentSystem } from './agent-system'
@@ -186,6 +186,36 @@ export async function run(
   // Surface the prompt size to the UI BEFORE the loop's first turn streams — so the live readout shows
   // ↑ tokens during the initial thinking phase (and every between-turns gap), not only after onDone.
   cb.onUsage?.(promptTokens)
+
+  // What that prompt is MADE OF, for the composer's Context window panel — resolved by differencing four
+  // more probes (see countBreakdown). Strictly a SIDE ROAD: fire-and-forget, after onUsage, never awaited.
+  // The count above blocks in front of every turn and drives the compression threshold as well as the
+  // readout, so making the panel's extra probes wait in that queue would add a round trip to the start of
+  // every single turn. Free (count_tokens is not billed) is not the same as free of latency.
+  // Its own failure is silent by design: the panel is an aid, and a probe that 500s must not touch the run.
+  // No known window → no panel to fill (the indicator hides itself too), so don't probe at all.
+  if (cb.onBreakdown && input.contextWindow) {
+    const contextWindow = input.contextWindow
+    // Everything, INCLUDING the shadow system build, happens inside the async boundary. buildAgentSystem is
+    // NOT pure — it reads the project's convention files off disk — so calling it out here would put that
+    // synchronous I/O back on the turn's critical path, and let a transient throw take the run down with it.
+    // `announce: false` is the other half: reading those files is what fires the user's InstructionsLoaded
+    // hook, and a build that exists only to be counted must not pose as a real load (it would run the hook
+    // twice per turn, with a payload identical to the genuine one).
+    void (async () => {
+      // The same system prompt minus ONLY the recalled memories + the memory index — the project map stays
+      // in (it is part of the prompt proper, not auto-memory).
+      const systemNoMemory = buildAgentSystem(roleId, [], summary?.content ?? null, skillManager.listingForRole(roleId), input.cwd, false, projectMapText, undefined, false)
+      const b = await countBreakdown(
+        protocol,
+        // NOTE: no smallModel — deliberately. The L2 fallback is a REAL max_tokens:1 request, i.e. billed;
+        // spending four of those per turn to shade a panel is indefensible. Probes take free L1 only.
+        { baseUrl: ep.baseUrl, apiKey: key, model: input.model, system, messages: seed as { role: string; content: unknown }[], tools: toolSchemas, thinkingBudget: input.thinking?.budgetTokens },
+        { systemNoMemory, total: promptTokens, max: contextWindow },
+      )
+      if (b) cb.onBreakdown?.(b)
+    })().catch(() => {})
+  }
 
   const loopRes = await runAgentLoop(
     {

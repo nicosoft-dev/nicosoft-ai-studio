@@ -4,6 +4,9 @@ import type { ThinkingParam } from '@/lib/thinking'
 import type { AgentMode } from '@/lib/agent-mode'
 
 export type ConversationDto = Awaited<ReturnType<typeof window.api.conversations.list>>[number]
+// Derived off the preload surface, like the DTO above — the renderer never reaches into main for a type.
+export type ContextBreakdown = Parameters<Parameters<typeof window.api.onConvBreakdown>[0]>[0]['breakdown']
+export type ContextPart = ContextBreakdown['parts'][number]['id']
 
 export interface ToolCall {
   id: string
@@ -150,6 +153,7 @@ export interface ChatState {
   question: Record<string, QuestionPrompt | null> // per-conversation AskUserQuestion prompt
   approvals: Record<string, ApprovalCard[]> // per-conversation coordinator approval cards (yellow notes + red pending)
   contextTokens: Record<string, number> // per-conversation CURRENT context size (count_tokens of the last sent turn) — drives the composer "/ window" indicator
+  breakdown: Record<string, ContextBreakdown> // per-conversation prompt composition — fills the composer's Context window panel; absent until the off-path probes land (and on paths that don't compute it)
   liveInput: Record<string, number> // per-conversation REAL input tokens of the in-flight request (full prompt incl cache), streamed live (↑ readout) — overwritten by streaming pings; NOT accumulated
   liveOutput: Record<string, number> // per-conversation REAL output tokens, streamed live during a turn (↓ readout) — overwritten by streaming pings; NOT accumulated
   liveCached: Record<string, number> // per-conversation cache-read share of liveInput — the cache-aware ↑ split renders fresh = liveInput − liveCached as the main number, cached as a "(+N cached)" note

@@ -51,6 +51,87 @@ export async function countContext(protocol: Protocol, input: AnthropicCountInpu
   return roughCount(input)
 }
 
+// What the prompt is MADE OF, for the composer's Context window panel. Stable ids, not labels — the
+// renderer owns the wording (and its five translations).
+export type ContextPart = 'system' | 'memory' | 'tools' | 'messages' | 'free'
+export interface ContextBreakdown {
+  parts: { id: ContextPart; tokens: number }[] // descending by tokens, 'free' always last
+  total: number // T_all — the measured prompt (what the ring reads)
+  max: number // the window
+}
+
+// Resolve the prompt into its parts. No API itemises a prompt, so each part is a DIFFERENCE between two
+// nested TOOL-FREE prefixes, plus a locally-priced tool figure:
+//
+//   T_base   = ()               → protocol overhead + the dummy turn bodyFor() injects
+//   T_sysMin = (system−memory)  → System prompt  = T_sysMin − T_base
+//   T_sys    = (system)         → auto-memory    = T_sys    − T_sysMin
+//   T_msgs   = (messages)       → Messages       = T_msgs   − T_base
+//                               → System tools   = roughToolTokens (see below)
+//
+// T_base MUST be subtracted: an empty-messages body still carries a dummy user turn (see bodyFor), which
+// would otherwise inflate every part by ~8 tokens. Differencing cancels it.
+//
+// ⚠️ THE SUBTRAHENDS MUST SHARE A TIER, or the subtraction is meaningless. countContext is TIERED (exact
+// count_tokens → billed small-model probe → local estimate) and the tiers disagree by large factors. An
+// earlier cut differenced tool-BEARING prefixes and mixed tiers — count_tokens 400s on a body carrying the
+// tool kit, so those probes fell to the estimate while the total came from a probe — producing parts that
+// summed to 46.5K against a 30.4K total, a bar overflowing to 101.6%. Hence: every networked probe here is
+// tool-free (they all reach L1), tools never join a subtraction, and the monotonic guard rejects the whole
+// breakdown if a probe still fell through. A confidently wrong picture of the prompt is worse than none.
+//
+// Deliberately NO smallModel: that tier is a REAL max_tokens:1 request, i.e. billed. A shading aid must
+// never cost money. (Claude Code makes the opposite call — its fallback IS a billed haiku probe. It also
+// counts each section independently rather than by differencing, for the same reason tools are split out
+// here: independent counts tolerate a tier the differences cannot. Its panel says "Estimated usage by
+// category" for exactly this reason, and so does ours.)
+//
+// Cost: 4 free probes, memoised on (model+system+messages+tools) — T_base/T_sysMin never change within a
+// conversation, so steady state is 0–2 real round trips. For openai/gemini it is pure CPU.
+//
+// CALLERS: never await this in front of a turn — see the fire-and-forget note at its call site.
+export async function countBreakdown(
+  protocol: Protocol,
+  input: AnthropicCountInput, // the FULL body, exactly as passed to countContext
+  opts: { systemNoMemory: string; total: number; max: number }
+): Promise<ContextBreakdown | null> {
+  // Every probe here is TOOL-FREE and shares one config, so they all land on the same tier and their
+  // differences are meaningful. Tools are priced separately, below, precisely because they cannot join.
+  const probe = (system: string | undefined, messages: AnthropicCountInput['messages']): Promise<number> =>
+    countContext(protocol, { ...input, system, tools: undefined, messages, smallModel: undefined })
+  const [tBase, tSysMin, tSys, tMsgs] = await Promise.all([
+    probe(undefined, []),
+    probe(opts.systemNoMemory, []),
+    probe(input.system, []),
+    probe(undefined, input.messages),
+  ])
+  // Same tier ⇒ monotonic. If not, a probe failed or fell through and the differences are noise.
+  if (!(tBase <= tSysMin && tSysMin <= tSys) || tMsgs < tBase) return null
+  const system = tSysMin - tBase
+  const memory = tSys - tSysMin
+  const messages = tMsgs - tBase
+  // Tools are the RESIDUAL, not an estimate. They are the one part no probe can price — count_tokens 400s
+  // on any body carrying the kit — but the caller's `total` already measured the whole prompt INCLUDING
+  // them, so whatever it holds beyond the three parts above IS the tool cost. This beats estimating them
+  // locally in every way: dense-JSON/2 overpriced the kit by ~1.8x, which rendered "System tools" LARGER
+  // than the total printed one line above it, and let the parts outgrow the window. As the residual it
+  // cannot exceed the total by construction, and it silently absorbs any tier gap between `total` and the
+  // probes rather than letting that gap corrupt a measured part.
+  const tools = opts.total - system - memory - messages
+  if (tools < 0) return null // parts already exceed the measured prompt → the numbers aren't comparable
+  const parts: { id: ContextPart; tokens: number }[] = [
+    { id: 'system', tokens: system },
+    { id: 'memory', tokens: memory },
+    { id: 'tools', tokens: tools },
+    { id: 'messages', tokens: messages },
+  ]
+  parts.sort((a, b) => b.tokens - a.tokens) // biggest first: the panel gives the densest shade to the heaviest
+  // Anchored on the same total, so the five always span exactly the window: parts sum to total, and free is
+  // the rest of it.
+  parts.push({ id: 'free', tokens: Math.max(0, opts.max - opts.total) }) // always last — the remainder, not a part
+  return { parts, total: opts.total, max: opts.max }
+}
+
 // L1 — the real endpoint. Free, not billed, supports system+messages+tools+thinking (verified live).
 async function viaCountTokensApi(input: AnthropicCountInput): Promise<number | null> {
   try {

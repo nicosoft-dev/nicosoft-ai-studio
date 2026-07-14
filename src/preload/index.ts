@@ -12,6 +12,7 @@ import type {
   AgentRunInput,
   AgentResumeStream,
   ConvUsage,
+  ConvBreakdown,
   ConvCard,
   ConvImage,
   ConvTodos,
@@ -158,6 +159,10 @@ const api = {
   // Live per-conversation usage (real ↑ input), broadcast by EVERY path (chat / agent / coordinator / image)
   // so the working readout shows tokens uniformly no matter which one is running.
   onConvUsage: (cb: (d: ConvUsage) => void): (() => void) => agentListen('conv:usage', cb),
+
+  // What the current prompt is made of → the composer's Context window panel. Its own channel: computed
+  // off the hot path, so it trails the usage ping above rather than riding with it.
+  onConvBreakdown: (cb: (d: ConvBreakdown) => void): (() => void) => agentListen('conv:breakdown', cb),
 
   // Live per-conversation generated images: an agent tool produced an image (persisted nsai-media:// ref),
   // broadcast so the renderer attaches it to the in-flight assistant bubble without base64 crossing IPC.

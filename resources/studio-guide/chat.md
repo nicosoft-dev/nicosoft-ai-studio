@@ -14,7 +14,8 @@ The main surface: talk to one expert (solo) or to Danny (the coordinator, who ro
 - **Images**: paste, drag-and-drop, or the "Attach image" button (images only — other file types go through the working folder instead).
 - **Folder**: the path bar picks a working directory, enabling Files / Diff / Terminal / Preview for this conversation (see Workspace).
 - **Pickers** under the input: model, thinking depth (when the model supports it), permission Mode (Ask / Plan / Auto), and — for Georgia — an image model picker.
-- **Context ring**: a small ring at the right of the pickers fills as the context window does. Hover it for the exact reading (e.g. `45.2K / 200K (23%)`), or click it to open the Context window panel. It is accent-coloured until 75%, amber from 75%, and red from 90% — use `/compact` once it turns.
+- **Context ring**: a small ring at the right of the pickers fills as the context window does. Hover it for the exact reading (e.g. `45.2K / 200K (23%)`). It is accent-coloured until 75%, amber from 75%, and red from 90% — use `/compact` once it turns.
+- **Context window panel**: click the ring to see what the prompt is made of — System prompt, Auto-memory, System tools, Messages and Free space, as a stacked bar plus a legend with tokens and percentages. It is labelled "Estimated usage by category" because it is: the system prompt, memory and messages are measured exactly, but the tool kit's share can only be estimated. The panel appears once a turn has run (agent roles), and is hidden briefly after `/compact` until the next turn re-measures.
 
 ## Slash commands
 

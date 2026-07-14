@@ -1,7 +1,7 @@
 import { ipcMain, type WebContents } from 'electron'
 import { ulid } from '../db/id'
 import { LlmError } from '../llm/types'
-import { broadcastConvImage, broadcastConvTodos, broadcastUsage } from './usage-broadcast'
+import { broadcastBreakdown, broadcastConvImage, broadcastConvTodos, broadcastUsage } from './usage-broadcast'
 import { StreamRegistry } from './stream-lifecycle'
 import { CoalescerGroup } from './stream-coalesce'
 import { PermissionBridge } from './permission-bridge'
@@ -170,6 +170,7 @@ export function startAgentRun(input: AgentRunInput, sender: WebContents, opts?: 
           // The up-front per-turn count is the CURRENT context (count_tokens of what's being sent) → drives
           // the composer's "/ window" indicator.
           onUsage: (inputTokens) => broadcastUsage(sender, input.convId, 'context', inputTokens),
+          onBreakdown: (b) => broadcastBreakdown(sender, input.convId, b),
           onTodos: (roleId, todos) => {
             broadcastConvTodos(sender, input.convId, roleId, todos)
             workspaceTasks.recordTodos(input.convId, roleId, todos) // Tasks-history phase capture (design §5 P30) — same seam as the live push

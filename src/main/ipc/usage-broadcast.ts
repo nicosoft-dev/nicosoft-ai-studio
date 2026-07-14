@@ -9,7 +9,7 @@
 // convId, so we skip the streamId→conv indirection the done events use.
 import { BrowserWindow } from 'electron'
 import type { WebContents } from 'electron'
-import type { ConvCard, ConvTodos, ConvUsage, MessageAttachmentDto, MessageDto } from './contracts'
+import type { ContextBreakdown, ConvBreakdown, ConvCard, ConvTodos, ConvUsage, MessageAttachmentDto, MessageDto } from './contracts'
 
 export function broadcastUsage(
   sender: WebContents,
@@ -33,6 +33,15 @@ export function broadcastUsage(
   if (cacheCreationInputTokens !== undefined) ev.cacheCreationInputTokens = cacheCreationInputTokens
   if (roleId !== undefined) ev.roleId = roleId
   sender.send('conv:usage', ev)
+}
+
+// What the current prompt is made of → the composer's Context window panel. Separate from broadcastUsage
+// because it is computed OFF the hot path: the 'context' ping must reach the readout the moment the turn
+// starts, while this lands a beat later, whenever the differencing probes settle.
+export function broadcastBreakdown(sender: WebContents, convId: string, breakdown: ContextBreakdown): void {
+  if (sender.isDestroyed()) return
+  const ev: ConvBreakdown = { convId, breakdown }
+  sender.send('conv:breakdown', ev)
 }
 
 // An agent tool generated an image (already persisted to the media store) — broadcast its nsai-media:// ref,

@@ -141,7 +141,11 @@ function emitInstructionsLoaded(cwd: string, filePath: string): void {
   })()
 }
 
-function readProjectConventions(cwd: string | undefined): string | null {
+// `announce` distinguishes the REAL build of a turn's prompt from a shadow build made only to measure it.
+// Reading a convention file is what fires the user's InstructionsLoaded hook — an arbitrary command — so a
+// caller that is merely counting tokens must not fire it: the hook would run twice per turn with identical
+// payloads, indistinguishable from two genuine loads.
+function readProjectConventions(cwd: string | undefined, announce: boolean): string | null {
   if (!cwd) return null
   const parts: string[] = []
   for (const rel of CONVENTION_FILES) {
@@ -150,7 +154,7 @@ function readProjectConventions(cwd: string | undefined): string | null {
     try {
       const body = readFileSync(p, 'utf8').trim()
       if (body) {
-        emitInstructionsLoaded(cwd, p)
+        if (announce) emitInstructionsLoaded(cwd, p)
         parts.push(`--- ${rel} ---\n${body}`)
       }
     } catch {
@@ -185,6 +189,10 @@ export function buildAgentSystem(
   collab = false,
   projectMap?: string,
   memoryIndex?: string,
+  // FALSE = this build is a shadow: it exists only to be token-counted, so it must not announce that the
+  // project's instructions were loaded (that fires the user's InstructionsLoaded hook). Defaults to a real
+  // build so every existing caller keeps its behaviour.
+  announce = true,
 ): string {
   // toolless:false — this is the agent-loop path (the role really has a tool kit), so buildRolePrompt must
   // NOT prepend the "no tools to call" chat-mode note. TOOL_AWARENESS below tells non-dev roles they can act.
@@ -214,7 +222,7 @@ export function buildAgentSystem(
     const customWrite = rolesService.getCustom(roleId)?.tools.includes('write') ?? false
     parts.push(customWrite ? CUSTOM_WRITE_SCOPE : TOOL_AWARENESS_IRON_RULE)
   }
-  const conventions = readProjectConventions(cwd)
+  const conventions = readProjectConventions(cwd, announce)
   if (conventions) {
     parts.push(
       '# PROJECT CONVENTIONS (reference)\n' +
