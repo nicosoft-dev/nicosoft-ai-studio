@@ -234,6 +234,16 @@ export interface DrainedRun {
   contextTokens: number // LAST turn's prompt = current context size → display ↑ (overwrite semantics)
   cacheReadTokens: number // cache-read share of the LAST turn's prompt → "(+N cached)"
   outTokens: number
+  // FIRST turn's prompt — the run's starting context, measured by the server. This is the SAME quantity
+  // countContext predicts up front (system + tools + the seed built from the messages table), so the two are
+  // directly comparable: firstContext is the truth that prediction was aiming at. It is deliberately NOT
+  // contextTokens: by the last turn the prompt has grown by a run's worth of tool traffic, and that traffic
+  // is transient — it lives in the session transcript, never in the messages table, so it is gone from the
+  // next run's seed. Only the first turn measures what actually persists.
+  // 0 means "no figure worth having", and the caller MUST treat it as such rather than as a small context.
+  // Two ways to get it: the run produced no usage at all, and — the subtle one — the loop compacted its own
+  // message array before the first send (see the guard at the assignment). Both are "we cannot say".
+  firstContext: number
   toolCalls: { total: number; errors: number; byName: Record<string, number> }
   toolImages: MessageAttachmentDto[]
 }
@@ -260,6 +270,16 @@ export async function drainAgentRun(opts: {
   let lastContext = 0 // current context size = LAST turn's prompt (display ↑). OVERWRITE, never accumulate — accumulating ANY per-turn input (fresh/non-cached/total) re-counts history N× and balloons on long runs (engineer hit 5.3M).
   let lastCacheRead = 0 // cache-read share of the LAST turn's prompt (display "(+N cached)"). OVERWRITE alongside lastContext so fresh = lastContext − lastCacheRead pairs with the same turn.
   let outTokens = 0
+  let firstContext = 0 // FIRST turn's prompt = the run's starting context, server-measured (see DrainedRun). WRITE-ONCE.
+  // The loop compacts its OWN message array — proactively above autocompactThreshold(window), and reactively
+  // on an overflow 413 — and that fold is purely in-memory: agent/compact.ts touches no repo, so no summary row
+  // is written and the messages table is untouched. If it fires before the first send, the first turn's prompt
+  // is the FOLDED one and no longer measures the seed we built from the DB. Nothing downstream can detect this
+  // after the fact — the conversation's summary boundary is exactly as it was — so it has to be caught here.
+  // It is not a corner case: the loop's threshold is window−33000 while the chat layer's fold is at 90% of the
+  // window, and window−33000 < 0.9·window for every window under 330K, so there is a band that every long
+  // conversation crosses where the loop folds on turn 1 of every run and the chat layer never does.
+  let foldedBeforeFirstTurn = false
   const toolImages: MessageAttachmentDto[] = [] // images any tool produced this run → assistant-message attachments
   const toolNames = new Map<string, string>() // tool_use id → name, to pair tool:post with its tool
   const gitBashIds = new Set<string>() // tool_use ids of git-MUTATING Bash calls → invalidate+push on their result
@@ -276,11 +296,22 @@ export async function drainAgentRun(opts: {
       break
     }
     let emitted: AgentEvent = value
+    // Any fold that lands before the first assistant turn rewrote the very prompt that turn is about to
+    // measure. Both kinds count: 'auto' replaces the transcript with a summary, 'micro' truncates old tool
+    // results — either way what the server prices is no longer the seed. `phase:'start'` is the same fold
+    // announcing itself, so it disqualifies just as much as the settled event.
+    if (value.type === 'compaction' && !firstContext) foldedBeforeFirstTurn = true
     if (value.type === 'assistant') {
       inTokens += promptTokensFromUsage(value.usage) // total incl. cache → billing
       lastContext = promptTokensFromUsage(value.usage) // current context size = this (latest) turn's full prompt incl. cache. OVERWRITE: the last turn's prompt IS the conversation context — cache- AND length-invariant.
       lastCacheRead = value.usage.cacheReadTokens ?? 0 // cache-read share of THIS turn's prompt, paired with lastContext
       outTokens += value.usage.outTokens
+      // WRITE-ONCE, so it keeps the FIRST turn even on a long tool-using run — that is the whole point (the
+      // later turns measure transient tool traffic). `!firstContext` and not a turn counter: a 0-token prompt
+      // is not a thing the server reports, so "still 0" is exactly "no turn seen yet".
+      // Left at 0 when the loop folded first: that prompt is the loop's own rewrite, not the seed, and calling
+      // it the run's starting context would understate the real one by the whole fold.
+      if (!firstContext && !foldedBeforeFirstTurn) firstContext = promptTokensFromUsage(value.usage)
       opts.onUsage?.(promptTokensFromUsage(value.usage)) // live ↑ readout: this turn's prompt size (current context, last)
       for (const b of value.message.content) {
         if (isContentBlock(b) && b.type === 'tool_use') {
@@ -332,14 +363,14 @@ export async function drainAgentRun(opts: {
     log({ t: 'event', runId, event: emitted })
     opts.onEvent(emitted)
   }
-  return { result, inTokens, contextTokens: lastContext, cacheReadTokens: lastCacheRead, outTokens, toolCalls, toolImages }
+  return { result, inTokens, contextTokens: lastContext, cacheReadTokens: lastCacheRead, outTokens, firstContext, toolCalls, toolImages }
 }
 
 export async function runAgentLoop(
   loop: AgentLoopInput,
   cb: AgentCallbacks,
   signal: AbortSignal,
-): Promise<{ text: string; inTokens: number; contextTokens: number; cacheReadTokens: number; outTokens: number; reason: AgentResult['reason']; turns: number; attachments: MessageAttachmentDto[]; writtenFiles: WrittenFile[] }> {
+): Promise<{ text: string; inTokens: number; contextTokens: number; cacheReadTokens: number; outTokens: number; firstContext: number; reason: AgentResult['reason']; turns: number; attachments: MessageAttachmentDto[]; writtenFiles: WrittenFile[] }> {
   const sessionDir = join(dataDir(), 'sessions', loop.convId)
   await mkdir(join(sessionDir, 'tool-results'), { recursive: true })
   // No project folder selected (Flynn/Shuri can chat folder-free) → fall back to a per-conversation scratch
@@ -602,6 +633,7 @@ export async function runAgentLoop(
     contextTokens: drained.contextTokens,
     cacheReadTokens: drained.cacheReadTokens,
     outTokens: drained.outTokens,
+    firstContext: drained.firstContext,
     reason: result.reason,
     turns: result.turns,
     attachments: drained.toolImages,
@@ -769,13 +801,21 @@ export async function runDispatchedAgent(
 
 // Persisted conversation messages → agent seed. Assistant turns are prior runs' FINAL replies (plain
 // text — tool steps were never persisted); user turns carry text + any image attachments.
+// Replayable images across a history — the input to the elision decision below. Exported because the context
+// anchor has to know when this crosses MAX_REPLAY_IMAGES: past the cap a new image EVICTS the oldest instead
+// of adding to the prompt, and an anchor that can't see the eviction drifts by an image each time.
+export function countReplayImages(messages: convRepo.MessageRow[]): number {
+  let total = 0
+  for (const m of messages) if (m.author === 'user') for (const a of m.attachments as { url?: string }[]) if (typeof a.url === 'string') total++
+  return total
+}
+
 export function conversationToAgentMessages(messages: convRepo.MessageRow[]): AgentMessage[] {
   // Request-body size guard: the seed is re-sent on EVERY turn, so a long image-heavy conversation re-uploads
   // every image each time and the body crosses the gateway's limit (400 "failed to read request body"). Replay
   // only the MOST RECENT MAX_REPLAY_IMAGES across the whole history (older images are elided from the LLM
   // payload — their text stays); each kept image is right-sized (resolveImageForLlm: long edge ≤2048, ≤2MB).
-  let totalImages = 0
-  for (const m of messages) if (m.author === 'user') for (const a of m.attachments as { url?: string }[]) if (typeof a.url === 'string') totalImages++
+  const totalImages = countReplayImages(messages)
   const keepFrom = Math.max(0, totalImages - MAX_REPLAY_IMAGES)
   let imgIdx = 0
   let elided = 0

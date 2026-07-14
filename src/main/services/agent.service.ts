@@ -36,11 +36,13 @@ import * as compressionService from './compression.service'
 import { pickSmallModel } from './model-select'
 import { recallText } from './memory/project-map'
 import { indexText as agentMemoryIndexText } from './memory/agent-memory'
-import { countBreakdown, countContext } from './token-count.service'
+import { countBreakdown, countContext, roughMessageTokens } from './token-count.service'
+import * as contextAnchor from './context-anchor'
+import { MAX_REPLAY_IMAGES } from '../media/storage'
 import { manager as skillManager } from './extensions/skill'
 import { DEV_ROLES, ENGINEER_ROLE_ID, PLAYWRIGHT_TOOLS, SERVICE_TOOLS, SUBAGENT_TOOLS, toolsForAgentRole } from './agent-tools'
 import { buildAgentSystem } from './agent-system'
-import { conversationToAgentMessages, runAgentLoop, type AgentCallbacks } from './agent-dispatch'
+import { conversationToAgentMessages, countReplayImages, runAgentLoop, type AgentCallbacks } from './agent-dispatch'
 import type { AgentContext } from '../agent/context'
 import { runHooks } from '../agent/hooks/engine'
 import { hookRegistry } from '../agent/hooks/registry'
@@ -151,6 +153,14 @@ export async function run(
   const mapped = conversationToAgentMessages(recent)
   const firstUser = mapped.findIndex((m) => m.role === 'user')
   let seed = firstUser > 0 ? mapped.slice(firstUser) : mapped
+  // The context anchor's whole contract is that the seed IS `recent` rendered — it prices `recent` up to a
+  // watermark and the next turn adds what came after. Both branches below append content that was never
+  // persisted, so the seed stops corresponding to any message id and the correspondence breaks in both
+  // directions: reading would miss the extra turn's cost, and recording would fold it into a price we then
+  // attribute to `recent` alone and re-add forever. Neither is worth a special case — count for real instead.
+  // (The leading-assistant slice just above is harmless by contrast: it only drops from the FRONT, before any
+  // watermark, and the server's price already reflects the drop.)
+  let seedIsRecent = true
   if (opts?.resumeNote != null) {
     // 批C2b resume: deliver the completion note as the trailing user turn (in-memory only — not persisted). The
     // parked turn USUALLY left an assistant reply ("launched X, awaiting…"), so history ends on assistant and we
@@ -163,26 +173,54 @@ export async function run(
     } else {
       seed = [...seed, { role: 'user', content: [{ type: 'text', text: opts.resumeNote }] }]
     }
+    seedIsRecent = false
   } else if (seed.length && seed[seed.length - 1].role === 'assistant') {
     // Claude-OAuth-routed upstreams reject assistant prefill ("the conversation must end with a user message"); the
     // native API tolerates it. History normally ends on the just-persisted user prompt, but guard the invariant here
     // too so a persistence-order change can't reintroduce a routed 400.
     seed = [...seed, { role: 'user', content: [{ type: 'text', text: submittedPrompt }] }]
+    seedIsRecent = false
   }
 
-  // Exact prompt tokens for this turn (system + seed + tool schemas) — free via count_tokens, falls
-  // back to a small-model probe then chars/4. Drives the composer readout + the compression threshold.
+  // This run's starting context (system + seed + tool schemas). Drives the composer readout + the panel.
+  // PREFER THE SERVER'S OWN PRICE. Every turn of this conversation was already priced by the server, and the
+  // last one's figure is in the anchor — so all that is left to estimate is what got appended since, which is
+  // the reply and the new user turn. Counting the whole payload instead is re-deriving a known number, and
+  // measurement says both ways of doing that are wrong by a constant that lives entirely in the tools term:
+  // openai +105% (roughCount prices schemas at chars/2), anthropic −1837 every single time (count_tokens is
+  // sent the kit with its server tools stripped, and nothing prices them back). See context-anchor.ts.
+  // No anchor — first turn here, or an app restart, or the history was rewritten — is the cold start, and only
+  // then do we count for real.
   const toolSchemas = buildToolsParam(tools, input.model)
-  const promptTokens = await countContext(protocol, {
-    baseUrl: ep.baseUrl,
-    apiKey: key,
-    model: input.model,
-    system,
-    messages: seed as { role: string; content: unknown }[],
-    tools: toolSchemas,
-    thinkingBudget: input.thinking?.budgetTokens,
-    smallModel: pickSmallModel(protocol, ep.availableModels, input.model)
-  })
+  const toolsFp = contextAnchor.fingerprint(toolSchemas)
+  const anchored = seedIsRecent
+    ? contextAnchor.read(convId, roleId, {
+        model: input.model,
+        toolsFp,
+        coveredUpTo: summary?.coveredUpTo,
+        msgIds: recent.map((m) => m.id),
+        images: countReplayImages(recent),
+        maxImages: MAX_REPLAY_IMAGES,
+      })
+    : null
+  // Render the tail through the REAL seed mapping rather than re-deriving it per message: image replay is a
+  // whole-list decision, so a hand-rolled per-message estimate would diverge from what actually gets sent.
+  const promptTokens = anchored
+    ? contextAnchor.combine(
+        anchored,
+        conversationToAgentMessages(recent.filter((m) => m.id > anchored.upToMsgId)).reduce((sum, m) => sum + roughMessageTokens(m.content), 0),
+        system.length,
+      )
+    : await countContext(protocol, {
+        baseUrl: ep.baseUrl,
+        apiKey: key,
+        model: input.model,
+        system,
+        messages: seed as { role: string; content: unknown }[],
+        tools: toolSchemas,
+        thinkingBudget: input.thinking?.budgetTokens,
+        smallModel: pickSmallModel(protocol, ep.availableModels, input.model)
+      })
   // Surface the prompt size to the UI BEFORE the loop's first turn streams — so the live readout shows
   // ↑ tokens during the initial thinking phase (and every between-turns gap), not only after onDone.
   cb.onUsage?.(promptTokens)
@@ -279,12 +317,56 @@ export async function run(
     outTokens: loopRes.outTokens,
   })
 
+  // The server just priced this exact seed — keep the figure so the next turn adds to it instead of counting
+  // the whole payload again. Written AFTER the loop and only on a real observation: an errored or aborted run
+  // has no usage to anchor on, and a stale anchor is worse than none. `recent` ends on the user turn that
+  // started this run (it was appended above, before the read) — everything after that id is the next tail.
+  // Deliberately firstContext and not contextTokens: the last turn's prompt has a run's worth of tool traffic
+  // in it, and that traffic never reaches the messages table, so it will not be in the next seed.
+  if (loopRes.firstContext > 0 && recent.length && seedIsRecent) {
+    contextAnchor.record(convId, roleId, {
+      tokens: loopRes.firstContext,
+      upToMsgId: recent[recent.length - 1].id,
+      model: input.model,
+      toolsFp,
+      systemLen: system.length,
+      images: countReplayImages(recent),
+      coveredUpTo: summary?.coveredUpTo ?? null,
+    })
+  }
+
+  // Prediction vs truth, on the one seam where both exist: promptTokens is what the counter said this run's
+  // starting context would be, firstContext is what the server measured it as. Same quantity, so the gap is
+  // the counter's error and nothing else. Diagnostic only — never gates anything.
+  if (process.env.NSAI_TOKEN_DIAG && loopRes.firstContext > 0) {
+    const err = ((promptTokens - loopRes.firstContext) / loopRes.firstContext) * 100
+    console.log(
+      `[token-diag] protocol=${protocol} model=${input.model} src=${anchored ? 'anchor' : 'count'} predicted=${promptTokens} observed=${loopRes.firstContext} err=${err >= 0 ? '+' : ''}${err.toFixed(1)}% tools=${toolSchemas?.length ?? 0} peak=${loopRes.contextTokens}`,
+    )
+  }
+
   // ⑥ chat-layer side effects, fire-and-forget so they don't delay the run's completion (mirrors the
   //    plain-chat onDone path: memory extraction cadence + compression check). contextWindow is passed
   //    explicitly because the role's model may not be in the endpoint's availableModels catalog.
   //    B6/#8: chained (not concurrent) so the post-turn extraction runs BEFORE the compaction check —
   //    compaction's STEP 0 extraction otherwise races onTurn on the same CAS lock and could fold before
   //    memory is captured. Still fire-and-forget overall; the run's completion isn't delayed.
+  // The gate runs AFTER the loop, so the server has already priced this conversation and there is nothing left
+  // to predict: firstContext is the run's starting context as measured, and the reply just landed on top of
+  // it. Their sum is the context the NEXT run opens with, which is what the gate decides on. This is the same
+  // anchor + tail the read path uses, with the tail being the one message this run appended.
+  // It is deliberately NOT contextTokens (the last turn's prompt): that has a run's worth of tool traffic baked
+  // in, and tool traffic never reaches the messages table, so feeding the peak here would fold conversations
+  // nowhere near the window. And it prices the reply by its TEXT, not by usage.outTokens: output tokens include
+  // extended thinking, which is billed but never persisted — charging the gate for thinking would fold early
+  // for reasons the next prompt will not contain. Rendering the text the same way the seed will is the point.
+  // promptTokens stays the fallback for a run with no usable measurement — errored, aborted, or folded by the
+  // loop before its first send. Until now it was the ONLY input, which is what made openai fold early:
+  // roughCount prices tool schemas at chars/2, so the gate was handed a doubled prompt every single turn.
+  const measuredContext =
+    loopRes.firstContext > 0
+      ? loopRes.firstContext + roughMessageTokens([{ type: 'text', text: loopRes.text }])
+      : promptTokens
   void memoryService
     .onTurn({ convId, roleId, endpointId: input.endpointId, model: input.model })
     .catch(() => {})
@@ -295,7 +377,7 @@ export async function run(
         endpointId: input.endpointId,
         model: input.model,
         contextWindow: input.contextWindow,
-        currentTokens: promptTokens,
+        currentTokens: measuredContext,
       })
     )
     .catch(() => {})

@@ -110,11 +110,15 @@ export async function countBreakdown(
   const messages = tMsgs - tBase
   // Tools are the RESIDUAL: the caller's `total` measured the whole prompt including them, so whatever it
   // holds beyond the three measured parts IS the tool cost. Pricing them locally instead (dense-JSON/2)
-  // overpriced the kit ~1.8x and rendered "System tools" LARGER than the total one line above it. As a
+  // overpriced the kit ~2.05x and rendered "System tools" LARGER than the total one line above it. As a
   // residual it cannot exceed the total by construction, and it absorbs any gap between `total` and the
-  // probes rather than letting that gap corrupt a measured part. Note it inherits whatever `total` is: an
-  // exact count of the body count_tokens was ASKED about, which toolsForCounting narrowed — so server
-  // tools land here as a small under-count, not as a wrong measured part.
+  // probes rather than letting that gap corrupt a measured part.
+  // It inherits whatever `total` is, and `total` is now normally the ServerObserved anchor (context-anchor.ts)
+  // — the price the API itself put on this exact prompt. That is a FINER tier than these probes, and the
+  // direction matters: the residual shrinks toward the truth instead of overflowing. It also closes the
+  // server-tool hole this comment used to describe, because the server counted the whole kit, including the
+  // tools toolsForCounting has to strip before count_tokens will accept the body — measured at a dead-constant
+  // −1837 tokens on opus-4-8, three turns running, before the anchor landed.
   const tools = opts.total - system - memory - messages
   if (tools < 0) return null // parts already exceed the measured prompt → the numbers aren't comparable
   const parts: { id: ContextPart; tokens: number }[] = [
@@ -227,6 +231,14 @@ function roughCount(input: AnthropicCountInput): number {
   for (const m of input.messages) t += roughContent(m.content)
   if (input.tools?.length) t += Math.ceil(JSON.stringify(input.tools).length / 2)
   return t
+}
+
+// One message's rough cost, for the context anchor's tail. Deliberately the SAME roughContent the full
+// estimate uses: the anchor replaces a whole-payload count with anchor + tail, and a tail measured by some
+// other estimator would swap a known bias for an unknown one. Tools/system are none of its business — the
+// anchor already carries the server's price for those.
+export function roughMessageTokens(content: unknown): number {
+  return roughContent(content)
 }
 
 function roughContent(content: unknown): number {
