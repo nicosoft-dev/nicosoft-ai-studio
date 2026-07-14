@@ -11,17 +11,28 @@ import { useT } from '@/stores/locale'
 import type { ContextBreakdown, ContextPart } from '@/stores/chat'
 import { ContextRing, readContext } from '@/components/context-ring'
 
-// Shade per part. CC derives its ladder from hsl lightness (+6 per step); that cannot port — Studio's
-// tokens are oklch, whose L is PERCEPTUAL, so the three bases sit at wildly different heights and dark
-// --warning (L 0.78) would hit the ceiling at the very first step. Fading toward the background instead
-// keeps every base, theme and part-count separable, and it is what Studio's own --accent-soft/-softer
-// already do. Free space is the remainder rather than a part, so it takes the faintest neutral — matching
-// CC's actual intent, where Free space is the LARGEST slice yet drawn the palest: least important, least ink.
-const shadeFor = (id: ContextPart, i: number): string =>
-  id === 'free' ? 'var(--border-1)' : `color-mix(in oklab, var(--ctx-base) ${100 - 15 * i}%, transparent)`
+// One FIXED colour per part, not a ladder — this is Claude Code's CLI approach, and the reason for it is
+// that a ladder cannot survive a real palette. CC's desktop build derives shades from a base
+// (hsl(from base h s min(85, l+6i))); ported to Studio's oklch tokens that collapses, because oklch's L is
+// perceptual and dark --warning sits at 0.78 with 0.07 of headroom. The alpha ladder that replaced it kept
+// every step distinct in code but not to the eye: four 15% steps on an 8px legend swatch read as one
+// colour. Discrete hues are legible at any size and any part count. Every value is an existing token — no
+// new colour is introduced. Free space stays the faintest neutral: it is the remainder, and CC draws it
+// palest even though it is the LARGEST slice — least important, least ink.
+// Every part colour is OPAQUE and a different hue. Both properties are load-bearing: --accent-soft looked
+// like a second colour but is literally `color-mix(--accent 18%, transparent)` — an alpha of --accent, i.e.
+// the ladder again, and translucent, so the same part rendered differently over the bar's track than over
+// the popover's background. Free space alone stays translucent: it is the empty part of the track, not a
+// part with a colour.
+const PART_COLOR: Record<ContextPart, string> = {
+  tools: 'var(--accent)', // blue-violet
+  system: 'var(--success)', // green — picked as a HUE from the palette, not as "success"
+  memory: 'var(--warning)', // amber
+  messages: 'var(--text-3)', // mid grey (opaque; --text-4 is dimmer than --border-2 in light mode)
+  free: 'var(--border-1)', // the remainder — faintest neutral, as CC draws it despite it being the largest
+}
 
-/* — ContextParts: the stacked bar + its legend. Parts arrive biggest-first, so the heaviest gets the
-     densest shade and the eye lands on what is actually filling the window. — */
+/* — ContextParts: the stacked bar + its legend. Parts arrive biggest-first. — */
 function ContextParts({ breakdown }: { breakdown: ContextBreakdown }): ReactElement | null {
   const t = useT()
   const label: Record<ContextPart, string> = {
@@ -39,18 +50,25 @@ function ContextParts({ breakdown }: { breakdown: ContextBreakdown }): ReactElem
   const shown = breakdown.parts.filter((p) => p.tokens > 0)
   return (
     <>
-      {/* Says "estimated" because it IS: the tool kit's share can only be priced locally — count_tokens
-          rejects a body carrying it — so the parts are honest about not being a measurement. */}
+      {/* "Estimated" because the parts are differenced off the up-front count while the ring reads the live
+          measured usage — the two are not meant to add up. CC labels its own panel the same way. */}
       <div className="ctx-bar-note">{t('conv.ctxEstimated')}</div>
       <div className="ctx-bar" role="presentation">
-        {shown.map((p, i) => (
-          <span key={p.id} className="ctx-bar-seg" style={{ width: `${(p.tokens / max) * 100}%`, background: shadeFor(p.id, i) }} />
+        {shown.map((p) => (
+          <span
+            key={p.id}
+            className="ctx-bar-seg"
+            // A real part must never round away to nothing: at a 1M window, Messages is routinely <0.01%
+            // and would vanish while its legend row still claims tokens. CC solves this the same way
+            // (Math.max(1, …) square per non-free part). Free space takes no floor — it IS the remainder.
+            style={{ width: `${(p.tokens / max) * 100}%`, minWidth: p.id === 'free' ? undefined : 2, background: PART_COLOR[p.id] }}
+          />
         ))}
       </div>
       <ul className="ctx-legend">
-        {shown.map((p, i) => (
+        {shown.map((p) => (
           <li key={p.id} className="ctx-legend-row">
-            <span className="ctx-legend-dot" style={{ background: shadeFor(p.id, i) }} />
+            <span className="ctx-legend-dot" style={{ background: PART_COLOR[p.id] }} />
             <span className="ctx-legend-name">{label[p.id]}</span>
             <span className="ctx-legend-tok">{fmtContextTokens(p.tokens)}</span>
             <span className="ctx-legend-pct">{((p.tokens / max) * 100).toFixed(1)}%</span>
@@ -98,6 +116,12 @@ export function ContextIndicator({ used, max, breakdown }: { used: number; max: 
 
   if (max <= 0) return null // no known window → nothing honest to draw
   const { pct, level, summary } = readContext(used, max)
+  // The panel's header reads the SAME number its parts were differenced from, so the two always add up.
+  // The ring keeps `used` — the live measured usage, which is what "how full is my window" really means,
+  // and which the API overwrites every turn. Pointing the header at `used` instead put two sources one line
+  // apart: the parts summed to 30.4K under a header reading 40.2K. Claude Code avoids the clash by deriving
+  // its header FROM the parts (its `used` is their sum) — same principle, applied at the seam we have.
+  const panelSummary = breakdown ? readContext(breakdown.total, breakdown.max).summary : summary
 
   return (
     <>
@@ -116,11 +140,9 @@ export function ContextIndicator({ used, max, breakdown }: { used: number; max: 
         ? createPortal(
             <>
               <div className="menu-backdrop" onClick={() => setOpen(false)} />
-              {/* the level class rides the popover ROOT too: it is portaled to <body>, so it inherits
-                  nothing from the ring — this is what puts --ctx-base in scope for the panel. */}
               <div
                 ref={menuRef}
-                className={`ctx-pop ctx-${level}`}
+                className="ctx-pop"
                 style={style}
                 role="dialog"
                 aria-label={t('conv.ctxUsage')}
@@ -134,7 +156,7 @@ export function ContextIndicator({ used, max, breakdown }: { used: number; max: 
                 </button>
                 {expanded ? (
                   <div className="ctx-pop-body">
-                    <div className="ctx-pop-total">{summary}</div>
+                    <div className="ctx-pop-total">{panelSummary}</div>
                     {breakdown ? <ContextParts breakdown={breakdown} /> : null}
                   </div>
                 ) : null}

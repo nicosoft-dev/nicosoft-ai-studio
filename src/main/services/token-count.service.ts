@@ -109,11 +109,12 @@ export async function countBreakdown(
   const memory = tSys - tSysMin
   const messages = tMsgs - tBase
   // Tools are the RESIDUAL: the caller's `total` measured the whole prompt including them, so whatever it
-  // holds beyond the three measured parts IS the tool cost. Now that L1 accepts a tool-bearing body (see
-  // toolsForCounting), `total` is itself an exact count, which makes this residual exact too. Pricing tools
-  // locally instead (dense-JSON/2) overpriced the kit ~1.8x and rendered "System tools" LARGER than the
-  // total one line above it. As a residual it cannot exceed the total by construction, and it absorbs any
-  // gap between `total` and the probes rather than letting that gap corrupt a measured part.
+  // holds beyond the three measured parts IS the tool cost. Pricing them locally instead (dense-JSON/2)
+  // overpriced the kit ~1.8x and rendered "System tools" LARGER than the total one line above it. As a
+  // residual it cannot exceed the total by construction, and it absorbs any gap between `total` and the
+  // probes rather than letting that gap corrupt a measured part. Note it inherits whatever `total` is: an
+  // exact count of the body count_tokens was ASKED about, which toolsForCounting narrowed — so server
+  // tools land here as a small under-count, not as a wrong measured part.
   const tools = opts.total - system - memory - messages
   if (tools < 0) return null // parts already exceed the measured prompt → the numbers aren't comparable
   const parts: { id: ContextPart; tokens: number }[] = [
@@ -122,7 +123,7 @@ export async function countBreakdown(
     { id: 'tools', tokens: tools },
     { id: 'messages', tokens: messages },
   ]
-  parts.sort((a, b) => b.tokens - a.tokens) // biggest first: the panel gives the densest shade to the heaviest
+  parts.sort((a, b) => b.tokens - a.tokens) // biggest first — the panel lists them in this order
   // Anchored on the same total, so the five always span exactly the window: parts sum to total, and free is
   // the rest of it.
   parts.push({ id: 'free', tokens: Math.max(0, opts.max - opts.total) }) // always last — the remainder, not a part

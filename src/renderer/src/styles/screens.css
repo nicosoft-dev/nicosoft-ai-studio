@@ -294,8 +294,9 @@
 .segmented.sm { padding: 2px; }
 .segmented.sm button { padding: 3px 9px; font-size: 11.5px; }
 
-/* context indicator — the "how full is the window" ring. The level class carries --ctx-base, so the
-   75/90 threshold repaints the ring from ONE declaration rather than a stroke rule per level. */
+/* context indicator — the "how full is the window" ring. The level class carries --ctx-base so the 75/90
+   threshold repaints the ring from ONE declaration. ONLY the ring reads it — the breakdown's parts are
+   fixed opaque hues (see PART_COLOR), deliberately not shades of the threshold colour. */
 .ctx-normal   { --ctx-base: var(--accent); }
 .ctx-warning  { --ctx-base: var(--warning); }
 .ctx-critical { --ctx-base: var(--error); }
