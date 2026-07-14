@@ -61,30 +61,28 @@ export interface ContextBreakdown {
 }
 
 // Resolve the prompt into its parts. No API itemises a prompt, so each part is a DIFFERENCE between two
-// nested TOOL-FREE prefixes, plus a locally-priced tool figure:
+// nested prefixes, with tools falling out as the remainder:
 //
 //   T_base   = ()               → protocol overhead + the dummy turn bodyFor() injects
 //   T_sysMin = (system−memory)  → System prompt  = T_sysMin − T_base
 //   T_sys    = (system)         → auto-memory    = T_sys    − T_sysMin
 //   T_msgs   = (messages)       → Messages       = T_msgs   − T_base
-//                               → System tools   = roughToolTokens (see below)
+//   `total`  (from the caller)  → System tools   = total − the three above
 //
 // T_base MUST be subtracted: an empty-messages body still carries a dummy user turn (see bodyFor), which
 // would otherwise inflate every part by ~8 tokens. Differencing cancels it.
 //
 // ⚠️ THE SUBTRAHENDS MUST SHARE A TIER, or the subtraction is meaningless. countContext is TIERED (exact
-// count_tokens → billed small-model probe → local estimate) and the tiers disagree by large factors. An
-// earlier cut differenced tool-BEARING prefixes and mixed tiers — count_tokens 400s on a body carrying the
-// tool kit, so those probes fell to the estimate while the total came from a probe — producing parts that
-// summed to 46.5K against a 30.4K total, a bar overflowing to 101.6%. Hence: every networked probe here is
-// tool-free (they all reach L1), tools never join a subtraction, and the monotonic guard rejects the whole
-// breakdown if a probe still fell through. A confidently wrong picture of the prompt is worse than none.
+// count_tokens → billed small-model probe → local estimate) and the tiers disagree by large factors — an
+// earlier cut mixed them and produced parts summing to 46.5K against a 30.4K total, a bar overflowing to
+// 101.6%. The probes here share one config, and the monotonic guard rejects the breakdown outright if one
+// still fell through. A confidently wrong picture of the prompt is worse than none.
 //
 // Deliberately NO smallModel: that tier is a REAL max_tokens:1 request, i.e. billed. A shading aid must
 // never cost money. (Claude Code makes the opposite call — its fallback IS a billed haiku probe. It also
-// counts each section independently rather than by differencing, for the same reason tools are split out
-// here: independent counts tolerate a tier the differences cannot. Its panel says "Estimated usage by
-// category" for exactly this reason, and so does ours.)
+// counts each section independently rather than by differencing, which is why its panel says "Estimated
+// usage by category". Ours says the same: the parts are differenced off the up-front count, while the
+// header shows the ring's live measured usage, so the two are not meant to add up.)
 //
 // Cost: 4 free probes, memoised on (model+system+messages+tools) — T_base/T_sysMin never change within a
 // conversation, so steady state is 0–2 real round trips. For openai/gemini it is pure CPU.
@@ -110,13 +108,12 @@ export async function countBreakdown(
   const system = tSysMin - tBase
   const memory = tSys - tSysMin
   const messages = tMsgs - tBase
-  // Tools are the RESIDUAL, not an estimate. They are the one part no probe can price — count_tokens 400s
-  // on any body carrying the kit — but the caller's `total` already measured the whole prompt INCLUDING
-  // them, so whatever it holds beyond the three parts above IS the tool cost. This beats estimating them
-  // locally in every way: dense-JSON/2 overpriced the kit by ~1.8x, which rendered "System tools" LARGER
-  // than the total printed one line above it, and let the parts outgrow the window. As the residual it
-  // cannot exceed the total by construction, and it silently absorbs any tier gap between `total` and the
-  // probes rather than letting that gap corrupt a measured part.
+  // Tools are the RESIDUAL: the caller's `total` measured the whole prompt including them, so whatever it
+  // holds beyond the three measured parts IS the tool cost. Now that L1 accepts a tool-bearing body (see
+  // toolsForCounting), `total` is itself an exact count, which makes this residual exact too. Pricing tools
+  // locally instead (dense-JSON/2) overpriced the kit ~1.8x and rendered "System tools" LARGER than the
+  // total one line above it. As a residual it cannot exceed the total by construction, and it absorbs any
+  // gap between `total` and the probes rather than letting that gap corrupt a measured part.
   const tools = opts.total - system - memory - messages
   if (tools < 0) return null // parts already exceed the measured prompt → the numbers aren't comparable
   const parts: { id: ContextPart; tokens: number }[] = [
@@ -138,7 +135,7 @@ async function viaCountTokensApi(input: AnthropicCountInput): Promise<number | n
     const res = await fetch(`${trimBase(input.baseUrl)}/v1/messages/count_tokens`, {
       method: 'POST',
       headers: anthropicHeaders(input.apiKey),
-      body: JSON.stringify(bodyFor(input.model, input)),
+      body: JSON.stringify(bodyFor(input.model, input, true)),
       signal: AbortSignal.timeout(COUNT_TIMEOUT_MS),
     })
     if (!res.ok) return null
@@ -157,7 +154,7 @@ async function viaSmallModelProbe(input: AnthropicCountInput): Promise<number | 
     const res = await fetch(`${trimBase(input.baseUrl)}/v1/messages`, {
       method: 'POST',
       headers: anthropicHeaders(input.apiKey),
-      body: JSON.stringify({ ...bodyFor(smallModel, input), max_tokens: 1 }),
+      body: JSON.stringify({ ...bodyFor(smallModel, input, false), max_tokens: 1 }),
       signal: AbortSignal.timeout(COUNT_TIMEOUT_MS),
     })
     if (!res.ok) return null
@@ -178,15 +175,43 @@ function anthropicHeaders(apiKey: string): Record<string, string> {
   return { 'x-api-key': apiKey, 'anthropic-version': ANTHROPIC_VERSION, 'content-type': 'application/json' }
 }
 
+// /v1/messages/count_tokens accepts a STRICTER tools param than /v1/messages does, and rejects the whole
+// request — HTTP 400, "the request was rejected by the model provider" — over either of two things the
+// generation endpoint takes happily. Both were measured against the live API, one tool at a time:
+//   • SERVER tools (the ones with a `type`, e.g. tool_search_tool_regex_20251119): not accepted at all.
+//   • `defer_loading` / `eager_input_streaming` / `strict` hints on a normal tool (EnterWorktree,
+//     ExitWorktree carry defer_loading): stripping them alone turns that 400 into a 200.
+// Claude Code does exactly these two: its Sap() drops the same three fields before every count_tokens
+// call, and it never routes server tools through this endpoint.
+// This is load-bearing for COST, not just for the panel: without it L1 fails on every agent turn (the kit
+// always carries tool_search), so countAnthropic silently fell through to L2 — a real, BILLED
+// max_tokens:1 request — once per turn, forever.
+const COUNT_TOKENS_REJECTED_FIELDS = ['defer_loading', 'eager_input_streaming', 'strict'] as const
+function toolsForCounting(tools: unknown[] | undefined): unknown[] {
+  if (!tools?.length) return []
+  return tools
+    .filter((t) => !(t && typeof t === 'object' && typeof (t as { type?: unknown }).type === 'string' && (t as { type: string }).type !== ''))
+    .map((t) => {
+      if (!t || typeof t !== 'object') return t
+      const rest = { ...(t as Record<string, unknown>) }
+      for (const f of COUNT_TOKENS_REJECTED_FIELDS) delete rest[f]
+      return rest
+    })
+}
+
 // Shared body builder. Empty messages with tools still needs a dummy user turn so
 // the tool token count comes back accurate.
-function bodyFor(model: string, input: AnthropicCountInput): Record<string, unknown> {
+// `forCountTokens` gates the tool narrowing above: ONLY /v1/messages/count_tokens is that strict. L2 is a
+// real /v1/messages request, which takes the kit verbatim — narrowing it there would undercount the very
+// server tools the turn actually pays for.
+function bodyFor(model: string, input: AnthropicCountInput, forCountTokens: boolean): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model,
     messages: input.messages.length ? input.messages : [{ role: 'user', content: 'foo' }]
   }
   if (input.system) body.system = input.system
-  if (input.tools?.length) body.tools = input.tools
+  const tools = forCountTokens ? toolsForCounting(input.tools) : (input.tools ?? [])
+  if (tools.length) body.tools = tools
   if (input.thinkingBudget && input.thinkingBudget > 0) {
     body.thinking = { type: 'enabled', budget_tokens: input.thinkingBudget }
   }
