@@ -38,6 +38,7 @@ import { monitorService } from './monitor.service'
 import { selfRhythmService } from './self-rhythm.service'
 import { buildAgentSystem } from './agent-system'
 import { createLensHandle } from './lens/agent-lens'
+import { createResearchHandle } from './research/research-handle'
 import { recallText } from './memory/project-map'
 import { indexText as agentMemoryIndexText } from './memory/agent-memory'
 import { setActiveServices, clearActiveServices, broadcastConvServices } from './active-services'
@@ -403,6 +404,19 @@ export async function runCollabSession(
                 // post-collab final audit). lens is a TOOL here — it surfaces as the driver's tool card, never a
                 // 'verifier' segment (the reviewer step lifecycle is suppressed on the tool path).
                 reviewerOverride: x.roleId
+              })
+            : undefined,
+          // studio_research bridge for collab experts — same handle⟺tool guard. Progress rides the persistent
+          // coordinator stream (onExpertStream), which a park never finishes, so the card reaches Tasks live.
+          research: tools.some((t) => t.name === 'studio_research')
+            ? createResearchHandle({
+                convId,
+                callerRoleId: x.roleId,
+                cwd,
+                permissionMode: x.permissionMode ?? 'default',
+                signal: sig,
+                onStream: (ev) => hooks.onExpertStream(x.roleId, ev),
+                requestPermission: (req, s) => hooks.requestPermission(x.roleId, req, s)
               })
             : undefined,
           onSubAgentToolEvent: (ev) => hooks.onExpertStream(x.roleId, ev),

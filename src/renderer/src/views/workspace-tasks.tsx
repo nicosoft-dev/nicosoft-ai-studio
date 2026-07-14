@@ -13,6 +13,7 @@ import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { Icons } from '@/components/icons'
 import { useChat } from '@/stores/chat'
 import { LensCard } from '@/components/lens-card'
+import { ResearchCard } from '@/components/research-card'
 import { useT } from '@/stores/locale'
 import { useConvTodos } from '@/stores/conv-todos'
 import { useConvServices } from '@/stores/conv-services'
@@ -96,9 +97,13 @@ function PanelGroup({ owner, panelTools, expertsById, convId }: { owner: string;
           <span className="ws-svc-owner-name">{expertsById[owner]?.name ?? owner}</span>
         </div>
       ) : null}
-      {panelTools.map((tl) => (
-        <LensCard key={tl.id} tool={tl} convId={convId} />
-      ))}
+      {panelTools.map((tl) =>
+        tl.name === 'StudioResearch' ? (
+          <ResearchCard key={tl.id} tool={tl} convId={convId} />
+        ) : (
+          <LensCard key={tl.id} tool={tl} convId={convId} />
+        )
+      )}
     </div>
   )
 }
@@ -186,6 +191,9 @@ export function WorkspaceTasks({ activeConv }: { activeConv: string | null }): R
         // bucketed so it advances ~smoothly, not on every single token (workflow /workflows live parity + perf).
         // Keyed on the MONOTONIC streamLen (not stream.length, which pins at the tail cap → tail would freeze).
         if (tl.name === 'StudioLens') sig += `${m.expertId ?? ''}~${tl.id}~${tl.status}~${(tl.subTools ?? []).map((st) => `${st.status}${Math.floor((st.streamLen ?? 0) / 32)}`).join('')};`
+        // StudioResearch cards advance on PHASE progress, not token streams: fold in each phase child's status +
+        // its live summary length (onLog → input.lastToolSummary), so the card re-renders as phases tick through.
+        else if (tl.name === 'StudioResearch') sig += `${m.expertId ?? ''}~${tl.id}~${tl.status}~${(tl.subTools ?? []).map((st) => `${st.status}${(((st.input as { lastToolSummary?: string } | undefined)?.lastToolSummary) ?? '').length}`).join('')};`
       }
     }
     return sig
@@ -210,8 +218,14 @@ export function WorkspaceTasks({ activeConv }: { activeConv: string | null }): R
     for (const m of ms ?? []) {
       if (m.role !== 'assistant' || !m.tools) continue
       for (const tl of m.tools) {
-        if (tl.name !== 'StudioLens') continue
-        live++
+        // Both studio_lens and studio_research surface as top-level panel cards in this section. Only lens has a
+        // persisted store — research is live-only (its report lives in the role's chat turn), so research done
+        // cards show in-session only and are correctly absent after reload.
+        if (tl.name !== 'StudioLens' && tl.name !== 'StudioResearch') continue
+        // Only StudioLens gates the persisted-examines rebuild below — that history is lens-only (research is not
+        // persisted). Counting research here would wrongly suppress the rebuild and HIDE a conversation's done
+        // lens-review history from the panel whenever a live/in-session research card is present.
+        if (tl.name === 'StudioLens') live++
         push(tl.status === 'running' ? running : done, m.expertId ?? '', tl)
       }
     }
@@ -466,9 +480,13 @@ export function WorkspaceTasks({ activeConv }: { activeConv: string | null }): R
                     <span className="ws-svc-owner-name">{expertsById[g.owner]?.name ?? g.owner}</span>
                   </div>
                 ) : null}
-                {g.panels.map((tl) => (
-                  <LensCard key={tl.id} tool={tl} />
-                ))}
+                {g.panels.map((tl) =>
+                  tl.name === 'StudioResearch' ? (
+                    <ResearchCard key={tl.id} tool={tl} />
+                  ) : (
+                    <LensCard key={tl.id} tool={tl} />
+                  )
+                )}
                 {g.items.map((it) =>
                   it.kind === 'phase' ? (
                     <PhaseCard key={'p' + it.row.id} phase={it.row} t={t} />

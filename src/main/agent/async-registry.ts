@@ -7,7 +7,7 @@
 
 export interface AsyncHandle {
   id: string
-  kind: 'lens' | 'e2e' | 'process' | 'service' | 'subagent' | 'custom'
+  kind: 'lens' | 'research' | 'design' | 'migrate' | 'e2e' | 'process' | 'service' | 'subagent' | 'custom'
   status: 'running' | 'done' | 'failed'
   info?: string // short human label of what was launched (shown in await/list results)
   result?: unknown // the runner's resolved value, set on 'done'
@@ -116,12 +116,14 @@ export class AsyncRegistry {
 export function formatAsyncHandle(h: AsyncHandle): string {
   if (h.status === 'running') return `- ${h.id} (${h.kind}): still running${h.info ? ` — ${h.info}` : ''}`
   if (h.status === 'failed') return `- ${h.id} (${h.kind}): FAILED — ${h.error ?? 'unknown error'}`
-  // A 'panel' handle's result is a StudioLensResult OBJECT — surface its readable .message (the verdict summary
-  // the agent acts on), not a raw JSON dump. The driver awaits this handle in its OWN turn (the consolidated lens
-  // review) and acts on it there; it is NOT threaded to the coordinator (the post-collab pass is Danny's separate Turing audit).
-  if (h.kind === 'lens' && h.result && typeof h.result === 'object' && 'message' in h.result) {
+  // A 'panel' (lens) OR research/design/migrate handle's result is a {ok,message} OBJECT — surface its readable
+  // .message (the verdict summary / the cited report / the migration patch note the agent acts on), not a raw JSON
+  // dump. The driver awaits this handle in its OWN turn and reports on it there. (lens is shown as 'panel' for
+  // backward-compatible wording; the others keep their kind.)
+  if ((h.kind === 'lens' || h.kind === 'research' || h.kind === 'design' || h.kind === 'migrate') && h.result && typeof h.result === 'object' && 'message' in h.result) {
     const msg = (h.result as { message?: unknown }).message
-    return `- ${h.id} (panel): done — ${typeof msg === 'string' ? msg : '(panel produced no message)'}`
+    const label = h.kind === 'lens' ? 'panel' : h.kind
+    return `- ${h.id} (${label}): done — ${typeof msg === 'string' ? msg : '(no message)'}`
   }
   const r = typeof h.result === 'string' ? h.result : h.result != null ? JSON.stringify(h.result) : '(no result)'
   return `- ${h.id} (${h.kind}): done — ${r}`

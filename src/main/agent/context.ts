@@ -42,6 +42,20 @@ export interface PanelHandle {
   examine(input: { paths?: string[]; mode: 'review' | 'understand'; signal?: AbortSignal; asyncHandleId?: string }): Promise<StudioLensResult>
 }
 
+// studio_research agent tool (research-role-driven-redesign §4.1): the agent drives a deep multi-source web-research
+// fan-out (the deep-research script) in its OWN turn — the sibling of PanelHandle/studio_lens. The handle (impl in
+// services/research/research-handle) captures the run's convId/cwd/signal, emits a top-level 'StudioResearch'
+// progress card (→ Tasks panel, exactly like the lens panel card), and runs the fan-out under the CALLER role's
+// endpoint (so research runs on the driving role's native protocol; pickResearchRole is gone). signal/asyncHandleId
+// mirror PanelHandle — the Tasks-panel Stop aborts THIS handle. ok:false carries a clear reason, never a silent empty.
+export interface StudioResearchResult {
+  ok: boolean
+  message: string // the cited report (ok) or a clear failure reason
+}
+export interface ResearchHandle {
+  run(input: { question: string; signal?: AbortSignal; asyncHandleId?: string }): Promise<StudioResearchResult>
+}
+
 export interface ReadFileEntry {
   content: string
   mtimeMs: number
@@ -231,6 +245,10 @@ export interface AgentContext {
   // sub-agents also null it explicitly in loop.ts) so a reviewer can't recursively trigger another panel →
   // bounded fan-out×depth. The tool no-ops with a clear reason when this is absent.
   panel?: PanelHandle
+  // studio_research agent tool (research-role-driven-redesign): set by runAgentLoop / collab iff the run's kit
+  // carries studio_research (handle-presence ⟺ tool-presence, same guard as panel). Undefined inside a sub-agent
+  // so a web-researcher can't recursively launch another research fan-out. no-ops with a clear reason when absent.
+  research?: ResearchHandle
 }
 
 // What a tool needs to make its own LLM call (a content-extraction summary, a delegated search) or run a

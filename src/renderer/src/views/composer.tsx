@@ -490,29 +490,47 @@ export function Composer({
       setCmdOutput(['Usage:  /research <question>', 'Fan-out web research with adversarial verification → a cited report.'])
       return
     }
-    const rawCmd = value.trim() // the user's literal command line — persisted as their bubble
-    setCmdOutput(null)
-    void (async () => {
-      try {
-        // The research card + all its live patches arrive on the conv:card broadcast, whose renderer listener
-        // (onConvCard) is subscribed only inside ensureListeners(). A /research as the FIRST action of a session
-        // (greeting page, or a boot-restored conversation) never ran send(), so without this the card and the
-        // whole run are invisible live (only a reload surfaces the persisted card). Same guard launchWorkflow uses.
-        chat.ensureStreamListeners()
-        let convId = activeConv
-        if (!convId) {
-          const conv = await window.api.conversations.create({ kind: 'single', primaryRoleId: expert.id, title: rawCmd.slice(0, 60), cwd: effectiveCwd || '' })
-          convId = conv.id
-          chat.adoptConversation(conv)
+    // P1 (research-role-driven-redesign) migrates ONLY the SOLO path to a role-driven tool. A COORDINATOR
+    // conversation keeps the old system run until P2 wires Danny's dispatch — so coordinator /research is
+    // unchanged here (no collab regression while P1 is solo-scoped). Distinguished by the active role being the
+    // coordinator (a coordinator collab runs in a kind:'single' conv, so the role — not conv.kind — is the signal).
+    if (roleIsCoordinator(expert.id)) {
+      const rawCmd = value.trim()
+      setCmdOutput(null)
+      void (async () => {
+        try {
+          chat.ensureStreamListeners()
+          let convId = activeConv
+          if (!convId) {
+            const conv = await window.api.conversations.create({ kind: 'single', primaryRoleId: expert.id, title: rawCmd.slice(0, 60), cwd: effectiveCwd || '' })
+            convId = conv.id
+            chat.adoptConversation(conv)
+          }
+          const line = await window.api.conversations.append(convId, { author: 'user', content: rawCmd })
+          chat.insertUserLine(convId, { id: line.id, text: rawCmd })
+          const res = await window.api.research.run({ convId, question })
+          if (!res.ok) toast.error(res.error)
+        } catch (err) {
+          toast.error(err instanceof Error ? err.message : String(err))
         }
-        const line = await window.api.conversations.append(convId, { author: 'user', content: rawCmd })
-        chat.insertUserLine(convId, { id: line.id, text: rawCmd }) // seeds byConversation so onConvCard's `if (!msgs) return` guard passes
-        const res = await window.api.research.run({ convId, question })
-        if (!res.ok) toast.error(res.error)
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : String(err))
-      }
-    })()
+      })()
+      return undefined
+    }
+    // SOLO: the active role must be agent-enabled to drive studio_research — roleHasAgent is the SAME predicate that
+    // gates the agent-loop path (chat.ts route) and the PANEL_TOOLS kit (agent-tools.ts isAgent), and that /workflow
+    // branches on here too. A chat-only persona carries no studio_research tool, so a plain turn would just
+    // hallucinate a "research" reply — fail LOUDLY instead of silently faking it. (Built-ins all qualify; only a
+    // custom chat-only persona hits this.)
+    if (!roleHasAgent(expert.id)) {
+      toast.error('This role can’t run research. Switch to an agent role (e.g. Analyst).')
+      return
+    }
+    setCmdOutput(null)
+    // §4.2: /research is a ROLE-DRIVEN turn now. Hand the active role a normal turn (dispatchSend carries its
+    // binding/model/cwd and creates the conversation on the first turn, exactly like a typed message).
+    // studio_research's tool prompt maps this "/research <q>" message to an immediate studio_research call → the
+    // progress card lands in the Tasks panel (not a chat-flow launch card), and the role reports the cited report.
+    dispatchSend(`/research ${question}`)
     return undefined
   }
   const runResearchCommandRef = useRef(runResearchCommand)

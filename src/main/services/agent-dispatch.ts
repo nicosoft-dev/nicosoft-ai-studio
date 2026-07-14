@@ -24,6 +24,7 @@ import { ServiceRegistry } from '../agent/service-registry'
 import { AsyncSubAgentPool } from '../agent/sub-agent-pool'
 import { LSPManager } from '../agent/lsp/manager'
 import { createLensHandle } from './lens/agent-lens'
+import { createResearchHandle } from './research/research-handle'
 import { lspTool } from '../agent/tools/lsp'
 import { disposePlaywrightSessionsOwnedBy } from '../agent/tools/playwright-browser'
 import { releaseComputerUse } from './computer-use'
@@ -425,6 +426,20 @@ export async function runAgentLoop(
           // park never finishes) — a different call site, deliberately untouched.
           onStream: (ev) => broadcastConvLens(loop.convId, loop.roleId, ev),
           onToolImage: cb.onToolImage,
+          requestPermission: cb.requestPermission
+        })
+      : undefined,
+    // studio_research bridge — same handle⟺tool guard as panel. Progress rides the SAME conv-level lens broadcast
+    // (a parked async op's turn stream finishes, so per-run cb.onStream becomes a guarded no-op; the conv:lens
+    // channel reaches the Tasks panel live across the park). Tagged with THIS run's roleId to anchor the card.
+    research: loop.tools.some((t) => t.name === 'studio_research')
+      ? createResearchHandle({
+          convId: loop.convId,
+          callerRoleId: loop.roleId,
+          cwd,
+          permissionMode: loop.permissionMode,
+          signal,
+          onStream: (ev) => broadcastConvLens(loop.convId, loop.roleId, ev),
           requestPermission: cb.requestPermission
         })
       : undefined,

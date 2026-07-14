@@ -9,6 +9,7 @@ import { enterPlanModeTool } from '../agent/tools/enter-plan-mode'
 import { exitPlanModeTool } from '../agent/tools/exit-plan-mode'
 import { askUserQuestionTool } from '../agent/tools/ask-user-question'
 import { studioLensTool } from '../agent/tools/studio-lens'
+import { studioResearchTool } from '../agent/tools/studio-research'
 import { readMeTool, showWidgetTool } from '../agent/tools/visualize'
 import { readTool } from '../agent/tools/read'
 import { globTool } from '../agent/tools/glob'
@@ -123,7 +124,11 @@ const PLAN_TOOLS = [enterPlanModeTool, exitPlanModeTool] as unknown as Tool[]
 // dev roles); the runtime chooseVerifierRole gate decides whether a panel can actually form. It carries ctx.panel:
 // the injection sites (runAgentLoop / collab) key off the kit containing this tool, so handle-presence ⟺
 // tool-presence — a fixed-kit verifier / sub-agent (no studio_lens) automatically gets no handle (recursion guard).
-const PANEL_TOOLS = [studioLensTool] as unknown as Tool[]
+// studio_research (research-role-driven-redesign §4.1) is a UNIVERSAL-tier tool alongside studio_lens: a deep
+// web-research fan-out any agent role drives in its OWN turn, carrying ctx.research (same handle⟺tool guard — the
+// injection sites key off the kit containing this tool). Grouped with lens because both surface as top-level
+// progress cards in the Tasks panel. (design joins this group in a later batch; migrate is red-zone, gated separately.)
+const PANEL_TOOLS = [studioLensTool, studioResearchTool] as unknown as Tool[]
 // visualize (CC "Imagine" parity) — UNIVERSAL-tier like studio_lens: read_me returns drawing guidance,
 // show_widget carries the widget as streaming tool INPUT (the renderer's WidgetCard draws it off
 // tool_use_input deltas; the handler only returns CC's fixed receipt). Every agent role; chat-only
