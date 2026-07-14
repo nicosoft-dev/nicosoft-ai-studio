@@ -512,34 +512,21 @@ export function Composer({
   runResearchCommandRef.current = runResearchCommand
 
   // `/design <problem>` — a judge-panel design review (N independent solution attempts from different angles →
-  // parallel judge → a scored synthesis). Free text, bare = usage. Mirrors /research: ensure the conversation +
-  // a persisted user bubble + the stream-listener subscription, then hand the problem to design:run (surfaces as
-  // a design card). Kept distinct from the coordinator council — this is a one-shot, leaf-level approach review.
+  // parallel judge → a scored synthesis), now ROLE-DRIVEN (research-role-driven-redesign §4.2/§4.4), mirroring
+  // /research: SOLO agent role calls studio_design; COORDINATOR conv → Danny's route() /design fast path
+  // dispatches a design role. Chat-only persona fails loudly.
   const runDesignCommand = (arg?: string): boolean | undefined => {
     const problem = arg?.trim()
     if (!problem) {
       setCmdOutput(['Usage:  /design <problem>', 'Judge-panel design review: N angles → scored synthesis.'])
       return
     }
-    const rawCmd = value.trim()
+    if (!roleHasAgent(expert.id) && !roleIsCoordinator(expert.id)) {
+      toast.error('This role can’t run a design review. Switch to an agent role (e.g. Designer).')
+      return
+    }
     setCmdOutput(null)
-    void (async () => {
-      try {
-        chat.ensureStreamListeners() // the design card + patches ride conv:card — subscribe before it can fire
-        let convId = activeConv
-        if (!convId) {
-          const conv = await window.api.conversations.create({ kind: 'single', primaryRoleId: expert.id, title: rawCmd.slice(0, 60), cwd: effectiveCwd || '' })
-          convId = conv.id
-          chat.adoptConversation(conv)
-        }
-        const line = await window.api.conversations.append(convId, { author: 'user', content: rawCmd })
-        chat.insertUserLine(convId, { id: line.id, text: rawCmd })
-        const res = await window.api.design.run({ convId, problem })
-        if (!res.ok) toast.error(res.error)
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : String(err))
-      }
-    })()
+    dispatchSend(`/design ${problem}`)
     return undefined
   }
   const runDesignCommandRef = useRef(runDesignCommand)

@@ -56,6 +56,17 @@ export interface ResearchHandle {
   run(input: { question: string; signal?: AbortSignal; asyncHandleId?: string }): Promise<StudioResearchResult>
 }
 
+// studio_design agent tool (research-role-driven-redesign §4.1) — sibling of ResearchHandle: a judge-panel design
+// review (design-panel script) the agent drives in its own turn. Same shape as ResearchHandle (top-level
+// StudioDesign Tasks card, caller-role endpoint, Tasks-panel Stop via signal/asyncHandleId).
+export interface StudioDesignResult {
+  ok: boolean
+  message: string // the scored design synthesis (ok) or a clear failure reason
+}
+export interface DesignHandle {
+  run(input: { problem: string; signal?: AbortSignal; asyncHandleId?: string }): Promise<StudioDesignResult>
+}
+
 export interface ReadFileEntry {
   content: string
   mtimeMs: number
@@ -249,6 +260,8 @@ export interface AgentContext {
   // carries studio_research (handle-presence ⟺ tool-presence, same guard as panel). Undefined inside a sub-agent
   // so a web-researcher can't recursively launch another research fan-out. no-ops with a clear reason when absent.
   research?: ResearchHandle
+  // studio_design agent tool — same handle⟺tool guard as research; undefined inside a sub-agent.
+  design?: DesignHandle
 }
 
 // What a tool needs to make its own LLM call (a content-extraction summary, a delegated search) or run a

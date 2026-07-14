@@ -25,6 +25,7 @@ import { AsyncSubAgentPool } from '../agent/sub-agent-pool'
 import { LSPManager } from '../agent/lsp/manager'
 import { createLensHandle } from './lens/agent-lens'
 import { createResearchHandle } from './research/research-handle'
+import { createDesignHandle } from './design/design-handle'
 import { lspTool } from '../agent/tools/lsp'
 import { disposePlaywrightSessionsOwnedBy } from '../agent/tools/playwright-browser'
 import { releaseComputerUse } from './computer-use'
@@ -434,6 +435,18 @@ export async function runAgentLoop(
     // channel reaches the Tasks panel live across the park). Tagged with THIS run's roleId to anchor the card.
     research: loop.tools.some((t) => t.name === 'studio_research')
       ? createResearchHandle({
+          convId: loop.convId,
+          callerRoleId: loop.roleId,
+          cwd,
+          permissionMode: loop.permissionMode,
+          signal,
+          onStream: (ev) => broadcastConvLens(loop.convId, loop.roleId, ev),
+          requestPermission: cb.requestPermission
+        })
+      : undefined,
+    // studio_design bridge — same handle⟺tool guard + conv-level broadcast as research.
+    design: loop.tools.some((t) => t.name === 'studio_design')
+      ? createDesignHandle({
           convId: loop.convId,
           callerRoleId: loop.roleId,
           cwd,

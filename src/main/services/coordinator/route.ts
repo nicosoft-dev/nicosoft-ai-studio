@@ -42,6 +42,21 @@ export interface RouteContext {
   convId?: string
 }
 
+// The role-driven script commands (research-role-driven-redesign §4.4) → their BOUND (preferred) role. /research
+// and /design route DETERMINISTICALLY (like @mention), so an explicit command never falls to Danny-direct (Danny
+// carries none of these tools). Every dispatchable role is an agent role carrying the tool; the bound role is just
+// the sensible default. (migrate joins here in a later batch.)
+const SCRIPT_COMMANDS: Record<string, string> = { research: 'analyst', design: 'designer' }
+function matchScriptCommand(userInput: string): { cmd: string; prefRole: string; arg: string; title: string } | null {
+  const m = userInput.trim().match(/^\/(\w+)(?:\s|$)/)
+  // Object.hasOwn, NOT `in`: `in` walks the prototype chain, so /toString, /constructor, /valueOf, /__proto__ …
+  // would falsely match as commands and misroute the turn (+ mint a bogus isWork card). Own-property only.
+  if (!m || !Object.hasOwn(SCRIPT_COMMANDS, m[1])) return null
+  const cmd = m[1]
+  const arg = userInput.trim().replace(/^\/\w+\s*/, '').trim()
+  return { cmd, prefRole: SCRIPT_COMMANDS[cmd], arg, title: `${cmd[0].toUpperCase()}${cmd.slice(1)}: ${arg.slice(0, 50)}` }
+}
+
 export async function route(userInput: string, history: convRepo.MessageRow[], ctx: RouteContext = {}, signal?: AbortSignal, cb?: CoordinatorCallbacks): Promise<RouteDecision> {
   const disabled = disabledRoleIds()
   // Routing universe = built-in dispatchables + agent-enabled custom roles (custom-agent-roles §8),
@@ -85,12 +100,13 @@ export async function route(userInput: string, history: convRepo.MessageRow[], c
   // (lifecycle review 2026-07-11).
   const ready = enabled.filter((r) => rolesService.isDispatchReady(r))
   if (ready.length === 0) {
-    // /research must NEVER fall to the Danny-direct branch below: Danny carries no studio_research tool, so he'd
-    // answer the "/research <q>" turn conversationally with NO research (silent wrong result). Dispatch to an
-    // enabled agent role (analyst if enabled) so its dispatch fails LOUDLY ("configure this role") — the actionable
-    // error the old system's pickResearchRole()==null path surfaced. Above the direct return, mirroring @mention.
-    if (/^\/research(\s|$)/.test(userInput.trim())) {
-      return { mode: 'single', role: enabled.includes('analyst') ? 'analyst' : enabled[0], reason: '/research — no dispatch-ready research role', needsPlan: false }
+    // A /research·/design command must NEVER fall to the Danny-direct branch below: Danny carries none of these
+    // tools, so he'd answer the "/<cmd> …" turn conversationally with NO fan-out (silent wrong result). Dispatch to
+    // an enabled agent role (the bound role if enabled) so its dispatch fails LOUDLY ("configure this role") — the
+    // actionable error the old pickXRole()==null path surfaced. Above the direct return, mirroring @mention.
+    const scriptCmd0 = matchScriptCommand(userInput)
+    if (scriptCmd0) {
+      return { mode: 'single', role: enabled.includes(scriptCmd0.prefRole) ? scriptCmd0.prefRole : enabled[0], reason: `/${scriptCmd0.cmd} — no dispatch-ready role`, needsPlan: false }
     }
     // Zero experts can run a step right now. If Danny himself is dispatch-ready he answers DIRECT —
     // his own binding is all direct mode needs, and chitchat that worked pre-filter must keep working
@@ -101,17 +117,16 @@ export async function route(userInput: string, history: convRepo.MessageRow[], c
       : { mode: 'single', role: enabled[0], reason: 'no dispatch-ready roles', needsPlan: isNonTrivialTask(userInput) }
   }
 
-  // /research <q> fast path (research-role-driven-redesign §4.4) — like an @mention, this is an EXPLICIT command,
-  // so route it DETERMINISTICALLY rather than through the LLM router (which reads a short research question as the
-  // 'direct' case → Danny answers from memory, and Danny carries NO studio_research tool → no research). Dispatch
-  // (single) to a research-capable, dispatch-ready agent role — the bound research role (analyst) if ready, else the
-  // first ready role. Every ready role is an agent role, so it carries studio_research and, per that tool's prompt,
-  // runs it on this '/research …' turn; the report flows back through Danny. NEVER 'direct'. Research is a
-  // deliverable → isWork (assignments parity).
-  if (/^\/research(\s|$)/.test(userInput.trim())) {
-    const q = userInput.trim().replace(/^\/research\s*/, '').trim()
-    const researchRole = ready.includes('analyst') ? 'analyst' : ready[0]
-    return { mode: 'single', role: researchRole, reason: 'explicit /research command', needsPlan: false, isWork: true, taskTitle: `Research: ${q.slice(0, 50)}` }
+  // /research·/design fast path (research-role-driven-redesign §4.4) — like an @mention, these are EXPLICIT
+  // commands, so route them DETERMINISTICALLY rather than through the LLM router (which reads a short question as
+  // the 'direct' case → Danny answers from memory, and Danny carries none of these tools → no fan-out). Dispatch
+  // (single) to a dispatch-ready agent role — the bound role (analyst/designer) if ready, else the first ready
+  // role. Every ready role is an agent role carrying the tool, and per that tool's prompt runs it on this '/<cmd>
+  // …' turn; the result flows back through Danny. NEVER 'direct'. These produce a deliverable → isWork.
+  const scriptCmd = matchScriptCommand(userInput)
+  if (scriptCmd) {
+    const role = ready.includes(scriptCmd.prefRole) ? scriptCmd.prefRole : ready[0]
+    return { mode: 'single', role, reason: `explicit /${scriptCmd.cmd} command`, needsPlan: false, isWork: true, taskTitle: scriptCmd.title }
   }
 
   const binding = rolesService.getBinding('coordinator')
