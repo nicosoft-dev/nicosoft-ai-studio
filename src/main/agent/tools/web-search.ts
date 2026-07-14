@@ -1,14 +1,17 @@
 // WebSearch — delegate web search to an ISOLATED secondary request so the agent's main conversation never
 // carries a server search tool (no multi-computer confusion). call() fires a fresh, single-purpose request
-// whose only tool is the search, then hands the hits back as a normal tool_result. Two backends, by protocol:
+// whose only tool is the search, then hands the hits back as a normal tool_result. THREE backends, by protocol —
+// each speaks the driver's OWN native protocol (studio never pushes a model onto another's entrypoint):
 //   - anthropic: web_search_20250305 (standalone server search → web_search_tool_result). Pinned over the
 //     newer web_search_20260209, which routes through the code_execution sandbox. Uses searchModel (Sonnet).
 //   - gemini: google_search grounding — which 400s when combined with functionDeclarations, so it MUST be
 //     isolated here (the agent loop always sends tools). See delegatedSearchGemini.
-// OpenAI roles don't use this tool; they get OpenAI's hosted web_search as a serverTool in agent.service.run.
+//   - openai: hosted web_search via an ISOLATED /v1/responses (delegatedSearchOpenAI). The MAIN agent loop
+//     gives openai roles web_search as a serverTool (agent.service.run); this isolated path serves callers that
+//     hand WebSearch as an EXPLICIT tool (e.g. /research runs on the lens seam, which injects no serverTools).
 
 import { z } from 'zod'
-import { geminiBase, geminiHeaders, geminiModelPath, trimBase } from '../../llm/_shared'
+import { geminiBase, geminiHeaders, geminiModelPath, openaiHeaders, trimBase } from '../../llm/_shared'
 import { anthropicHeaders } from '../../llm/anthropic-wire'
 import type { AgentLlmAccess } from '../context'
 import { buildTool } from '../tool'
@@ -133,6 +136,62 @@ async function delegatedSearchGemini(
   return hits.length ? { query: input.query, hits } : { query: input.query, hits: [], note: 'no results found' }
 }
 
+// OpenAI's hosted web_search (Responses API): an ISOLATED /v1/responses whose only tool is web_search, then
+// harvest the source URLs. Unlike anthropic's web_search_tool_result (a structured hit list), OpenAI's hosted
+// search is AGENT-STYLE — the model searches, opens pages, and writes an answer — so the sources surface three
+// ways and we UNION them: url_citation annotations (when the model cites), the web_search_call open_page URLs
+// (pages the model actually opened), and any URLs in the answer text (fallback). A reasoning model needs real
+// output room, so max_output_tokens is generous (a `1` cap would starve it before it ever searched).
+interface ResponsesSearchOutput {
+  output?: Array<{
+    type: string
+    action?: { type?: string; url?: string }
+    content?: Array<{ text?: string; annotations?: Array<{ type?: string; url?: string; title?: string }> }>
+  }>
+}
+async function delegatedSearchOpenAI(
+  llm: AgentLlmAccess,
+  input: z.infer<typeof inputSchema>,
+  signal: AbortSignal,
+): Promise<WebSearchOutput> {
+  const res = await fetch(`${trimBase(llm.baseUrl)}/v1/responses`, {
+    method: 'POST',
+    signal: AbortSignal.any([signal, AbortSignal.timeout(SEARCH_TIMEOUT_MS)]),
+    headers: openaiHeaders(llm.apiKey),
+    body: JSON.stringify({
+      model: llm.searchModel,
+      instructions: 'You are a web-search assistant. Search the web for the query and report the most relevant result URLs with their titles.',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: `Perform a web search for the query: ${input.query}` }] }],
+      tools: [{ type: 'web_search' }],
+      store: false,
+      max_output_tokens: 8192,
+    }),
+  })
+  if (!res.ok) {
+    const detail = (await res.text().catch(() => '')).slice(0, 300)
+    throw new Error(`web search request failed (HTTP ${res.status})${detail ? `: ${detail}` : ''}`)
+  }
+  const json = (await res.json()) as ResponsesSearchOutput
+  const hits: SearchHit[] = []
+  const seen = new Set<string>()
+  const add = (url: string, title?: string): void => {
+    const clean = url.replace(/[.,;]+$/, '')
+    if (!clean || seen.has(clean)) return
+    seen.add(clean)
+    hits.push({ title: title || clean, url: clean })
+  }
+  for (const item of json.output ?? []) {
+    if (item.type === 'web_search_call' && item.action?.type === 'open_page' && item.action.url) add(item.action.url)
+    if (item.type === 'message') {
+      for (const part of item.content ?? []) {
+        for (const a of part.annotations ?? []) if (a.type === 'url_citation' && a.url) add(a.url, a.title)
+        for (const m of (part.text ?? '').matchAll(/https?:\/\/[^\s)\]<>"']+/g)) add(m[0])
+      }
+    }
+  }
+  return hits.length ? { query: input.query, hits } : { query: input.query, hits: [], note: 'no results found' }
+}
+
 const DESCRIPTION = `- Searches the web for current information and returns matching result links (title + URL).
 - Input: a search query, optionally scoped with allowed_domains or blocked_domains.
 - Read-only. After using results, cite the source URLs in your answer.
@@ -159,7 +218,9 @@ export const webSearchTool = buildTool<typeof inputSchema, WebSearchOutput>({
     const out =
       ctx.llm.protocol === 'gemini'
         ? await delegatedSearchGemini(ctx.llm, input, ctx.signal)
-        : await delegatedSearch(ctx.llm, input, ctx.signal)
+        : ctx.llm.protocol === 'openai'
+          ? await delegatedSearchOpenAI(ctx.llm, input, ctx.signal)
+          : await delegatedSearch(ctx.llm, input, ctx.signal)
     return { data: out }
   },
   mapResult(out, toolUseId): ToolResultBlock {
