@@ -87,7 +87,7 @@ function examineToPanelTool(ex: WorkspaceExamine): ToolCall {
 // One owner's studio_lens cards (shared by the live "Panel reviews" section and the History section). Owner
 // header shown whenever a real expert owns it — even a single owner in a collab — so attribution is never lost
 // ("不要串"); solo (no expertId) renders headerless.
-function PanelGroup({ owner, panelTools, expertsById }: { owner: string; panelTools: ToolCall[]; expertsById: ReturnType<typeof useAllExperts>['byId'] }): ReactElement {
+function PanelGroup({ owner, panelTools, expertsById, convId }: { owner: string; panelTools: ToolCall[]; expertsById: ReturnType<typeof useAllExperts>['byId']; convId?: string }): ReactElement {
   return (
     <div className="ws-panel-group">
       {owner ? (
@@ -97,7 +97,7 @@ function PanelGroup({ owner, panelTools, expertsById }: { owner: string; panelTo
         </div>
       ) : null}
       {panelTools.map((tl) => (
-        <LensCard key={tl.id} tool={tl} />
+        <LensCard key={tl.id} tool={tl} convId={convId} />
       ))}
     </div>
   )
@@ -359,20 +359,31 @@ export function WorkspaceTasks({ activeConv }: { activeConv: string | null }): R
           <div className="ws-wfruns">
             <div className="ws-sub-head">{t('tasks.workflows')}</div>
             {wfEntries.map((r) => (
-              <button
-                key={r.runId}
-                className="ws-wfrun"
-                title={t('wf.openPanel')}
-                onClick={() => window.dispatchEvent(new CustomEvent('nsai:open-workflow-run', { detail: { workflowId: r.workflowId, runId: r.runId } }))}
-              >
-                <span className="wf-dot run" />
-                <span className="ws-wfrun-name">{r.name || '…'}</span>
-                {r.phase ? <span className="ws-wfrun-meta">{r.phase}</span> : null}
-                {r.role ? <span className="ws-wfrun-meta">{expertsById[r.role]?.name ?? r.role}</span> : null}
-                <span className="ws-wfrun-tail">
-                  {r.steps > 0 ? `${Math.min(r.stepsDone, r.steps)}/${r.steps} · ` : ''}↑{fmtTok(r.inTokens)}
-                </span>
-              </button>
+              // The entry (opens the run panel) + its Stop are TWO sibling buttons in a flex wrap — a Stop button
+              // can't nest inside the entry button. Stop hits the existing workflows.stop(runId) (pure UI; mirrors
+              // the scheduled row's Stop). tasks stop tasks — the composer .cmp-stop never reaches a workflow run.
+              <div key={r.runId} className="ws-wfrun-wrap">
+                <button
+                  className="ws-wfrun"
+                  title={t('wf.openPanel')}
+                  onClick={() => window.dispatchEvent(new CustomEvent('nsai:open-workflow-run', { detail: { workflowId: r.workflowId, runId: r.runId } }))}
+                >
+                  <span className="wf-dot run" />
+                  <span className="ws-wfrun-name">{r.name || '…'}</span>
+                  {r.phase ? <span className="ws-wfrun-meta">{r.phase}</span> : null}
+                  {r.role ? <span className="ws-wfrun-meta">{expertsById[r.role]?.name ?? r.role}</span> : null}
+                  <span className="ws-wfrun-tail">
+                    {r.steps > 0 ? `${Math.min(r.stepsDone, r.steps)}/${r.steps} · ` : ''}↑{fmtTok(r.inTokens)}
+                  </span>
+                </button>
+                <button
+                  className="icon-btn sm ws-wfrun-stop"
+                  title={t('tasks.stopRun')}
+                  onClick={() => void window.api.workflows.stop(r.runId)}
+                >
+                  <Icons.x size={14} />
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -412,7 +423,7 @@ export function WorkspaceTasks({ activeConv }: { activeConv: string | null }): R
           <div className="ws-panels">
             <div className="ws-sub-head">{t('tasks.panels')}</div>
             {runningPanels.map(([owner, panelTools]) => (
-              <PanelGroup key={'rp' + (owner || 'solo')} owner={owner} panelTools={panelTools} expertsById={expertsById} />
+              <PanelGroup key={'rp' + (owner || 'solo')} owner={owner} panelTools={panelTools} expertsById={expertsById} convId={activeConv ?? undefined} />
             ))}
           </div>
         )}

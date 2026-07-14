@@ -462,6 +462,12 @@ export function createLensHandle(deps: LensHandleDeps): PanelHandle {
         return { ok: false, message: 'studio_lens needs target file path(s) — pass `paths`. (Inline-text targets are not supported.)' }
       }
       const mode = input.mode === 'understand' ? 'understand' : 'review'
+      // Abort on EITHER the run/session signal (composer stop / session dispose) OR the per-handle async signal
+      // (the Tasks-panel Stop → AsyncRegistry.stop aborts just this launched op). The sync (non-async) tool path
+      // passes no signal → deps.signal alone. Without folding in input.signal, a Tasks Stop would flip the card but
+      // never actually reap the fan-out (examine binds opts.signal, not the handle's controller).
+      const runSignal = input.signal ? AbortSignal.any([deps.signal, input.signal]) : deps.signal
+      const asyncHandleId = input.asyncHandleId
 
       const shim: CoordinatorCallbacks = {
         onDispatch: () => {},
@@ -472,7 +478,15 @@ export function createLensHandle(deps: LensHandleDeps): PanelHandle {
         onStepDone: () => {},
         onExpertActive: () => {},
         onToolEvent: (_roleId, ev: AgentEvent | AgentLlmEvent) => {
-          if (ev.type !== 'assistant' && ev.type !== 'tool_results' && ev.type !== 'compaction') deps.onStream(ev)
+          if (ev.type === 'assistant' || ev.type === 'tool_results' || ev.type === 'compaction') return
+          // Tag the panel-open card — the ONE sub_tool_start rooted at LENS_PANEL_ROOT — with the async handle id
+          // so the Tasks-panel Stop button knows which background handle to abort. Its reviewer sub-agents (whose
+          // parentToolId is the panel id, not LENS_PANEL_ROOT) don't carry it. The renderer stores it as the
+          // StudioLens ToolCall's input.asyncHandleId (applySubToolStart preserves input).
+          if (asyncHandleId && ev.type === 'sub_tool_start' && ev.parentToolId === LENS_PANEL_ROOT && ev.name === 'StudioLens') {
+            ev.input = { ...ev.input, asyncHandleId }
+          }
+          deps.onStream(ev)
         },
         onToolImage: (att) => deps.onToolImage?.(att),
         requestPermission: (_roleId, req, sig) => deps.requestPermission(req, sig),
@@ -483,7 +497,7 @@ export function createLensHandle(deps: LensHandleDeps): PanelHandle {
         prompt: '',
         dispatch: [deps.callerRoleId, 'studio_lens'],
         cb: shim,
-        signal: deps.signal,
+        signal: runSignal,
         cwd: deps.cwd,
         permissionMode: deps.permissionMode,
       }

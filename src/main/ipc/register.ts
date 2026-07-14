@@ -22,6 +22,7 @@ import { registerScheduledHandlers } from './scheduled.handler'
 import { registerMonitorHandlers } from './monitor.handler'
 import { registerAnalyticsHandlers } from './analytics.handler'
 import { registerServiceHandlers } from './services.handler'
+import { registerAsyncHandlers } from './async.handler'
 import { registerUpdateHandlers } from './update.handler'
 import { registerPreviewHandlers } from './preview.handler'
 import { registerComputerUseHandlers } from './computer-use.handler'
@@ -56,6 +57,7 @@ export function registerIpc(): void {
   registerMonitorHandlers()
   registerAnalyticsHandlers()
   registerServiceHandlers()
+  registerAsyncHandlers()
   registerPreviewHandlers()
   registerComputerUseHandlers()
   registerWorkflowHandlers()

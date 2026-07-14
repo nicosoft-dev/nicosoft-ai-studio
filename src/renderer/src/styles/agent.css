@@ -208,6 +208,11 @@
 .pe-fail { color: var(--error); flex: none; }
 .pe-fixed { color: var(--accent); flex: none; }
 .pe-chev { margin-left: auto; }
+/* Live-review header row: the fold button (studio_lens · mode · counts) + an optional Tasks-panel Stop, two
+   sibling buttons — a Stop button can't nest inside the fold button. The fold grows; the Stop keeps its icon size. */
+.pe-head-row { display: flex; align-items: center; }
+.pe-head-row > .pe-head { flex: 1; min-width: 0; }
+.pe-stop { flex-shrink: 0; margin-right: 6px; }
 .pe-body { border-top: 1px solid var(--border-1); padding: 2px 0; }
 .pe-row-wrap { padding: 0 10px; }
 .pe-row {

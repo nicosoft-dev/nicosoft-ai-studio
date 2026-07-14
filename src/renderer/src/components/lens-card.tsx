@@ -339,10 +339,10 @@ function ReaderRow({ path, tool }: { path: string; tool?: ToolCall }): ReactElem
   )
 }
 
-function LiveCard({ tool }: { tool: ToolCall }): ReactElement {
+function LiveCard({ tool, convId }: { tool: ToolCall; convId?: string }): ReactElement {
   // Live cards open by default — the point is to WATCH the fan-out, like the Workflow /workflows view.
   const [open, setOpen] = useState(true)
-  const input = (tool.input ?? {}) as { mode?: string; subjects?: string[]; orchestration?: string }
+  const input = (tool.input ?? {}) as { mode?: string; subjects?: string[]; orchestration?: string; asyncHandleId?: string }
   const mode = input.mode ?? 'review'
   const isUnderstand = mode === 'understand'
   const orchestration = input.orchestration // 'authored' (the model wrote the fan-out) | 'template' (fixed fallback)
@@ -389,6 +389,7 @@ function LiveCard({ tool }: { tool: ToolCall }): ReactElement {
 
   return (
     <div className={'pe-card' + (confirmed > 0 && !isUnderstand ? ' has-flag' : '')}>
+      <div className="pe-head-row">
       <button className="pe-head" onClick={() => setOpen((o) => !o)}>
         {running ? <span className="tr-dot" /> : null}
         <span className="pe-name">studio_lens</span>
@@ -409,6 +410,18 @@ function LiveCard({ tool }: { tool: ToolCall }): ReactElement {
         )}
         <span className={'tr-chev pe-chev' + (open ? ' open' : '')}><Icons.chevronRight size={12} /></span>
       </button>
+      {/* Tasks-panel Stop: abort THIS running review's background handle (chat stops chat, tasks stop tasks). Shown
+          only for a live handle we can address — a persisted/reloaded card has no convId+asyncHandleId, so no Stop. */}
+      {running && convId && input.asyncHandleId ? (
+        <button
+          className="icon-btn sm pe-stop"
+          title="Stop this review"
+          onClick={() => void window.api.async.stopHandle(convId, input.asyncHandleId as string)}
+        >
+          <Icons.x size={14} />
+        </button>
+      ) : null}
+      </div>
       {open ? (
         <div className="pe-body">
           {running && agentN === 0 ? (
@@ -466,9 +479,10 @@ function LiveCard({ tool }: { tool: ToolCall }): ReactElement {
   )
 }
 
-export function LensCard({ tool }: { tool: ToolCall }): ReactElement {
+export function LensCard({ tool, convId }: { tool: ToolCall; convId?: string }): ReactElement {
   // findingsCard (persisted, rebuilt from history) → the durable per-candidate result view; otherwise the tool
-  // is a LIVE running fan-out → the workflow-style process tree.
+  // is a LIVE running fan-out → the workflow-style process tree. convId flows only to the live card (its Stop
+  // button); a persisted result card has no running handle to stop.
   const findingsCard = ((tool.input ?? {}) as { findingsCard?: boolean }).findingsCard === true
-  return findingsCard ? <ResultCard tool={tool} /> : <LiveCard tool={tool} />
+  return findingsCard ? <ResultCard tool={tool} /> : <LiveCard tool={tool} convId={convId} />
 }

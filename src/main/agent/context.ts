@@ -36,7 +36,10 @@ export interface StudioLensResult {
   findings?: Array<{ subject: string; passed: boolean; refuted?: boolean; feedback: string }>
 }
 export interface PanelHandle {
-  examine(input: { paths?: string[]; mode: 'review' | 'understand' }): Promise<StudioLensResult>
+  // signal: the per-handle abort signal when launched as a background handle (AsyncRegistry.launch → the Tasks-
+  // panel Stop aborts THIS op alone via AsyncRegistry.stop); combined with the run/session signal inside examine.
+  // asyncHandleId: that handle's id, tagged onto the panel card so the Tasks Stop button knows which handle to stop.
+  examine(input: { paths?: string[]; mode: 'review' | 'understand'; signal?: AbortSignal; asyncHandleId?: string }): Promise<StudioLensResult>
 }
 
 export interface ReadFileEntry {

@@ -41,6 +41,7 @@ import { createLensHandle } from './lens/agent-lens'
 import { recallText } from './memory/project-map'
 import { indexText as agentMemoryIndexText } from './memory/agent-memory'
 import { setActiveServices, clearActiveServices, broadcastConvServices } from './active-services'
+import { setActiveAsync, clearActiveAsync } from './active-async'
 import { createPreviewHandle } from './workspace/preview'
 import * as workspaceTasks from './workspace/tasks'
 
@@ -195,6 +196,10 @@ export async function runCollabSession(
   // One async-op registry per collaboration (C3 §6.2): experts launch long ops as background handles and
   // await_async them. Threaded the session signal so an aborted session cancels any in-flight handle (T3).
   const asyncRegistry = new AsyncRegistry(signal)
+  // Expose it convId-keyed (mirrors setActiveServices below) so the Tasks-panel Stop (async:stopHandle) can abort
+  // ONE of this collaboration's background handles — e.g. a running studio_lens review — without tree-killing the
+  // rest. Cleared in the finally (clearActiveAsync), same lifecycle as the service registry registration.
+  setActiveAsync(convId, asyncRegistry)
   // Live Tasks-panel wiring: push the active service set on every change; archive each one to history as it
   // exits; register the handle so the renderer can stop / read logs of a running service on demand.
   registry.setHooks({
@@ -517,6 +522,7 @@ export async function runCollabSession(
     selfRhythmService.disposeForConv(convId)
     hooks.onServices?.([])
     clearActiveServices(convId, registry)
+    clearActiveAsync(convId, asyncRegistry) // stop exposing this session's registry to async:stopHandle (guarded so a successor's registration survives)
     broadcastConvServices(convId, []) // clear the Tasks panel's Services section on teardown
     registry.dispose() // tree-kill every service the collaboration started — no lingering ports
     asyncRegistry.dispose() // tree-kill any still-running launch_async op, INCLUDING unawaited ones — a normal quiescent end never aborts the signal, so this is the only cleanup hook

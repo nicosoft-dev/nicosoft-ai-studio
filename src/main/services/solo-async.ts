@@ -39,6 +39,13 @@ export function getSoloAsync(convId: string): SoloAsyncEntry {
   return e
 }
 
+// Peek the conv's async entry WITHOUT creating one (getSoloAsync is get-or-create). The async:stopHandle IPC
+// uses this to reach a solo conv's persistent registry for a Tasks-panel Stop — a conv with no background op has
+// no entry, and we must not materialize one (with its onComplete/AbortController) just to look.
+export function peekSoloAsync(convId: string): SoloAsyncEntry | undefined {
+  return entries.get(convId)
+}
+
 // await_async's SOLO branch (ctx.parkSolo) calls this: record the awaited handles + ride-along settled
 // summaries, reconcile any that finished between the tool's status read and now (else we'd park on a handle
 // whose onComplete already fired → stuck forever), and return the "parked" message so the agent ends its turn.

@@ -1556,6 +1556,12 @@
 /* scheduled run row: same shell as a workflow run but not a button (has its own Stop control) */
 .ws-schedrun { cursor: default; }
 .ws-schedrun-stop { margin-left: auto; flex-shrink: 0; }
+/* running-workflow row: the (clickable, opens the panel) entry + its Stop are two sibling buttons in a flex wrap
+   — a Stop button can't nest inside the entry button. The entry grows; the Stop keeps its natural icon size. */
+.ws-wfrun-wrap { display: flex; align-items: center; gap: 4px; }
+.ws-wfrun-wrap + .ws-wfrun-wrap { margin-top: 6px; }
+.ws-wfrun-wrap > .ws-wfrun { flex: 1; min-width: 0; }
+.ws-wfrun-stop { flex-shrink: 0; }
 /* scheduled run History card: expandable per-step trail */
 .ws-sched-steps { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; padding-left: 8px; border-left: 2px solid var(--border-1); }
 .ws-sched-step { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }

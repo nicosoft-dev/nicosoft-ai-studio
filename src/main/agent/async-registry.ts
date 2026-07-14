@@ -14,13 +14,25 @@ export interface AsyncHandle {
   error?: string // the failure message, set on 'failed'
 }
 
+// Module-level (process-global) so handle ids are unique across EVERY registry, not just within one. A solo
+// direct-chat's registry (solo-async) is conv-level and PERSISTENT (it outlives runs), while a collaboration's
+// (agent-collab) is per-session — so the same convId can, in principle, be backed by two registries. async:stopHandle
+// locates a registry by convId and then stop()s by id; with a per-registry counter both would mint 'async-lens-1',
+// and a collision could abort the WRONG op. A process-global counter makes every id unambiguous (each id lives in
+// exactly one registry), so that lookup is provably safe WITHOUT relying on solo/collab routing being mutually
+// exclusive. The id format is unchanged (async-<kind>-<n>); only the number is now global (nothing parses it).
+let handleSeq = 0
+
 export class AsyncRegistry {
   private handles = new Map<string, AsyncHandle>()
-  private counter = 0
   // 批C2a: each launch's settle promise, so a SOLO caller can AWAIT one handle within its turn (await_async's solo
   // path). Collab instead wakes a parked expert via onComplete. The promise never rejects (the IIFE captures the
   // runner's throw as status:'failed'), so settle() always resolves to the settled handle.
   private settlers = new Map<string, Promise<void>>()
+  // Per-handle abort controllers (批 P0 — Tasks-panel Stop). Each is chained to the shared `ac` below, so a
+  // parentSignal abort / dispose() still fires EVERY handle's controller (whole-session tree-kill); stop(id) fires
+  // only ONE. Without this the sole kill switch was `ac` (all-or-nothing) — a Tasks Stop had no way to end one op.
+  private controllers = new Map<string, AbortController>()
   // Internal kill switch, chained to the owning session's signal. Both a real parentSignal abort AND dispose()
   // (called on a NORMAL quiescent session end, which does NOT abort parentSignal) fire it → every launch runner
   // sees its signal abort and tree-kills its background work (launch-async.ts onAbort). This MUST be independent
@@ -38,13 +50,20 @@ export class AsyncRegistry {
   // status to done/failed and firing onComplete. The runner gets the registry's INTERNAL signal (not parentSignal)
   // so dispose() on a normal session end cancels it too. A runner throw is captured as status:'failed' — it never
   // rejects into the session (a background fault must not crash it, mirroring CollabSession's per-expert isolation).
-  launch(kind: AsyncHandle['kind'], info: string, runner: (signal: AbortSignal) => Promise<unknown>): AsyncHandle {
-    const id = `async-${kind}-${++this.counter}`
+  launch(kind: AsyncHandle['kind'], info: string, runner: (signal: AbortSignal, id: string) => Promise<unknown>): AsyncHandle {
+    const id = `async-${kind}-${++handleSeq}`
     const handle: AsyncHandle = { id, kind, status: 'running', info }
     this.handles.set(id, handle)
+    // Per-handle controller so stop(id) can end THIS op alone. Chained to the shared `ac`: a parentSignal abort or
+    // dispose() aborts it too (whole-session tree-kill preserved). The runner also receives `id` so it can tag its
+    // progress (e.g. the lens panel card carries its handle id → the Tasks Stop button knows which handle to stop).
+    const hc = new AbortController()
+    if (this.ac.signal.aborted) hc.abort()
+    else this.ac.signal.addEventListener('abort', () => hc.abort(), { once: true })
+    this.controllers.set(id, hc)
     const settler = (async (): Promise<void> => {
       try {
-        handle.result = await runner(this.ac.signal)
+        handle.result = await runner(hc.signal, id)
         handle.status = 'done'
       } catch (e) {
         handle.status = 'failed'
@@ -58,6 +77,17 @@ export class AsyncRegistry {
 
   get(id: string): AsyncHandle | undefined {
     return this.handles.get(id)
+  }
+
+  // Stop ONE running handle (Tasks-panel Stop for lens/research/design/migrate). Aborts only its own controller,
+  // so its runner's onAbort reaps just that op; the settler captures the abort as status:'failed' and fires
+  // onComplete like any normal settle. No-op (false) for an unknown / already-settled id — the other handles keep
+  // running (unlike dispose(), which tree-kills all of them on session end).
+  stop(id: string): boolean {
+    const h = this.handles.get(id)
+    if (!h || h.status !== 'running') return false
+    this.controllers.get(id)?.abort()
+    return true
   }
 
   // Await ONE handle's completion (SOLO within-turn await_async). Resolves to the settled handle (done/failed),

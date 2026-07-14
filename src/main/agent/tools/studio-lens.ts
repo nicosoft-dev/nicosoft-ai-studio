@@ -110,7 +110,10 @@ export const studioLensTool = buildTool<typeof inputSchema, StudioLensResult>({
     // 批A's delta-stall watchdog bounds the handle so it always settles (no indefinite park, N1).
     if (ctx.async) {
       const label = `${mode} panel over ${input.paths.length} path(s): ${input.paths.slice(0, 3).join(', ')}${input.paths.length > 3 ? ' …' : ''}`
-      const handle = ctx.async.launch('lens', label, () => ctx.panel!.examine({ paths: input.paths, mode }))
+      // Pass the per-handle signal + id into examine: the signal lets the Tasks-panel Stop (AsyncRegistry.stop →
+      // this handle's controller) actually abort the fan-out, and the id is tagged onto the panel card so that Stop
+      // button knows which handle to stop. examine combines the signal with its own run/session signal.
+      const handle = ctx.async.launch('lens', label, (signal, id) => ctx.panel!.examine({ paths: input.paths, mode, signal, asyncHandleId: id }))
       return {
         data: {
           ok: true,

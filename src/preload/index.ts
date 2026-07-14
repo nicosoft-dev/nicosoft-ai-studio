@@ -535,6 +535,12 @@ const api = {
     stashSecrets: (values: Record<string, string>): Promise<string> =>
       ipcRenderer.invoke('extensions:stashSecrets', values)
   },
+  // Stop ONE background async handle a role parked on (the Tasks-panel Stop on a running lens/research/design/
+  // migrate card). chat stops chat (.cmp-stop → the turn); tasks stop tasks — this reaches the conv's async
+  // registry to abort just that op. Returns false when the handle is unknown / already settled.
+  async: {
+    stopHandle: (convId: string, handleId: string): Promise<boolean> => ipcRenderer.invoke('async:stopHandle', convId, handleId)
+  },
   workflows: {
     list: (): Promise<WorkflowDto[]> => ipcRenderer.invoke('workflows:list'),
     get: (id: string): Promise<WorkflowDto | null> => ipcRenderer.invoke('workflows:get', id),
