@@ -490,46 +490,21 @@ export function Composer({
       setCmdOutput(['Usage:  /research <question>', 'Fan-out web research with adversarial verification → a cited report.'])
       return
     }
-    // P1 (research-role-driven-redesign) migrates ONLY the SOLO path to a role-driven tool. A COORDINATOR
-    // conversation keeps the old system run until P2 wires Danny's dispatch — so coordinator /research is
-    // unchanged here (no collab regression while P1 is solo-scoped). Distinguished by the active role being the
-    // coordinator (a coordinator collab runs in a kind:'single' conv, so the role — not conv.kind — is the signal).
-    if (roleIsCoordinator(expert.id)) {
-      const rawCmd = value.trim()
-      setCmdOutput(null)
-      void (async () => {
-        try {
-          chat.ensureStreamListeners()
-          let convId = activeConv
-          if (!convId) {
-            const conv = await window.api.conversations.create({ kind: 'single', primaryRoleId: expert.id, title: rawCmd.slice(0, 60), cwd: effectiveCwd || '' })
-            convId = conv.id
-            chat.adoptConversation(conv)
-          }
-          const line = await window.api.conversations.append(convId, { author: 'user', content: rawCmd })
-          chat.insertUserLine(convId, { id: line.id, text: rawCmd })
-          const res = await window.api.research.run({ convId, question })
-          if (!res.ok) toast.error(res.error)
-        } catch (err) {
-          toast.error(err instanceof Error ? err.message : String(err))
-        }
-      })()
-      return undefined
-    }
-    // SOLO: the active role must be agent-enabled to drive studio_research — roleHasAgent is the SAME predicate that
-    // gates the agent-loop path (chat.ts route) and the PANEL_TOOLS kit (agent-tools.ts isAgent), and that /workflow
-    // branches on here too. A chat-only persona carries no studio_research tool, so a plain turn would just
-    // hallucinate a "research" reply — fail LOUDLY instead of silently faking it. (Built-ins all qualify; only a
-    // custom chat-only persona hits this.)
-    if (!roleHasAgent(expert.id)) {
+    // The active role must be able to DRIVE research: an AGENT role calls studio_research itself; the COORDINATOR
+    // (Danny) dispatches it to a research role via route()'s /research fast path. A chat-only persona can do
+    // neither (no studio_research tool, no dispatch) — fail loudly instead of hallucinating a "research" reply.
+    // roleHasAgent is the same predicate that gates the agent-loop path + the PANEL_TOOLS kit; roleIsCoordinator
+    // lets Danny through (Danny is not roleHasAgent but routes the command). Built-ins all qualify.
+    if (!roleHasAgent(expert.id) && !roleIsCoordinator(expert.id)) {
       toast.error('This role can’t run research. Switch to an agent role (e.g. Analyst).')
       return
     }
     setCmdOutput(null)
-    // §4.2: /research is a ROLE-DRIVEN turn now. Hand the active role a normal turn (dispatchSend carries its
-    // binding/model/cwd and creates the conversation on the first turn, exactly like a typed message).
-    // studio_research's tool prompt maps this "/research <q>" message to an immediate studio_research call → the
-    // progress card lands in the Tasks panel (not a chat-flow launch card), and the role reports the cited report.
+    // research-role-driven-redesign §4.2/§4.4: /research is a ROLE-DRIVEN turn now, not a system run. Hand the
+    // active role a normal turn (dispatchSend carries its binding/model/cwd and creates the conversation on the
+    // first turn). SOLO agent role → it calls studio_research (its tool prompt maps this "/research <q>" message);
+    // COORDINATOR conv → Danny's route() /research fast path dispatches a research role. Either way the progress
+    // card lands in the Tasks panel (not a chat-flow launch card) and the role reports the cited report.
     dispatchSend(`/research ${question}`)
     return undefined
   }

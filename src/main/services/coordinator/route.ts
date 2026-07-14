@@ -85,6 +85,13 @@ export async function route(userInput: string, history: convRepo.MessageRow[], c
   // (lifecycle review 2026-07-11).
   const ready = enabled.filter((r) => rolesService.isDispatchReady(r))
   if (ready.length === 0) {
+    // /research must NEVER fall to the Danny-direct branch below: Danny carries no studio_research tool, so he'd
+    // answer the "/research <q>" turn conversationally with NO research (silent wrong result). Dispatch to an
+    // enabled agent role (analyst if enabled) so its dispatch fails LOUDLY ("configure this role") — the actionable
+    // error the old system's pickResearchRole()==null path surfaced. Above the direct return, mirroring @mention.
+    if (/^\/research(\s|$)/.test(userInput.trim())) {
+      return { mode: 'single', role: enabled.includes('analyst') ? 'analyst' : enabled[0], reason: '/research — no dispatch-ready research role', needsPlan: false }
+    }
     // Zero experts can run a step right now. If Danny himself is dispatch-ready he answers DIRECT —
     // his own binding is all direct mode needs, and chitchat that worked pre-filter must keep working
     // (the router LLM used to pick 'direct' for it). Only when Danny can't run either do we fall back
@@ -92,6 +99,19 @@ export async function route(userInput: string, history: convRepo.MessageRow[], c
     return rolesService.isDispatchReady('coordinator')
       ? { mode: 'direct', reason: 'no dispatch-ready experts — answering directly', needsPlan: false }
       : { mode: 'single', role: enabled[0], reason: 'no dispatch-ready roles', needsPlan: isNonTrivialTask(userInput) }
+  }
+
+  // /research <q> fast path (research-role-driven-redesign §4.4) — like an @mention, this is an EXPLICIT command,
+  // so route it DETERMINISTICALLY rather than through the LLM router (which reads a short research question as the
+  // 'direct' case → Danny answers from memory, and Danny carries NO studio_research tool → no research). Dispatch
+  // (single) to a research-capable, dispatch-ready agent role — the bound research role (analyst) if ready, else the
+  // first ready role. Every ready role is an agent role, so it carries studio_research and, per that tool's prompt,
+  // runs it on this '/research …' turn; the report flows back through Danny. NEVER 'direct'. Research is a
+  // deliverable → isWork (assignments parity).
+  if (/^\/research(\s|$)/.test(userInput.trim())) {
+    const q = userInput.trim().replace(/^\/research\s*/, '').trim()
+    const researchRole = ready.includes('analyst') ? 'analyst' : ready[0]
+    return { mode: 'single', role: researchRole, reason: 'explicit /research command', needsPlan: false, isWork: true, taskTitle: `Research: ${q.slice(0, 50)}` }
   }
 
   const binding = rolesService.getBinding('coordinator')
