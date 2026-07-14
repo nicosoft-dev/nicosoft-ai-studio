@@ -327,6 +327,7 @@
   "conv.endpointKeyUnreadable": "端點“{endpoint}”的金鑰已無法解密（應用身分變更）— 請在設定中重新輸入",
   "conv.endpointNoModel": "請在設定中為 {name} 選擇一個模型",
   "conv.bindEndpoint": "綁定一個帶金鑰和模型的端點以便與 {name} 對話",
+  "conv.ctxRing": "上下文用量:{summary}",
   "conv.openSettings": "開啟設定",
   "conv.chooseFolder": "請在上方選擇一個專案資料夾以開始",
   "conv.askPlaceholder": "向 {name} 提問 — Enter 傳送，Shift+Enter 換行",

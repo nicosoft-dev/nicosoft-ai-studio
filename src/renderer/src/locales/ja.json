@@ -327,6 +327,7 @@
   "conv.endpointKeyUnreadable": "エンドポイント「{endpoint}」のキーは復号できません（アプリ ID 変更）— 設定で再入力してください",
   "conv.endpointNoModel": "設定で {name} のモデルを選択してください",
   "conv.bindEndpoint": "{name} と会話するには、キーとモデルを持つエンドポイントをバインドしてください",
+  "conv.ctxRing": "コンテキスト使用量: {summary}",
   "conv.openSettings": "設定を開く",
   "conv.chooseFolder": "開始するには上でプロジェクトフォルダを選択してください",
   "conv.askPlaceholder": "{name} に質問 — Enter で送信、Shift+Enter で改行",

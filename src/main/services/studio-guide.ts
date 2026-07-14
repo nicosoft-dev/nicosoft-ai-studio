@@ -35,7 +35,7 @@ export type StudioGuideTopic = (typeof STUDIO_GUIDE_TOPICS)[number]
 // run (the e2e pin caps the built index at 1,600 chars ≈ the ratified ~200-token budget).
 const TOPIC_HINTS: Record<StudioGuideTopic, string> = {
   overview: 'what Studio is, the nine experts, ways of working, quick start',
-  chat: 'conversations, composer, slash commands, image attachments, token meter, approvals',
+  chat: 'conversations, composer, slash commands, image attachments, context ring, approvals',
   workflows: 'saved multi-expert procedures: create/edit, drafts vs enabled, /workflow, runs & replay',
   scheduled: 'timed tasks (triggers + step chains), monitors, expert-managed schedules',
   'tasks-panel': 'the ⌘J drawer: to-dos, workflow runs, review findings, services, history',

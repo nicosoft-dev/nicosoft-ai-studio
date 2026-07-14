@@ -13,6 +13,7 @@ import { parseWorkflowArgs, launchPayload, type WfCmdWorkflow } from '@/lib/work
 import { resolveTarget } from '@/lib/command-routing'
 import { toast } from '@/stores/toast'
 import { PathBar } from '@/components/path-bar'
+import { ContextIndicator } from '@/components/context-ring'
 import { GitStatusChip } from '@/components/git-status-chip'
 import { resolveConvCwd } from '@/lib/resolve-cwd'
 import { participantsOf, matchLeadingMention } from '@/lib/conversation-participants'
@@ -48,12 +49,6 @@ function bindBannerMessage(
   if (selectedEp.keyState !== 'ok') return t('conv.endpointNoKey', { endpoint: selectedEp.name })
   if (!b.model) return t('conv.endpointNoModel', { name })
   return t('conv.bindEndpoint', { name }) // unreachable given noEndpoint already true — defensive
-}
-
-// Compact token readout: K below 1M, M at/above it (1M, 1.05M, 1.5M — trailing zeros trimmed).
-function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return `${parseFloat((n / 1_000_000).toFixed(2))}M`
-  return `${parseFloat((n / 1000).toFixed(1))}K`
 }
 
 /* — Composer: real model/thinking pickers, path bar, image paste, streams via the chat store — */
@@ -141,7 +136,6 @@ export function Composer({
     baseTokens > 0
       ? baseTokens + value.length / 4
       : messages.reduce((s, m) => s + m.text.length, 0) / 4 + value.length / 4
-  const tokenAmber = b.contextLength > 0 && usedTokens / b.contextLength > 0.85
   const selectedEp = b.endpoints.find((e) => e.id === b.endpointId)
   const agent = roleHasAgent(expert.id)
   // A project folder is OPTIONAL for every agent role, Flynn/Shuri included: they can chat folder-free,
@@ -684,11 +678,7 @@ export function Composer({
             ) : null}
             <ThinkingPicker family={b.family} model={b.model} depth={effectiveDepth} onChange={b.onDepth} disabled={!ready} />
             {agent ? <ModePicker value={mode} onChange={(m) => setMode(expert.id, m)} disabled={!ready} /> : null}
-            {b.contextLength > 0 ? (
-              <span className={'cmp-tokens' + (tokenAmber ? ' amber' : '')}>
-                {fmtTokens(usedTokens)} / {fmtTokens(b.contextLength)}
-              </span>
-            ) : null}
+            <ContextIndicator used={usedTokens} max={b.contextLength} />
           </div>
           <AttachmentStrip items={attach} onRemove={(id) => setAttach((p) => p.filter((a) => a.id !== id))} />
           {cmdOutput ? (

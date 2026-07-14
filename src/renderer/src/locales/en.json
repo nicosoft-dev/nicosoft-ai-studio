@@ -327,6 +327,7 @@
   "conv.endpointKeyUnreadable": "Endpoint \"{endpoint}\" has a key that can no longer be decrypted (app identity changed) — re-enter it in Settings",
   "conv.endpointNoModel": "Pick a model for {name} in settings",
   "conv.bindEndpoint": "Bind an endpoint with a key and model to chat with {name}",
+  "conv.ctxRing": "Context usage: {summary}",
   "conv.openSettings": "Open settings",
   "conv.chooseFolder": "Choose a project folder above to start",
   "conv.askPlaceholder": "Ask {name} — Enter to send, Shift+Enter for newline",

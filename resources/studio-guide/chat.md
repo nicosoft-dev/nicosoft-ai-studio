@@ -14,7 +14,7 @@ The main surface: talk to one expert (solo) or to Danny (the coordinator, who ro
 - **Images**: paste, drag-and-drop, or the "Attach image" button (images only — other file types go through the working folder instead).
 - **Folder**: the path bar picks a working directory, enabling Files / Diff / Terminal / Preview for this conversation (see Workspace).
 - **Pickers** under the input: model, thinking depth (when the model supports it), permission Mode (Ask / Plan / Auto), and — for Georgia — an image model picker.
-- **Token meter**: "used / context limit" (e.g. `45.2K / 200K`); it turns amber above 85%. Use `/compact` when it gets tight.
+- **Context ring**: a small ring at the right of the pickers fills as the context window does. Hover it for the exact reading (e.g. `45.2K / 200K (23%)`). It is accent-coloured until 75%, amber from 75%, and red from 90% — use `/compact` once it turns.
 
 ## Slash commands
 
