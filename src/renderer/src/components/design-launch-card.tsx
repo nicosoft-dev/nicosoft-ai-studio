@@ -9,7 +9,6 @@
 import type { ReactElement } from 'react'
 import { Icons } from '@/components/icons'
 import { ChunkedMarkdown } from '@/components/markdown'
-import { useT } from '@/stores/locale'
 
 type DesignStatus = 'running' | 'done' | 'failed' | 'stopped'
 
@@ -33,7 +32,6 @@ function parsePayload(content: string): DesignPayload | null {
 }
 
 export function DesignLaunchCard({ content }: { content: string }): ReactElement {
-  const t = useT()
   const p = parsePayload(content)
   if (!p) return <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{content}</p>
   const status: DesignStatus = p.status ?? 'running'
@@ -50,11 +48,11 @@ export function DesignLaunchCard({ content }: { content: string }): ReactElement
         <span className="design-q">{p.problem ?? ''}</span>
         <span className="design-status">
           <span className={'wf-dot' + dotCls} />
-          {t(`design.status.${status}`)}
+          {status}
         </span>
         {status === 'running' && (
           <button className="design-stop" onClick={stop}>
-            {t('design.stop')}
+            Stop
           </button>
         )}
       </div>
@@ -69,8 +67,8 @@ export function DesignLaunchCard({ content }: { content: string }): ReactElement
           <ChunkedMarkdown text={p.report} live={false} />
         </div>
       ) : null}
-      {status === 'failed' ? <div className="design-err">{p.error ?? t('design.failedNote')}</div> : null}
-      {status === 'stopped' ? <div className="design-note">{t('design.stoppedNote')}</div> : null}
+      {status === 'failed' ? <div className="design-err">{p.error ?? 'Design review failed.'}</div> : null}
+      {status === 'stopped' ? <div className="design-note">Design review stopped.</div> : null}
     </div>
   )
 }

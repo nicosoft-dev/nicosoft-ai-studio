@@ -9,7 +9,6 @@
 import type { ReactElement } from 'react'
 import { Icons } from '@/components/icons'
 import { ChunkedMarkdown } from '@/components/markdown'
-import { useT } from '@/stores/locale'
 
 type ResearchStatus = 'running' | 'done' | 'failed' | 'stopped'
 
@@ -33,7 +32,6 @@ function parsePayload(content: string): ResearchPayload | null {
 }
 
 export function ResearchLaunchCard({ content }: { content: string }): ReactElement {
-  const t = useT()
   const p = parsePayload(content)
   // A corrupt payload renders as its raw text (never a thrown card) — same fallback as the other cards.
   if (!p) return <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{content}</p>
@@ -51,11 +49,11 @@ export function ResearchLaunchCard({ content }: { content: string }): ReactEleme
         <span className="research-q">{p.question ?? ''}</span>
         <span className="research-status">
           <span className={'wf-dot' + dotCls} />
-          {t(`research.status.${status}`)}
+          {status}
         </span>
         {status === 'running' && (
           <button className="research-stop" onClick={stop}>
-            {t('research.stop')}
+            Stop
           </button>
         )}
       </div>
@@ -70,8 +68,8 @@ export function ResearchLaunchCard({ content }: { content: string }): ReactEleme
           <ChunkedMarkdown text={p.report} live={false} />
         </div>
       ) : null}
-      {status === 'failed' ? <div className="research-err">{p.error ?? t('research.failedNote')}</div> : null}
-      {status === 'stopped' ? <div className="research-note">{t('research.stoppedNote')}</div> : null}
+      {status === 'failed' ? <div className="research-err">{p.error ?? 'Research failed.'}</div> : null}
+      {status === 'stopped' ? <div className="research-note">Research stopped.</div> : null}
     </div>
   )
 }

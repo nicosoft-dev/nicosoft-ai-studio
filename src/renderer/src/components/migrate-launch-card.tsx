@@ -9,7 +9,6 @@
 import type { ReactElement } from 'react'
 import { Icons } from '@/components/icons'
 import { ChunkedMarkdown } from '@/components/markdown'
-import { useT } from '@/stores/locale'
 
 type MigrateStatus = 'running' | 'done' | 'failed' | 'stopped'
 
@@ -33,7 +32,6 @@ function parsePayload(content: string): MigratePayload | null {
 }
 
 export function MigrateLaunchCard({ content }: { content: string }): ReactElement {
-  const t = useT()
   const p = parsePayload(content)
   if (!p) return <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{content}</p>
   const status: MigrateStatus = p.status ?? 'running'
@@ -50,11 +48,11 @@ export function MigrateLaunchCard({ content }: { content: string }): ReactElemen
         <span className="migrate-q">{p.instruction ?? ''}</span>
         <span className="migrate-status">
           <span className={'wf-dot' + dotCls} />
-          {t(`migrate.status.${status}`)}
+          {status}
         </span>
         {status === 'running' && (
           <button className="migrate-stop" onClick={stop}>
-            {t('migrate.stop')}
+            Stop
           </button>
         )}
       </div>
@@ -69,8 +67,8 @@ export function MigrateLaunchCard({ content }: { content: string }): ReactElemen
           <ChunkedMarkdown text={p.report} live={false} />
         </div>
       ) : null}
-      {status === 'failed' ? <div className="migrate-err">{p.error ?? t('migrate.failedNote')}</div> : null}
-      {status === 'stopped' ? <div className="migrate-note">{t('migrate.stoppedNote')}</div> : null}
+      {status === 'failed' ? <div className="migrate-err">{p.error ?? 'Migration failed.'}</div> : null}
+      {status === 'stopped' ? <div className="migrate-note">Migration stopped.</div> : null}
     </div>
   )
 }
