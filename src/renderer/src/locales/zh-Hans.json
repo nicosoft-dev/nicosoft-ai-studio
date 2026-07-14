@@ -328,6 +328,8 @@
   "conv.endpointNoModel": "请在设置中为 {name} 选择一个模型",
   "conv.bindEndpoint": "绑定一个带密钥和模型的端点以便与 {name} 对话",
   "conv.ctxRing": "上下文用量:{summary}",
+  "conv.ctxWindow": "上下文窗口",
+  "conv.ctxUsage": "用量",
   "conv.openSettings": "打开设置",
   "conv.chooseFolder": "请在上方选择一个项目文件夹以开始",
   "conv.askPlaceholder": "向 {name} 提问 — Enter 发送，Shift+Enter 换行",

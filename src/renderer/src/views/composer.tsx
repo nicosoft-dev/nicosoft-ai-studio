@@ -13,7 +13,7 @@ import { parseWorkflowArgs, launchPayload, type WfCmdWorkflow } from '@/lib/work
 import { resolveTarget } from '@/lib/command-routing'
 import { toast } from '@/stores/toast'
 import { PathBar } from '@/components/path-bar'
-import { ContextIndicator } from '@/components/context-ring'
+import { ContextIndicator } from '@/components/context-popover'
 import { GitStatusChip } from '@/components/git-status-chip'
 import { resolveConvCwd } from '@/lib/resolve-cwd'
 import { participantsOf, matchLeadingMention } from '@/lib/conversation-participants'

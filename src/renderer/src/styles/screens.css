@@ -300,11 +300,37 @@
 .ctx-warning  { --ctx-base: var(--warning); }
 .ctx-critical { --ctx-base: var(--error); }
 
-.ctx-ring-badge { margin-left: auto; display: inline-flex; align-items: center; }
+.ctx-ring-btn {
+  margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 6px; /* 12px ring is far under the pointer target — pad the hit area */
+  background: none; border: none; padding: 0; cursor: pointer; color: inherit;
+  transition: background 0.12s;
+}
+.ctx-ring-btn:hover { background: var(--bg-3); }
+.ctx-ring-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 .ctx-ring { display: block; transform: rotate(-90deg); } /* start the sweep at 12 o'clock, run clockwise */
 .ctx-ring-track { stroke: var(--border-2); }
 .ctx-ring-fill { stroke: var(--ctx-base); transition: stroke-dashoffset 300ms; }
 @media (prefers-reduced-motion: reduce) { .ctx-ring-fill { transition: none; } }
+
+/* the panel the ring opens. Sized/positioned like .row-menu (portaled, fixed, anchored) but it is a
+   dialog of readings rather than a list of choices, so it carries its own skin. */
+.ctx-pop {
+  position: absolute; z-index: 61; width: 300px; max-width: calc(100vw - 2rem);
+  background: var(--bg-2); border: 1px solid var(--border-2); border-radius: var(--r-md);
+  box-shadow: var(--shadow-float); padding: 4px; animation: dialog-in 0.12s both;
+}
+.ctx-pop-head {
+  display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 8px; border-radius: 6px;
+  background: none; border: none; cursor: pointer; text-align: left;
+}
+.ctx-pop-head:hover { background: var(--bg-3); }
+.ctx-pop-caret { display: inline-flex; color: var(--text-4); transition: transform 0.12s; }
+.ctx-pop-caret.open { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .ctx-pop-caret { transition: none; } }
+.ctx-pop-title { font-size: 12px; font-weight: 600; color: var(--text-2); }
+.ctx-pop-body { padding: 2px 8px 8px 26px; } /* 26px lines the body up with the title, past the caret */
+.ctx-pop-total { font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 
 /* attachment strip */
 .cmp-attach-strip { display: flex; flex-wrap: wrap; gap: 8px; padding: 11px 12px 0; }

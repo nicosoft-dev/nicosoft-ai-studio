@@ -3,7 +3,6 @@
    ============================================================ */
 import type { ReactElement } from 'react'
 import { fmtContextTokens } from '@/lib/format'
-import { useT } from '@/stores/locale'
 
 // 12px outer: r=5 + strokeWidth 2 lands the stroke's outer edge exactly on the viewBox. The progress is a
 // dash the length of the whole circumference, pulled back by strokeDashoffset — so offset 0 = full ring.
@@ -37,8 +36,8 @@ export function readContext(used: number, max: number): ContextReading {
   return { pct, level: contextLevel(pct), summary }
 }
 
-/* — ContextRing: the 12px sweep itself. Rendered by whatever owns the interaction (a plain badge here,
-     the popover trigger once that lands), so it stays a pure function of the reading. — */
+/* — ContextRing: the 12px sweep itself — a pure function of the reading. The interaction (the trigger
+     button + its popover) lives in context-popover.tsx. — */
 export function ContextRing({ pct, level }: { pct: number; level: ContextLevel }): ReactElement {
   return (
     <svg
@@ -61,18 +60,5 @@ export function ContextRing({ pct, level }: { pct: number; level: ContextLevel }
         strokeDashoffset={CIRC * (1 - pct / 100)}
       />
     </svg>
-  )
-}
-
-/* — ContextIndicator: the composer's readout. Replaces the "43.1K / 1M" text — the numbers move into the
-     tooltip so the toolbar keeps a fixed-width glyph that never reflows as the count grows. — */
-export function ContextIndicator({ used, max }: { used: number; max: number }): ReactElement | null {
-  const t = useT()
-  if (max <= 0) return null // no known window → nothing honest to draw
-  const { pct, level, summary } = readContext(used, max)
-  return (
-    <span className="ctx-ring-badge" title={summary} role="img" aria-label={t('conv.ctxRing', { summary })}>
-      <ContextRing pct={pct} level={level} />
-    </span>
   )
 }
