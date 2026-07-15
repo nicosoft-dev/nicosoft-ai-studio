@@ -42,6 +42,13 @@ export interface CompressInput {
   contextWindow?: number // explicit window (Engineer passes its run window); falls back to the model catalog
   currentTokens?: number // exact prompt tokens (count_tokens) for this turn; preferred over the estimate
   force?: boolean // manual /compact — bypass the 90% threshold and fold now (still needs enough to fold)
+  // Explicit trigger override (absolute tokens; default COMPRESS_RATIO·window). The pre-run seed gate
+  // (agent.service) passes the loop's own autocompactThreshold here, so the seed it hands to the loop is
+  // already under the loop's proactive trigger — the structural contract that keeps the loop from ever
+  // folding persisted history in-memory (which it would re-pay every run). Every guard on this path
+  // (floor, too-few, busy) applies unchanged; the floor keeps evidence PER trigger value, because "a fold
+  // can't get under 31K" says nothing about the 57.6K post-turn trigger.
+  threshold?: number
 }
 
 // The outcome every compression attempt reports (DTO shape shared with the renderer via ipc/contracts).
@@ -97,8 +104,8 @@ export type CompactOutcome =
 // keeps armed) is never gated, so a floored conversation degrades to overflow-triggered folding instead
 // of every-turn folding.
 const compactionFloor = new Map<string, Set<string>>()
-const floorKey = (roleId: string, endpointId: string, model: string, ctxLen: number): string =>
-  `${roleId}|${endpointId}|${model}|${ctxLen}`
+const floorKey = (roleId: string, endpointId: string, model: string, ctxLen: number, trigger: number): string =>
+  `${roleId}|${endpointId}|${model}|${ctxLen}|${Math.floor(trigger)}`
 export function clearCompactionFloor(convId: string): void {
   compactionFloor.delete(convId)
 }
@@ -182,8 +189,9 @@ export async function maybeCompress(input: CompressInput): Promise<CompactOutcom
       (prevSummary ? estimateTextTokens(prevSummary.content) : 0) +
       RESERVED_CONTEXT_TOKENS
     const used = Math.max(input.currentTokens ?? 0, foldTargetEstimate)
-    const bindingKey = floorKey(input.roleId, input.endpointId, input.model, ctxLen)
-    if (!input.force && used < ctxLen * COMPRESS_RATIO) {
+    const trigger = input.threshold ?? ctxLen * COMPRESS_RATIO
+    const bindingKey = floorKey(input.roleId, input.endpointId, input.model, ctxLen, trigger)
+    if (!input.force && used < trigger) {
       // Self-heal (see compactionFloor above): an under-threshold reading falsifies the armed premise
       // for THIS binding — a real floor can never read below the threshold, a mis-arm (stale or peaked
       // measurement) can. Clear it so auto compaction resumes on its own.
@@ -205,12 +213,12 @@ export async function maybeCompress(input: CompressInput): Promise<CompactOutcom
       // proof degenerates to `used ≥ threshold` — armed, correctly.
       const foldCandidate = recent.slice(0, Math.max(0, recent.length - KEEP_RECENT))
       const bound = foldSavingsBound(foldCandidate, prevSummary)
-      if (used - bound >= ctxLen * COMPRESS_RATIO) {
+      if (used - bound >= trigger) {
         let keys = compactionFloor.get(input.convId)
         if (!keys) compactionFloor.set(input.convId, (keys = new Set()))
         keys.add(bindingKey)
         console.warn(
-          `[compression] compaction floor: conversation ${input.convId} (role ${input.roleId}) is over threshold ${Math.floor(ctxLen * COMPRESS_RATIO)} (used≈${used}) and folding could free at most ~${bound} tokens — auto compaction disabled for this binding (manual /compact and overflow recovery still fold; a below-threshold reading or a role/binding change re-arms observation)`
+          `[compression] compaction floor: conversation ${input.convId} (role ${input.roleId}) is over trigger ${Math.floor(trigger)} (used≈${used}) and folding could free at most ~${bound} tokens — auto compaction disabled for this binding+trigger (manual /compact and overflow recovery still fold; a below-trigger reading or a role/binding change re-arms observation)`
         )
         return { status: 'skipped', reason: 'floor' }
       }

@@ -632,6 +632,17 @@ export async function* runAgent(
     // and adds a fixed reserve for the gateway-injected system prompt estimateTokens can't see — but
     // ONLY once lastUsage anchors the estimate: on turn 1 there's nothing to under-count, and adding it
     // could spuriously trip a small-window threshold on an empty conversation.
+    // Layer contract (agent.service's pre-run seed gate): a solo run's seed arrives already folded to
+    // ≤ autocompactThreshold(window) — persisted-history treatment belongs to the chat layer, whose folds
+    // are durable; a fold made HERE is in-memory and would be re-paid by every later run. So on the main
+    // path a proactive trip below means genuine in-run growth. (The gate can also explicitly stand down —
+    // compaction floor, busy lock — and then this layer's own autoFloorHit/reactive handling is the
+    // intended degradation for that run.) Turn 1's messages-only estimate (no anchor)
+    // UNDER-counts by system+tools — kept deliberately: under the gate's contract the low estimate cannot
+    // miss a real problem (the seed is under the trigger), while "correcting" it with the pre-run count
+    // would inject the cold-start rough tier's ~2x tools over-estimate and fire spurious turn-1/2 folds
+    // on small windows. collab is the exception and carries a real anchor across wakes via seedCompact —
+    // its folds live as long as the expert does, so they are not re-paid.
     const estimate =
       (lastUsage ? tokensFromUsage(lastUsage) + SYSTEM_PROMPT_RESERVE : 0) +
       estimateTokens(messages.slice(lastUsageAt)) -

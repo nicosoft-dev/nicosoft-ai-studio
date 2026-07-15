@@ -279,6 +279,9 @@ export async function drainAgentRun(opts: {
   // It is not a corner case: the loop's threshold is window−33000 while the chat layer's fold is at 90% of the
   // window, and window−33000 < 0.9·window for every window under 330K, so there is a band that every long
   // conversation crosses where the loop folds on turn 1 of every run and the chat layer never does.
+  // agent.service's pre-run seed gate now folds that band PERSISTENTLY before the loop starts (solo runs), so
+  // in practice this fires only for genuine in-run growth on later turns — the guard stays as the backstop
+  // for paths without the gate (dispatched steps seed from step context, collab carries its own anchor).
   let foldedBeforeFirstTurn = false
   const toolImages: MessageAttachmentDto[] = [] // images any tool produced this run → assistant-message attachments
   const toolNames = new Map<string, string>() // tool_use id → name, to pair tool:post with its tool

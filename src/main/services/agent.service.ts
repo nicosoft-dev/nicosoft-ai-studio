@@ -15,7 +15,8 @@ import { dataDir } from '../db/connection'
 import { join } from 'node:path'
 import { ulid } from '../db/id'
 import { buildToolsParam, type AgentResult } from '../agent/loop'
-import type { ServerToolSchema } from '../agent/types'
+import { autocompactThreshold } from '../agent/compact'
+import type { AgentMessage, ServerToolSchema } from '../agent/types'
 import { parseTranscript } from './transcript-parse'
 import { lspTool } from '../agent/tools/lsp'
 import { awaitAsyncTool } from '../agent/tools/await-async'
@@ -141,46 +142,54 @@ export async function run(
     model: input.model,
   })
   const history = convRepo.listByConversation(convId)
-  const summary = summaryRepo.getLatest(convId)
-  const recent = summary?.coveredUpTo != null ? history.filter((m) => m.id > summary.coveredUpTo!) : history
+  let summary = summaryRepo.getLatest(convId)
+  const afterBoundary = (rows: typeof history, s: typeof summary): typeof history =>
+    s?.coveredUpTo != null ? rows.filter((m) => m.id > s.coveredUpTo!) : rows
+  let recent = afterBoundary(history, summary)
 
   // ③ Agent system = ENGINEER prompt + injected memories + summary; seed = history → AgentMessage (Anthropic
   //    needs a user-first list, so drop any leading assistant turns left by a fold boundary).
   // §4: inject the SYSTEM-WIDE project map (if this cwd has a remembered one) so a solo agent orients like the
   // dispatched/collab paths — read-only; Danny's routeAsAgent stays the sole writer.
+  // buildSeed is re-runnable on purpose: the pre-run seed gate below can fold history between the first
+  // build and the loop start, and the rebuilt seed must re-apply the SAME trailing-turn branches.
   const [projectMapText, memoryIndexText] = await Promise.all([recallText(input.cwd), agentMemoryIndexText(input.cwd)])
-  const system = buildAgentSystem(roleId, memories, summary?.content ?? null, skillManager.listingForRole(roleId), input.cwd, false, projectMapText, memoryIndexText)
-  const mapped = conversationToAgentMessages(recent)
-  const firstUser = mapped.findIndex((m) => m.role === 'user')
-  let seed = firstUser > 0 ? mapped.slice(firstUser) : mapped
-  // The context anchor's whole contract is that the seed IS `recent` rendered — it prices `recent` up to a
-  // watermark and the next turn adds what came after. Both branches below append content that was never
-  // persisted, so the seed stops corresponding to any message id and the correspondence breaks in both
-  // directions: reading would miss the extra turn's cost, and recording would fold it into a price we then
-  // attribute to `recent` alone and re-add forever. Neither is worth a special case — count for real instead.
-  // (The leading-assistant slice just above is harmless by contrast: it only drops from the FRONT, before any
-  // watermark, and the server's price already reflects the drop.)
-  let seedIsRecent = true
-  if (opts?.resumeNote != null) {
-    // 批C2b resume: deliver the completion note as the trailing user turn (in-memory only — not persisted). The
-    // parked turn USUALLY left an assistant reply ("launched X, awaiting…"), so history ends on assistant and we
-    // append a fresh user turn. But if that turn was a pure tool-call with NO prose, nothing persisted and history
-    // ends on the user's ORIGINAL turn — appending another user turn would put two in a row (some upstreams 400).
-    // Fold the note into that trailing user turn instead so the seed stays well-formed (user/assistant alternation).
-    const last = seed[seed.length - 1]
-    if (last && last.role === 'user') {
-      seed = [...seed.slice(0, -1), { role: 'user', content: [...last.content, { type: 'text', text: `\n\n${opts.resumeNote}` }] }]
-    } else {
-      seed = [...seed, { role: 'user', content: [{ type: 'text', text: opts.resumeNote }] }]
+  let system = buildAgentSystem(roleId, memories, summary?.content ?? null, skillManager.listingForRole(roleId), input.cwd, false, projectMapText, memoryIndexText)
+  const buildSeed = (recentRows: typeof recent): { seed: AgentMessage[]; seedIsRecent: boolean } => {
+    const mapped = conversationToAgentMessages(recentRows)
+    const firstUser = mapped.findIndex((m) => m.role === 'user')
+    let seed = firstUser > 0 ? mapped.slice(firstUser) : mapped
+    // The context anchor's whole contract is that the seed IS `recent` rendered — it prices `recent` up to a
+    // watermark and the next turn adds what came after. Both branches below append content that was never
+    // persisted, so the seed stops corresponding to any message id and the correspondence breaks in both
+    // directions: reading would miss the extra turn's cost, and recording would fold it into a price we then
+    // attribute to `recent` alone and re-add forever. Neither is worth a special case — count for real instead.
+    // (The leading-assistant slice just above is harmless by contrast: it only drops from the FRONT, before any
+    // watermark, and the server's price already reflects the drop.)
+    let seedIsRecent = true
+    if (opts?.resumeNote != null) {
+      // 批C2b resume: deliver the completion note as the trailing user turn (in-memory only — not persisted). The
+      // parked turn USUALLY left an assistant reply ("launched X, awaiting…"), so history ends on assistant and we
+      // append a fresh user turn. But if that turn was a pure tool-call with NO prose, nothing persisted and history
+      // ends on the user's ORIGINAL turn — appending another user turn would put two in a row (some upstreams 400).
+      // Fold the note into that trailing user turn instead so the seed stays well-formed (user/assistant alternation).
+      const last = seed[seed.length - 1]
+      if (last && last.role === 'user') {
+        seed = [...seed.slice(0, -1), { role: 'user', content: [...last.content, { type: 'text', text: `\n\n${opts.resumeNote}` }] }]
+      } else {
+        seed = [...seed, { role: 'user', content: [{ type: 'text', text: opts.resumeNote }] }]
+      }
+      seedIsRecent = false
+    } else if (seed.length && seed[seed.length - 1].role === 'assistant') {
+      // Claude-OAuth-routed upstreams reject assistant prefill ("the conversation must end with a user message"); the
+      // native API tolerates it. History normally ends on the just-persisted user prompt, but guard the invariant here
+      // too so a persistence-order change can't reintroduce a routed 400.
+      seed = [...seed, { role: 'user', content: [{ type: 'text', text: submittedPrompt }] }]
+      seedIsRecent = false
     }
-    seedIsRecent = false
-  } else if (seed.length && seed[seed.length - 1].role === 'assistant') {
-    // Claude-OAuth-routed upstreams reject assistant prefill ("the conversation must end with a user message"); the
-    // native API tolerates it. History normally ends on the just-persisted user prompt, but guard the invariant here
-    // too so a persistence-order change can't reintroduce a routed 400.
-    seed = [...seed, { role: 'user', content: [{ type: 'text', text: submittedPrompt }] }]
-    seedIsRecent = false
+    return { seed, seedIsRecent }
   }
+  let { seed, seedIsRecent } = buildSeed(recent)
 
   // This run's starting context (system + seed + tool schemas). Drives the composer readout + the panel.
   // PREFER THE SERVER'S OWN PRICE. Every turn of this conversation was already priced by the server, and the
@@ -193,7 +202,7 @@ export async function run(
   // then do we count for real.
   const toolSchemas = buildToolsParam(tools, input.model)
   const toolsFp = contextAnchor.fingerprint(toolSchemas)
-  const anchored = seedIsRecent
+  let anchored = seedIsRecent
     ? contextAnchor.read(convId, roleId, {
         model: input.model,
         toolsFp,
@@ -205,10 +214,11 @@ export async function run(
     : null
   // Render the tail through the REAL seed mapping rather than re-deriving it per message: image replay is a
   // whole-list decision, so a hand-rolled per-message estimate would diverge from what actually gets sent.
-  const promptTokens = anchored
+  const anchorWatermark = anchored?.upToMsgId
+  let promptTokens = anchored
     ? contextAnchor.combine(
         anchored,
-        conversationToAgentMessages(recent.filter((m) => m.id > anchored.upToMsgId)).reduce((sum, m) => sum + roughMessageTokens(m.content), 0),
+        conversationToAgentMessages(recent.filter((m) => m.id > anchorWatermark!)).reduce((sum, m) => sum + roughMessageTokens(m.content), 0),
         system.length,
       )
     : await countContext(protocol, {
@@ -221,6 +231,48 @@ export async function run(
         thinkingBudget: input.thinking?.budgetTokens,
         smallModel: pickSmallModel(protocol, ep.availableModels, input.model)
       })
+
+  // ③b Pre-run seed gate — the structural contract between the two compaction layers. The loop's proactive
+  // autocompact fires at autocompactThreshold(window); chat-layer folding fires at 90%. For windows under
+  // ~330K the loop's trigger is the LOWER one, so a seed in the band between them would trip the loop into
+  // folding persisted history IN MEMORY — a full-transcript summary call whose result is discarded with the
+  // run, re-paid by every later run (agent-dispatch's foldedBeforeFirstTurn documents the turn-1 case; the
+  // anchored estimate makes turn 2+ just as reachable). Fold it HERE instead: once, persisted into the
+  // summary chain, before the loop ever sees it — after this gate every proactive fold the loop makes is
+  // genuine in-run growth. Same window fallback as the loop (loop.ts) so the two triggers never diverge.
+  // maybeCompress brings its own guards: the compaction floor (arithmetic proof, per trigger value),
+  // too-few, and the per-conv busy lock (a post-turn fold still in flight → skip, the seed rides once more
+  // as-is). One shot by construction — no loop, and a fold that lands leaves the seed under the trigger.
+  const runWindow = input.contextWindow ?? 200_000
+  let gateFolded = false
+  if (promptTokens > autocompactThreshold(runWindow)) {
+    const folded = await compressionService.maybeCompress({
+      convId,
+      roleId,
+      endpointId: input.endpointId,
+      model: input.model,
+      contextWindow: input.contextWindow,
+      currentTokens: promptTokens,
+      threshold: autocompactThreshold(runWindow),
+    })
+    if (folded.status === 'compacted') {
+      // History rows are untouched by a fold (only the summary boundary moved), so re-derive from the same
+      // snapshot. The system prompt embeds the summary text — it must be rebuilt, not patched.
+      summary = summaryRepo.getLatest(convId)
+      recent = afterBoundary(history, summary)
+      system = buildAgentSystem(roleId, memories, summary?.content ?? null, skillManager.listingForRole(roleId), input.cwd, false, projectMapText, memoryIndexText)
+      ;({ seed } = buildSeed(recent))
+      // The fold just moved the summary boundary, so the anchor no longer describes this seed (read()
+      // rejects on coveredUpTo drift) — and this turn's figure is now an arithmetic correction, not a
+      // server price. Clearing `anchored` keeps the breakdown's heavy verdicts and the token-diag tiers
+      // honest; the loop's first turn re-anchors from real usage. Same correction the manual /compact
+      // receipt applies (stores/chat.ts): the next real measurement supersedes it.
+      anchored = null
+      gateFolded = true
+      promptTokens = Math.max(0, promptTokens - folded.foldedTokens + folded.summaryTokens)
+    }
+  }
+
   // Surface the prompt size to the UI BEFORE the loop's first turn streams — so the live readout shows
   // ↑ tokens during the initial thinking phase (and every between-turns gap), not only after onDone.
   cb.onUsage?.(promptTokens)
@@ -341,7 +393,7 @@ export async function run(
   if (process.env.NSAI_TOKEN_DIAG && loopRes.firstContext > 0) {
     const err = ((promptTokens - loopRes.firstContext) / loopRes.firstContext) * 100
     console.log(
-      `[token-diag] protocol=${protocol} model=${input.model} src=${anchored ? 'anchor' : 'count'} predicted=${promptTokens} observed=${loopRes.firstContext} err=${err >= 0 ? '+' : ''}${err.toFixed(1)}% tools=${toolSchemas?.length ?? 0} peak=${loopRes.contextTokens}`,
+      `[token-diag] protocol=${protocol} model=${input.model} src=${anchored ? 'anchor' : gateFolded ? 'gate' : 'count'} predicted=${promptTokens} observed=${loopRes.firstContext} err=${err >= 0 ? '+' : ''}${err.toFixed(1)}% tools=${toolSchemas?.length ?? 0} peak=${loopRes.contextTokens}`,
     )
   }
 
