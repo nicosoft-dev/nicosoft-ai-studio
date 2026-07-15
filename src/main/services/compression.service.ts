@@ -9,6 +9,7 @@ import type { MessageRow } from '../repos/conversation.repo'
 import type { SummaryRow } from '../repos/summary.repo'
 import { agentEvents } from './event-bus'
 import * as roleRepo from '../repos/role.repo'
+import { COMPRESS_RATIO } from '../../shared/compression'
 
 // Context compression. When a conversation's running context crosses 90% of the model's window, fold
 // the older messages into a chained summary, keeping the most recent few verbatim. STEP 0 runs a
@@ -17,7 +18,8 @@ import * as roleRepo from '../repos/role.repo'
 // covered_up_to marks the boundary (a message id) so chat context assembly knows what's already folded.
 // Best-effort: never throws into the chat flow.
 
-const COMPRESS_RATIO = 0.9 // trigger at 90% of the context window
+// COMPRESS_RATIO (0.9 — trigger at 90% of the window) lives in shared/compression: the renderer's
+// context panel derives its "folding can't help" diagnosis from the same ratio.
 const KEEP_RECENT = 4 // messages kept verbatim after a compression (continuity tail)
 // Context the assembler adds that maybeCompress can't measure here: recalled memories (≤ RECALL budget)
 // + the role system prompt. Reserve for it so the threshold isn't an underestimate (better to compress
@@ -52,6 +54,7 @@ export type CompactSkipReason =
   | 'no-endpoint' // bound endpoint no longer exists
   | 'no-window' // no known context window anywhere on the endpoint
   | 'below-threshold' // auto only: under the 90% trigger (manual force bypasses this)
+  | 'floor' // auto only: the irreducible prompt floor is over the threshold — folding can't help (see compactionFloor)
   | 'too-few-messages' // nothing worth folding (the continuity tail is the whole history)
   | 'no-key' // endpoint has no API key
 export type CompactOutcome =
@@ -61,6 +64,63 @@ export type CompactOutcome =
   | { status: 'skipped'; reason: CompactSkipReason }
   | { status: 'cancelled' } // user hit Stop mid-fold — NOTHING was written (the summary is discarded)
   | { status: 'failed' }
+
+// Compaction floor (the conversation-layer sibling of the agent loop's autoFloorHit, loop.ts): folding
+// can only remove MESSAGE rows — the system prompt, tool schemas and recalled memories are irreducible
+// and always inside `used` — so when that floor sits at or over the 90% threshold, no fold can ever get
+// back under it and the auto path would otherwise re-fold EVERY turn (two LLM calls + a summary row +
+// the history cut to the tail, forever).
+//
+// Arming is a same-snapshot arithmetic proof, not a "did we just fold?" heuristic: a fold can save at
+// most foldSavingsBound tokens (every removable char priced at 1 token — a WIDE upper bound: CJK ≈ 1:1,
+// English ≈ 4:1 — plus a generous flat rate per image, plus the prior summary the new one absorbs), so
+// `used − foldSavingsBound ≥ threshold` proves this fold is pointless BEFORE paying for it. The bound
+// only over-estimates savings, so it can never arm a conversation whose fold would actually work; a
+// floored conversation is caught on its FIRST over-threshold call with zero wasted folds. An earlier
+// row-count heuristic ("recent ≤ tail+2 right after a fold") encoded plain-chat's 2-rows-per-turn
+// geometry and never fired on coordinator/collab turns (3-5+ rows) — adversarial review 2026-07-15.
+//
+// Evidence is kept PER (role, endpoint, model, window): the floor is a property of that pairing (the
+// window must fit that role's system+tools), and a coordinator conversation alternates bindings every
+// turn — a single-slot entry was deleted on every alternation and never stuck.
+//
+// Disarming — anything that can move the floor or the threshold re-observes:
+//   · below-threshold with this binding armed → the premise ("used can never get back under") is
+//     falsified by measurement, so the entry self-heals away. This also unwinds any mis-arm from a
+//     stale/peaked measurement (a fold racing the next turn, coordinator peak-context readings): the
+//     next honest reading clears it. A genuinely floored conversation never reads below the threshold,
+//     so it never falsely disarms.
+//   · a role's configuration changes (tool kit / prompt / binding) → roles.service clears that role's
+//     entries — the panel's own advice ("use a leaner role") must actually re-enable compaction.
+//   · conversation delete → clearCompactionFloor. In-memory: a restart re-probes at worst one skip.
+// force (manual /compact and the reactive overflow fold in chat.service — the same backstop the loop
+// keeps armed) is never gated, so a floored conversation degrades to overflow-triggered folding instead
+// of every-turn folding.
+const compactionFloor = new Map<string, Set<string>>()
+const floorKey = (roleId: string, endpointId: string, model: string, ctxLen: number): string =>
+  `${roleId}|${endpointId}|${model}|${ctxLen}`
+export function clearCompactionFloor(convId: string): void {
+  compactionFloor.delete(convId)
+}
+// A role's tool kit / prompt / binding changed → its floor evidence is stale in every conversation.
+export function clearCompactionFloorForRole(roleId: string): void {
+  const prefix = `${roleId}|`
+  for (const [convId, keys] of compactionFloor) {
+    for (const k of keys) if (k.startsWith(prefix)) keys.delete(k)
+    if (keys.size === 0) compactionFloor.delete(convId)
+  }
+}
+// Upper bound on the tokens a fold of `fold` (+ absorbing `prevSummary`) could possibly free: text at
+// 1 token/char (≥ any real tokenizer), images at a flat 2000 (≥ per-image pricing across providers).
+const FOLD_IMAGE_TOKEN_BOUND = 2_000
+function foldSavingsBound(fold: MessageRow[], prevSummary: SummaryRow | null): number {
+  let bound = prevSummary ? prevSummary.content.length : 0
+  for (const m of fold) {
+    bound += m.content.length
+    if (Array.isArray(m.attachments)) bound += m.attachments.length * FOLD_IMAGE_TOKEN_BOUND
+  }
+  return bound
+}
 
 // In-flight compactions by conversation, so the composer's Stop can abort the fold's LLM call.
 // Registered for every maybeCompress run (auto included — harmless, nothing cancels those).
@@ -122,7 +182,39 @@ export async function maybeCompress(input: CompressInput): Promise<CompactOutcom
       (prevSummary ? estimateTextTokens(prevSummary.content) : 0) +
       RESERVED_CONTEXT_TOKENS
     const used = Math.max(input.currentTokens ?? 0, foldTargetEstimate)
-    if (!input.force && used < ctxLen * COMPRESS_RATIO) return { status: 'skipped', reason: 'below-threshold' }
+    const bindingKey = floorKey(input.roleId, input.endpointId, input.model, ctxLen)
+    if (!input.force && used < ctxLen * COMPRESS_RATIO) {
+      // Self-heal (see compactionFloor above): an under-threshold reading falsifies the armed premise
+      // for THIS binding — a real floor can never read below the threshold, a mis-arm (stale or peaked
+      // measurement) can. Clear it so auto compaction resumes on its own.
+      const keys = compactionFloor.get(input.convId)
+      if (keys?.delete(bindingKey) && keys.size === 0) compactionFloor.delete(input.convId)
+      return { status: 'skipped', reason: 'below-threshold' }
+    }
+    // Floor guard (see compactionFloor above). Order matters: after below-threshold (an under-threshold
+    // conversation needs no guard and must keep reporting the honest reason — and self-heals there),
+    // before too-few-messages (a floored conversation spends most turns inside the post-fold tail,
+    // which too-few would mask this turn only for the re-fold cycle to resume once the tail outgrows
+    // it; the floor must latch first).
+    if (!input.force) {
+      if (compactionFloor.get(input.convId)?.has(bindingKey)) return { status: 'skipped', reason: 'floor' }
+      // Same-snapshot arithmetic proof: even crediting the fold with its savings UPPER bound, `used`
+      // stays over the threshold — this fold (and every smaller later one) cannot help. Arm and skip
+      // BEFORE paying the two LLM calls. `recent.length - keepTail` can be ≤ 0 on a short over-threshold
+      // history (nothing foldable at all): slice yields [], the bound is just the prior summary, and the
+      // proof degenerates to `used ≥ threshold` — armed, correctly.
+      const foldCandidate = recent.slice(0, Math.max(0, recent.length - KEEP_RECENT))
+      const bound = foldSavingsBound(foldCandidate, prevSummary)
+      if (used - bound >= ctxLen * COMPRESS_RATIO) {
+        let keys = compactionFloor.get(input.convId)
+        if (!keys) compactionFloor.set(input.convId, (keys = new Set()))
+        keys.add(bindingKey)
+        console.warn(
+          `[compression] compaction floor: conversation ${input.convId} (role ${input.roleId}) is over threshold ${Math.floor(ctxLen * COMPRESS_RATIO)} (used≈${used}) and folding could free at most ~${bound} tokens — auto compaction disabled for this binding (manual /compact and overflow recovery still fold; a below-threshold reading or a role/binding change re-arms observation)`
+        )
+        return { status: 'skipped', reason: 'floor' }
+      }
+    }
     // B3/#9: normally require a couple more than KEEP_RECENT to bother folding. But a conversation that
     // crossed the window in its first few turns — or via one oversized message — can be over threshold with
     // too few messages to clear that bar, leaving it permanently stuck. Under force (manual /compact or the

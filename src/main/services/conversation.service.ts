@@ -179,6 +179,7 @@ export function remove(convId: string): void {
   // handler that could stop runs — so the stop lives HERE, at the one choke point every path shares.
   abortLiveRuns(convId)
   compressionService.cancelCompact(convId) // an in-flight fold's LLM call must not finish against deleted rows
+  compressionService.clearCompactionFloor(convId) // drop the armed-floor entry (in-memory Map) with its conversation
   convRepo.remove(convId)
   assignmentService.removeByConversation(convId) // assignments carry no FK on conv_id — cascade here (docs/assignments-design.md §6)
   workspaceTasks.dropLive(convId) // workspace_task_history rows cascade via FK; the in-memory live phase doesn't

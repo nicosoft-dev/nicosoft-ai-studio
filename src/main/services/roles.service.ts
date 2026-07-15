@@ -4,6 +4,7 @@ import * as convRepo from '../repos/conversation.repo'
 import * as endpointRepo from '../repos/endpoint.repo'
 import * as keychain from '../keychain/keychain'
 import * as convService from './conversation.service'
+import { clearCompactionFloorForRole } from './compression.service'
 import { transaction } from '../db/connection'
 import { LlmError } from '../llm/types'
 import { AGENT_ROLE_IDS, ROLE_DISPLAY_NAMES } from '@shared/roles'
@@ -60,6 +61,7 @@ export function setBinding(roleId: string, input: RoleBindingInput): RoleBinding
     thinkingDepth: input.thinkingDepth ?? null,
     imageModel: input.imageModel ?? null
   })
+  clearCompactionFloorForRole(roleId) // new endpoint/model/window → the role's floor evidence is stale
   const b = roleRepo.getBinding(roleId)
   return b
     ? toBindingDto(b)
@@ -91,6 +93,7 @@ export function setState(
     delete safePatch.enabled // silently ignore the disable; keep any selfLearningEnabled change
   }
   roleRepo.setState(roleId, safePatch)
+  clearCompactionFloorForRole(roleId) // enabled/self-learning flips can change what the role's prompt carries
   const s = roleRepo.getState(roleId)
   return s
     ? toStateDto(s)
@@ -255,5 +258,6 @@ export function updateCustom(id: string, patch: CustomRoleUpdateDto): CustomRole
   if (trimmed && trimmed !== roleRepo.getCustom(id)?.name) assertNameFree(trimmed, id)
   const safe = trimmed !== undefined ? { ...patch, name: trimmed || undefined } : patch
   const row = roleRepo.updateCustom(id, safe)
+  clearCompactionFloorForRole(id) // capability groups / prompt edits change the role's irreducible floor
   return row ? toCustomDto(row) : null
 }
