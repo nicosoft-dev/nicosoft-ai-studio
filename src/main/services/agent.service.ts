@@ -249,7 +249,7 @@ export async function run(
         // NOTE: no smallModel — deliberately. The L2 fallback is a REAL max_tokens:1 request, i.e. billed;
         // spending four of those per turn to shade a panel is indefensible. Probes take free L1 only.
         { baseUrl: ep.baseUrl, apiKey: key, model: input.model, system, messages: seed as { role: string; content: unknown }[], tools: toolSchemas, thinkingBudget: input.thinking?.budgetTokens },
-        { systemNoMemory, total: promptTokens, max: contextWindow },
+        { systemNoMemory, total: promptTokens, max: contextWindow, anchored: !!anchored },
       )
       if (b) cb.onBreakdown?.(b)
     })().catch(() => {})

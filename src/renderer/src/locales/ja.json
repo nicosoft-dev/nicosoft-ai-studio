@@ -335,6 +335,8 @@
   "conv.ctxTools": "システムツール",
   "conv.ctxMessages": "メッセージ",
   "conv.ctxFree": "空き容量",
+  "conv.ctxOver": "ウィンドウ超過",
+  "conv.ctxFloorNote": "システムプロンプト・ツール・メモリだけで圧縮トリガーを超えています——メッセージを圧縮しても空きは作れません。より大きなコンテキストウィンドウのモデルに切り替えるか、ツールの少ないロールをご利用ください。",
   "conv.ctxEstimated": "カテゴリ別の推定使用量",
   "conv.openSettings": "設定を開く",
   "conv.chooseFolder": "開始するには上でプロジェクトフォルダを選択してください",

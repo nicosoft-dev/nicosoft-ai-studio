@@ -8,6 +8,7 @@ import type { Expert, Family } from '@/types'
 import type { EndpointDto } from '@/lib/api'
 import { choiceSupported, getThinkingCapability, hasAdaptiveOption, protocolToFamily, supportedDepths, type ThinkingChoice, type ThinkingDepth } from '@/lib/thinking'
 import { DEFAULT_IMAGE_MODEL, imageModelOptions } from '@/lib/image-models'
+import { useChat } from '@/stores/chat'
 
 export const FAMILY_LABEL: Record<string, string> = { anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Gemini' }
 
@@ -91,6 +92,16 @@ export function useRoleBinding(expert: Expert): RoleBindingControls {
 
   const persist = (eId: string, m: string, d: ThinkingChoice | '', im: string): void => {
     void window.api.roles.setBinding(expert.id, { endpointId: eId || null, model: m || null, thinkingDepth: d || null, imageModel: im || null })
+    // The active conversation's panel breakdown was measured under the OLD binding — its `max` (and its
+    // over-window / folding-can't-help verdicts) would keep describing a window the ring has already left.
+    // Drop it and let the next turn re-measure; same treatment /compact gives its own invalidation.
+    const conv = useChat.getState().activeConv
+    if (conv) {
+      useChat.setState((s) => {
+        const { [conv]: _dropped, ...rest } = s.breakdown
+        return { breakdown: rest }
+      })
+    }
   }
   const clamp = (fam: Family, m: string, d: ThinkingChoice | ''): ThinkingChoice | '' => {
     if (!d) return ''

@@ -58,6 +58,11 @@ export interface ContextBreakdown {
   parts: { id: ContextPart; tokens: number }[] // descending by tokens, 'free' always last
   total: number // T_all — the measured prompt (what the ring reads)
   max: number // the window
+  // Whether `total` is anchored on the server's own price (context-anchor) rather than the cold-start
+  // estimate. The panel's HEAVY verdicts — "over the window", "folding cannot help" — must only ever
+  // stand on an anchored total: the cold-start rough tier over-counts tools by ~2x on openai-protocol
+  // endpoints, which would assert a red over-window state on conversations genuinely inside the window.
+  anchored: boolean
 }
 
 // Resolve the prompt into its parts. No API itemises a prompt, so each part is a DIFFERENCE between two
@@ -91,7 +96,7 @@ export interface ContextBreakdown {
 export async function countBreakdown(
   protocol: Protocol,
   input: AnthropicCountInput, // the FULL body, exactly as passed to countContext
-  opts: { systemNoMemory: string; total: number; max: number }
+  opts: { systemNoMemory: string; total: number; max: number; anchored: boolean }
 ): Promise<ContextBreakdown | null> {
   // Every probe here is TOOL-FREE and shares one config, so they all land on the same tier and their
   // differences are meaningful. Tools are priced separately, below, precisely because they cannot join.
@@ -131,7 +136,7 @@ export async function countBreakdown(
   // Anchored on the same total, so the five always span exactly the window: parts sum to total, and free is
   // the rest of it.
   parts.push({ id: 'free', tokens: Math.max(0, opts.max - opts.total) }) // always last — the remainder, not a part
-  return { parts, total: opts.total, max: opts.max }
+  return { parts, total: opts.total, max: opts.max, anchored: opts.anchored }
 }
 
 // L1 — the real endpoint. Free, not billed, supports system+messages+tools+thinking (verified live).
