@@ -17,11 +17,13 @@ import { ScriptRunCard } from '@/components/script-run-card'
 import { useT } from '@/stores/locale'
 import { useConvTodos } from '@/stores/conv-todos'
 import { useConvServices } from '@/stores/conv-services'
+import { useConvAsync } from '@/stores/conv-async'
 import { useWorkflowRuns } from '@/stores/workflow-runs'
 import { useScheduledRuns } from '@/stores/scheduled-runs'
 import { useAllExperts } from '@/lib/all-experts'
+import { appLocale } from '@/lib/format'
 import type { ToolCall } from '@/stores/chat'
-import type { WorkspaceTaskHistory, WorkspacePhase, WorkspaceExamine, WorkspaceService, WorkspaceWorkflowRun, WorkspaceScheduledRun, ServiceInfo } from '@/lib/api'
+import type { WorkspaceTaskHistory, WorkspacePhase, WorkspaceExamine, WorkspaceService, WorkspaceWorkflowRun, WorkspaceScheduledRun, ServiceInfo, AsyncHandleDto, RhythmWakeupDto, MonitorInfo } from '@/lib/api'
 
 const TASK: Record<string, { cls: string; labelKey: string }> = {
   pending: { cls: 'todo', labelKey: 'tasks.statusTodo' },
@@ -36,7 +38,9 @@ const EMPTY: WorkspaceTaskHistory = { phases: [], examines: [], services: [], wo
 
 function fmtTime(ms: number): string {
   try {
-    return new Date(ms).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    // appLocale, not undefined: undefined = the OS locale, which leaks e.g. Chinese month names into an
+    // app whose language is set to English.
+    return new Date(ms).toLocaleString(appLocale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
   } catch {
     return ''
   }
@@ -149,6 +153,41 @@ export function WorkspaceTasks({ activeConv }: { activeConv: string | null }): R
   // — Live background services — same app-lifetime cache pattern as todos (stores/conv-services), so the
   // panel shows the current set the moment it opens. Only active (starting/ready) services are here.
   const liveServices = useConvServices((s) => (activeConv ? s.byConv[activeConv] : undefined)) ?? []
+
+  // — Background section: the conversation's OTHER live background work, three sources —
+  //   • async handles (launch_async & the async-parked lens/research/… ops): pushed via conv:async into an
+  //     app-lifetime store; the panel shows only running ones (settled handles announce themselves in the
+  //     transcript via the resume injection).
+  //   • Monitors: fetch-on-event (monitor:changed) — same pattern the Scheduled page uses, filtered to this
+  //     conversation here (Scheduled keeps the cross-conversation view).
+  //   • pending self-wakeups (schedule_wakeup): fetch-on-event (rhythm:changed).
+  const asyncHandles = (useConvAsync((s) => (activeConv ? s.byConv[activeConv] : undefined)) ?? []).filter((h) => h.status === 'running')
+  const [convMonitors, setConvMonitors] = useState<MonitorInfo[]>([])
+  const [wakeups, setWakeups] = useState<RhythmWakeupDto[]>([])
+  useEffect(() => {
+    if (!activeConv) {
+      setConvMonitors([])
+      setWakeups([])
+      return
+    }
+    const conv = activeConv
+    let gone = false
+    const refetchMon = (): void => void window.api.monitor.list().then((ms) => { if (!gone) setConvMonitors(ms.filter((m) => m.convId === conv)) }).catch(() => {})
+    const refetchWake = (): void => void window.api.rhythm.list(conv).then((ws) => { if (!gone) setWakeups(ws) }).catch(() => {})
+    refetchMon()
+    refetchWake()
+    const offMon = window.api.monitor.onChanged(refetchMon)
+    const offWake = window.api.rhythm.onChanged(refetchWake)
+    // The panel opens mid-run without a fresh conv:async push — seed the store once from the snapshot IPC.
+    // Fill only if nothing is cached yet: a push that lands while the snapshot is in flight is NEWER than
+    // the snapshot, and must not be overwritten by it.
+    void window.api.async.list(conv).then((handles) => useConvAsync.setState((s) => (s.byConv[conv] ? s : { byConv: { ...s.byConv, [conv]: handles } }))).catch(() => {})
+    return () => {
+      gone = true
+      offMon()
+      offWake()
+    }
+  }, [activeConv])
   // Group chats (conversation.kind === 'multi') group services by the expert that started them; single
   // chats list them flat. Owner → display name/color comes from the merged experts map.
   const isGroup = useChat((s) => s.conversations.find((c) => c.id === activeConv)?.kind === 'multi')
@@ -462,6 +501,48 @@ export function WorkspaceTasks({ activeConv }: { activeConv: string | null }): R
           </div>
         )}
 
+        {activeConv && (asyncHandles.length > 0 || convMonitors.length > 0 || wakeups.length > 0) && (
+          <div className="ws-background">
+            <div className="ws-sub-head">{t('tasks.background')}</div>
+            {asyncHandles.map((h) => (
+              <BgCard
+                key={h.id}
+                icon="zap"
+                label={h.info || h.id}
+                badge={h.kind}
+                meta={h.id}
+                stopTitle={t('tasks.stopRun')}
+                onStop={() => void window.api.async.stopHandle(activeConv, h.id)}
+                t={t}
+              />
+            ))}
+            {convMonitors.map((m) => (
+              <BgCard
+                key={m.id}
+                icon="eye"
+                label={m.label || m.target}
+                badge={t('tasks.bgMonitor')}
+                meta={t('monitors.meta', { interval: fmtDur(m.intervalMs), count: String(m.changeCount) })}
+                stopTitle={t('monitors.stop')}
+                onStop={() => void window.api.monitor.stop(m.id)}
+                t={t}
+              />
+            ))}
+            {wakeups.map((w) => (
+              <BgCard
+                key={w.id}
+                icon="clock"
+                label={w.promptPreview}
+                badge={t('tasks.bgWakeup')}
+                meta={(w.recurring ? t('tasks.bgRecurring') + ' · ' : '') + t('tasks.bgWakeAt', { time: fmtTime(w.fireAt) })}
+                stopTitle={t('tasks.bgCancelWake')}
+                onStop={() => void window.api.rhythm.cancel(w.id)}
+                t={t}
+              />
+            ))}
+          </div>
+        )}
+
         {(timeline.length > 0 || donePanels.length > 0) && (
           <div className="ws-history">
             <div className="ws-sub-head ws-history-head">
@@ -533,6 +614,37 @@ function TaskRow({ tk, t }: { tk: WsTask; t: ReturnType<typeof useT> }): ReactEl
 
 // A live (active) background service. Logs expand inline into a fixed-height, scrollable pane that scrolls
 // to the bottom; Stop tree-kills it. starting → amber "doing", ready → green "done".
+// One Background card — an async handle, a Monitor, or a pending self-wakeup. Same card skin as
+// ServiceCard (.ws-svc: status dot + name + badge, then a meta/actions footer with an explicit Stop),
+// minus the log pane — none of these carries a log stream.
+function BgCard({ icon, label, badge, meta, stopTitle, onStop, t }: { icon: 'zap' | 'eye' | 'clock'; label: string; badge: string; meta: string; stopTitle: string; onStop: () => void; t: ReturnType<typeof useT> }): ReactElement {
+  const Icon = Icons[icon]
+  return (
+    <div className="ws-svc ws-bg-card">
+      <div className="ws-svc-head">
+        {/* live-work dot: the composer's breathing "Thinking…" indicator, not the service amber — these
+            cards are all actively-running background work, and the pulse says so at a glance */}
+        <span className="ws-svc-dot bg-live" />
+        <span className="ws-bg-ico">
+          <Icon size={12} />
+        </span>
+        <span className="ws-svc-name" title={label}>{label}</span>
+        <span className="ws-svc-badges">
+          <span className="task-status doing">{badge}</span>
+        </span>
+      </div>
+      <div className="ws-svc-foot">
+        <span className="ws-svc-meta">{meta}</span>
+        <span className="ws-svc-actions">
+          <button className="ws-svc-btn ws-svc-stop" title={stopTitle} onClick={onStop}>
+            <Icons.x size={12} /> {t('tasks.svcStop')}
+          </button>
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function ServiceCard({ svc, convId, t }: { svc: ServiceInfo; convId: string; t: ReturnType<typeof useT> }): ReactElement {
   const [logs, setLogs] = useState<string | null>(null)
   const [open, setOpen] = useState(false)

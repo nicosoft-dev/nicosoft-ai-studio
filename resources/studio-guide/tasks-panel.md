@@ -9,6 +9,7 @@ The live-work drawer for the current conversation. Open it with ⌘J, or topbar 
 - **Workflows** — workflow runs launched *from this conversation*: status at a glance, click to open the full run panel.
 - **Studio Lens** — findings when an expert runs a code review: each finding carries a verdict — Pass, Flagged or False positive.
 - **Services** — dev servers the experts started: Starting / Running / Exited, with **Stop** and **Logs** ("waiting for port" while booting).
+- **Background** — everything else this conversation is running behind the scenes, one row each with a stop/cancel button: background operations an expert launched (`launch_async` — long scripts, e2e runs, detached reviews), running **Monitors** (the non-LLM watchers that wake the agent on change; the Scheduled page keeps the cross-conversation view), and pending **self-scheduled wakeups** with their fire time. When an operation finishes, its result arrives in the chat as the expert resumes — the row simply leaves the list.
 - **History** — settled workflow runs and scheduled runs persist here; a scheduled run expands into its per-step trail (kind, exit code, duration, output snippet), and workflow entries reopen as full replays. **Clear** empties the list.
 
 ## Notes

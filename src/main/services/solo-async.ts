@@ -15,6 +15,7 @@
 
 import { AsyncRegistry, formatAsyncHandle, type AsyncHandle } from '../agent/async-registry'
 import { sessionBus } from '../agent/session-bus'
+import { broadcastConvAsync } from './active-async'
 
 interface SoloAsyncEntry {
   reg: AsyncRegistry
@@ -34,6 +35,8 @@ export function getSoloAsync(convId: string): SoloAsyncEntry {
     const ac = new AbortController()
     e = { reg: new AsyncRegistry(ac.signal), ac, awaiting: new Set(), settled: [] }
     e.reg.onComplete = (h) => onHandleComplete(convId, h)
+    const reg = e.reg
+    e.reg.onChange = () => broadcastConvAsync(convId, reg) // Tasks panel Background section tracks live handles
     entries.set(convId, e)
   }
   return e
@@ -118,6 +121,7 @@ export function disposeSoloAsync(convId: string): void {
   if (e) {
     e.ac.abort()
     entries.delete(convId)
+    broadcastConvAsync(convId, undefined) // clear the Tasks panel's Background handles for the departed conv
   }
   // Always reclaim the bus session, even for a collab-only conv that armed delivery but never created a solo
   // async entry (collab uses its own AsyncRegistry) — disposeSession is the ONLY path that frees bus state.

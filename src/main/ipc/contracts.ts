@@ -193,6 +193,31 @@ export interface ConvServices {
   convId: string
   services: ServiceInfoDto[]
 }
+// Live background async handles for a conversation (launch_async ops, async-parked lens/research/design/
+// migrate, sub-agents…) — the Tasks panel's Background section. Broadcast conv-level on every launch /
+// settle / stop (conv:async), same all-windows pattern as conv:services. Slim view of AsyncHandle: no
+// result payload (it can be arbitrarily large and the renderer never renders it — the resume injection
+// already carries it into the transcript).
+export interface AsyncHandleDto {
+  id: string
+  kind: 'lens' | 'research' | 'design' | 'migrate' | 'e2e' | 'process' | 'service' | 'subagent' | 'custom'
+  status: 'running' | 'done' | 'failed'
+  info?: string
+}
+export interface ConvAsync {
+  convId: string
+  handles: AsyncHandleDto[]
+}
+// A pending self-scheduled wakeup (schedule_wakeup / the autonomous loop) — Tasks panel Background section.
+// promptPreview is truncated: the full prompt can be a whole /loop briefing and the panel only labels it.
+export interface RhythmWakeupDto {
+  id: string
+  convId: string
+  roleId?: string
+  fireAt: number // epoch ms of the next fire (re-armed on each recurring tick)
+  recurring: boolean
+  promptPreview: string
+}
 // Live studio_lens panel progress for a conversation, broadcast conv-level (all windows, like conv:services) so
 // it survives the caller's turn-stream lifecycle: a SOLO lens runs async and the caller PARKS — its turn stream
 // finishes and any event through it would no-op, freezing the Tasks-panel LensCard at "creating". Lens progress

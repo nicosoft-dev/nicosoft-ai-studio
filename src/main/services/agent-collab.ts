@@ -44,7 +44,7 @@ import { createMigrateHandle } from './migrate/migrate-handle'
 import { recallText } from './memory/project-map'
 import { indexText as agentMemoryIndexText } from './memory/agent-memory'
 import { setActiveServices, clearActiveServices, broadcastConvServices } from './active-services'
-import { setActiveAsync, clearActiveAsync } from './active-async'
+import { setActiveAsync, clearActiveAsync, broadcastConvAsync } from './active-async'
 import { createPreviewHandle } from './workspace/preview'
 import * as workspaceTasks from './workspace/tasks'
 
@@ -203,6 +203,7 @@ export async function runCollabSession(
   // ONE of this collaboration's background handles — e.g. a running studio_lens review — without tree-killing the
   // rest. Cleared in the finally (clearActiveAsync), same lifecycle as the service registry registration.
   setActiveAsync(convId, asyncRegistry)
+  asyncRegistry.onChange = () => broadcastConvAsync(convId, asyncRegistry) // Tasks panel Background section
   // Live Tasks-panel wiring: push the active service set on every change; archive each one to history as it
   // exits; register the handle so the renderer can stop / read logs of a running service on demand.
   registry.setHooks({
@@ -562,6 +563,7 @@ export async function runCollabSession(
     clearActiveServices(convId, registry)
     clearActiveAsync(convId, asyncRegistry) // stop exposing this session's registry to async:stopHandle (guarded so a successor's registration survives)
     broadcastConvServices(convId, []) // clear the Tasks panel's Services section on teardown
+    broadcastConvAsync(convId, undefined) // …and its Background handles (dispose below settles them, but the registry is already unexposed)
     registry.dispose() // tree-kill every service the collaboration started — no lingering ports
     asyncRegistry.dispose() // tree-kill any still-running launch_async op, INCLUDING unawaited ones — a normal quiescent end never aborts the signal, so this is the only cleanup hook
     transcript.end() // close the shared session transcript writer (best-effort; 'error' is swallowed above)

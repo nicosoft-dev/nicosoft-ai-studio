@@ -6,8 +6,10 @@
 // resumable), released when it fires or is cancelled.
 
 import { setTimeout as nodeSetTimeout, clearTimeout as nodeClearTimeout } from 'node:timers'
+import { BrowserWindow } from 'electron'
 import { ulid } from '../db/id'
 import { sessionBus } from '../agent/session-bus'
+import type { RhythmWakeupDto } from '../ipc/contracts'
 
 const MIN_DELAY_S = 60
 const MAX_DELAY_S = 3600
@@ -19,7 +21,14 @@ interface Wakeup {
   delayMs: number
   recurring: boolean
   roleId?: string
+  fireAt: number // epoch ms of the NEXT fire — re-stamped on each recurring re-arm (Tasks panel countdown)
   timer: ReturnType<typeof nodeSetTimeout>
+}
+
+// rhythm:changed — nudge the Tasks panel's Background section to refetch (same fetch-on-event pattern as
+// monitor:changed; the list is tiny and conv-scoped, so a payloadless nudge is enough).
+function broadcastRhythmChanged(): void {
+  for (const w of BrowserWindow.getAllWindows()) w.webContents.send('rhythm:changed')
 }
 
 class SelfRhythmService {
@@ -40,11 +49,30 @@ class SelfRhythmService {
       delayMs: clamped * 1000,
       recurring: opts?.recurring === true,
       roleId: opts?.roleId,
+      fireAt: Date.now() + clamped * 1000,
       timer: nodeSetTimeout(() => this.fire(id), clamped * 1000),
     }
     this.wakeups.set(id, w)
+    broadcastRhythmChanged()
     console.log(`[self-rhythm] scheduled wakeup id=${id} conv=${convId} in=${clamped}s recurring=${w.recurring}`)
     return { id, delaySeconds: clamped }
+  }
+
+  // Pending wakeups for one conversation — the Tasks panel's Background section (read-only view).
+  list(convId: string): RhythmWakeupDto[] {
+    const out: RhythmWakeupDto[] = []
+    for (const w of this.wakeups.values()) {
+      if (w.convId !== convId) continue
+      out.push({
+        id: w.id,
+        convId: w.convId,
+        roleId: w.roleId,
+        fireAt: w.fireAt,
+        recurring: w.recurring,
+        promptPreview: w.prompt.length > 120 ? w.prompt.slice(0, 120) + '…' : w.prompt,
+      })
+    }
+    return out.sort((a, b) => a.fireAt - b.fireAt)
   }
 
   // Fire a wakeup: inject the prompt; a recurring wakeup then re-arms (keepalive stays held), a one-shot cleans up.
@@ -54,10 +82,12 @@ class SelfRhythmService {
     void sessionBus.inject(w.convId, { text: w.prompt, source: `self-rhythm:${id}`, priority: 'later', roleId: w.roleId })
     if (w.recurring) {
       w.timer = nodeSetTimeout(() => this.fire(id), w.delayMs) // next tick; keepalive held until cancel/dispose
+      w.fireAt = Date.now() + w.delayMs
     } else {
       this.wakeups.delete(id)
       sessionBus.removeKeepalive(w.convId, `wakeup:${id}`)
     }
+    broadcastRhythmChanged()
   }
 
   cancel(id: string): boolean {
@@ -66,6 +96,7 @@ class SelfRhythmService {
     nodeClearTimeout(w.timer)
     this.wakeups.delete(id)
     sessionBus.removeKeepalive(w.convId, `wakeup:${id}`)
+    broadcastRhythmChanged()
     return true
   }
 

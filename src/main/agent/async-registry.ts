@@ -40,6 +40,10 @@ export class AsyncRegistry {
   private ac = new AbortController()
   // Completion hook: collab wires this to wake a parked expert when one of its in-flight handles finishes.
   onComplete?: (handle: AsyncHandle) => void
+  // Change hook: fired on every membership/status change (launch, settle, stop is a settle) — the owners
+  // (solo-async / agent-collab) wire it to the conv:async broadcast so the Tasks panel's Background section
+  // tracks live handles without polling. Fired AFTER onComplete so a resume injection never races the UI.
+  onChange?: () => void
 
   constructor(parentSignal: AbortSignal) {
     if (parentSignal.aborted) this.ac.abort()
@@ -70,8 +74,10 @@ export class AsyncRegistry {
         handle.error = e instanceof Error ? e.message : String(e)
       }
       this.onComplete?.(handle)
+      this.onChange?.()
     })()
     this.settlers.set(id, settler)
+    this.onChange?.()
     return handle
   }
 

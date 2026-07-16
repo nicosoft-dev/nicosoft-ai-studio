@@ -17,7 +17,10 @@ import type {
   ConvImage,
   ConvTodos,
   ConvServices,
+  ConvAsync,
   ConvLens,
+  AsyncHandleDto,
+  RhythmWakeupDto,
   ServiceInfoDto,
   AnalyticsSummary,
   AppInfo,
@@ -179,6 +182,10 @@ const api = {
   // Live per-conversation background services (start_service), pushed on every start/ready/port/exit — the
   // workspace Tasks panel's Services section. Only active (starting/ready); exited ones go to history.
   onConvServices: (cb: (d: ConvServices) => void): (() => void) => agentListen('conv:services', cb),
+
+  // Live per-conversation async handles (launch_async & friends), pushed on every launch/settle/stop — the
+  // workspace Tasks panel's Background section.
+  onConvAsync: (cb: (d: ConvAsync) => void): (() => void) => agentListen('conv:async', cb),
 
   // Live per-conversation studio_lens panel progress (reviewers + verdict), broadcast conv-level so a SOLO async
   // lens (whose caller parked) still reaches the Tasks panel after its turn stream finished. See ipc/lens-broadcast.
@@ -446,6 +453,14 @@ const api = {
     onChanged: (cb: () => void): (() => void) => agentListen('monitor:changed', cb)
   },
 
+  // Self-scheduled wakeups (schedule_wakeup) — the Tasks panel's Background section lists a conversation's
+  // pending wakes and can cancel one; rhythm:changed nudges a refetch on arm/fire/cancel.
+  rhythm: {
+    list: (convId: string): Promise<RhythmWakeupDto[]> => ipcRenderer.invoke('rhythm:list', convId),
+    cancel: (id: string): Promise<boolean> => ipcRenderer.invoke('rhythm:cancel', id),
+    onChanged: (cb: () => void): (() => void) => agentListen('rhythm:changed', cb)
+  },
+
   roles: {
     listBindings: (): Promise<RoleBindingDto[]> => ipcRenderer.invoke('roles:bindings:list'),
     setBinding: (roleId: string, input: RoleBindingInput): Promise<RoleBindingDto> =>
@@ -544,7 +559,9 @@ const api = {
   // migrate card). chat stops chat (.cmp-stop → the turn); tasks stop tasks — this reaches the conv's async
   // registry to abort just that op. Returns false when the handle is unknown / already settled.
   async: {
-    stopHandle: (convId: string, handleId: string): Promise<boolean> => ipcRenderer.invoke('async:stopHandle', convId, handleId)
+    stopHandle: (convId: string, handleId: string): Promise<boolean> => ipcRenderer.invoke('async:stopHandle', convId, handleId),
+    // Snapshot for a panel opening mid-run (before any conv:async push lands).
+    list: (convId: string): Promise<AsyncHandleDto[]> => ipcRenderer.invoke('async:list', convId)
   },
   workflows: {
     list: (): Promise<WorkflowDto[]> => ipcRenderer.invoke('workflows:list'),

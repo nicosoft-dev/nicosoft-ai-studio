@@ -9,9 +9,21 @@
 // async:stopHandle handler tries this collab locator first, then falls back to the solo registry — safe even if a
 // convId were backed by both, because handle ids are process-globally unique (async-registry's counter is
 // module-level), so only one registry owns any given id.
+import { BrowserWindow } from 'electron'
 import type { AsyncRegistry } from '../agent/async-registry'
+import type { ConvAsync } from '../ipc/contracts'
 
 const active = new Map<string, AsyncRegistry>()
+
+// conv:async broadcast — same all-windows convId-keyed pattern as conv:services (the registry's change
+// hook fires from settlers with no WebContents in scope). Slim DTO: result/error payloads stay in main.
+export function broadcastConvAsync(convId: string, reg: AsyncRegistry | undefined): void {
+  const ev: ConvAsync = {
+    convId,
+    handles: (reg?.list() ?? []).map((h) => ({ id: h.id, kind: h.kind, status: h.status, info: h.info })),
+  }
+  for (const w of BrowserWindow.getAllWindows()) w.webContents.send('conv:async', ev)
+}
 
 export function setActiveAsync(convId: string, reg: AsyncRegistry): void {
   active.set(convId, reg)

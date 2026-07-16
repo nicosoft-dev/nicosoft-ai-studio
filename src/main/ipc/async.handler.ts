@@ -11,10 +11,18 @@
 import { ipcMain } from 'electron'
 import { activeAsyncFor } from '../services/active-async'
 import { peekSoloAsync } from '../services/solo-async'
+import type { AsyncHandleDto } from './contracts'
 
 export function registerAsyncHandlers(): void {
   ipcMain.handle('async:stopHandle', (_e, convId: string, handleId: string): boolean => {
     if (activeAsyncFor(convId)?.stop(handleId)) return true
     return peekSoloAsync(convId)?.reg.stop(handleId) ?? false
+  })
+  // Snapshot of a conversation's async handles (Tasks panel Background section opens mid-run and needs the
+  // current set before any conv:async push arrives). Same two-registry lookup as stopHandle: a convId is in
+  // practice backed by at most one, and ids are globally unique, so concatenating both is safe.
+  ipcMain.handle('async:list', (_e, convId: string): AsyncHandleDto[] => {
+    const regs = [activeAsyncFor(convId), peekSoloAsync(convId)?.reg]
+    return regs.flatMap((r) => r?.list() ?? []).map((h) => ({ id: h.id, kind: h.kind, status: h.status, info: h.info }))
   })
 }
