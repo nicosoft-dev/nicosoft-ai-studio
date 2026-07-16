@@ -703,10 +703,9 @@ export function Composer({
           ) : null}
           {cmdOpen ? <CommandPalette matches={cmdMatches} index={cmdIndex} onPick={runCommand} /> : null}
           {mentionOpen ? <MentionPalette matches={mentionMatches} index={mentionIndex} onPick={pickMention} /> : null}
-          <div className="cmp-ta-wrap">
           <textarea
             ref={taRef}
-            className={ghost ? 'cmp-textarea has-ghost' : 'cmp-textarea'}
+            className="cmp-textarea"
             rows={1}
             value={value}
             // The ghost suggestion rides the placeholder slot (CC's presentation): it is exactly the faint
@@ -817,8 +816,6 @@ export function Composer({
             }}
             disabled={!ready}
           />
-          {ghost ? <kbd className="cmp-ghost-kbd">Tab</kbd> : null}
-          </div>
           <div className="cmp-bottom">
             <button className="icon-btn" title={t('conv.attachImage')} disabled={!ready} onClick={() => fileInputRef.current?.click()}>
               <Icons.paperclip size={16} />

@@ -137,9 +137,11 @@ export function ContextIndicator({ used, max, breakdown }: { used: number; max: 
   // Losing the window (endpoint unbound, catalog not loaded yet) renders the whole indicator away below.
   // `return null` is not an unmount, so without this `open` would survive: the panel would vanish and then
   // pop back unbidden the moment a window is known again, and its key listener would idle on in between.
+  // Losing the BREAKDOWN (no turn yet / cleared by /compact) closes it too: a panel with no parts to show
+  // is just the ring's own number in a box — the click is gated below for the same reason.
   useEffect(() => {
-    if (max <= 0) setOpen(false)
-  }, [max])
+    if (max <= 0 || !breakdown) setOpen(false)
+  }, [max, breakdown])
 
   // Escape closes and returns focus to the ring — the backdrop covers pointer dismissal.
   useEffect(() => {
@@ -174,9 +176,11 @@ export function ContextIndicator({ used, max, breakdown }: { used: number; max: 
         className="ctx-ring-btn"
         title={summary}
         aria-label={t('conv.ctxRing', { summary })}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={() => setOpen((s) => !s)}
+        aria-haspopup={breakdown ? 'dialog' : undefined}
+        aria-expanded={breakdown ? open : undefined}
+        // No breakdown (no turn measured yet, or /compact cleared it) → no panel: it would only re-print
+        // the ring's own number with nothing to break down. The hover title still reads the summary.
+        onClick={() => { if (breakdown) setOpen((s) => !s) }}
       >
         <ContextRing pct={pct} level={level} />
       </button>

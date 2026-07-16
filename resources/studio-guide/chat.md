@@ -11,7 +11,7 @@ The main surface: talk to one expert (solo) or to Danny (the coordinator, who ro
 ## The composer
 
 - Enter sends, Shift+Enter inserts a newline. "Stop" cancels the current turn.
-- **Ghost suggestion**: after a reply settles, a faint suggestion of what you might type next can appear in the empty input (with a small `Tab` chip). **Tab** fills it in for editing; **Escape** dismisses it; typing anything hides it (clearing the draft brings it back); Enter ignores it — an empty composer never sends. It reuses the conversation's own model over the prompt cache, so it costs next to nothing; it stays silent early in a conversation or when the cache is cold. Toggle it in Settings → General → "Prompt suggestions".
+- **Ghost suggestion**: after a reply settles, a faint suggestion of what you might type next can appear in the empty input. **Tab** fills it in for editing; **Escape** dismisses it; typing anything hides it (clearing the draft brings it back); Enter ignores it — an empty composer never sends. It reuses the conversation's own model over the prompt cache, so it costs next to nothing; it stays silent early in a conversation or when the cache is cold. Toggle it in Settings → General → "Prompt suggestions".
 - **Images**: paste, drag-and-drop, or the "Attach image" button (images only — other file types go through the working folder instead).
 - **Folder**: the path bar picks a working directory, enabling Files / Diff / Terminal / Preview for this conversation (see Workspace).
 - **Pickers** under the input: model, thinking depth (when the model supports it), permission Mode (Ask / Plan / Auto), and — for Georgia — an image model picker.

@@ -371,13 +371,7 @@
 .cmp-textarea::placeholder { color: var(--text-4); }
 .cmp-textarea:disabled { cursor: not-allowed; }
 
-/* ghost prompt suggestion — rides the placeholder slot; the kbd chip floats at the field's right edge */
-.cmp-ta-wrap { position: relative; }
-.cmp-ghost-kbd {
-  position: absolute; right: 12px; top: 7px; pointer-events: none;
-  font-family: var(--mono); font-size: 10px; line-height: 1; color: var(--text-4);
-  background: var(--bg-3); border: 1px solid var(--border-1); border-radius: 4px; padding: 3px 6px;
-}
+/* ghost prompt suggestion rides the placeholder slot — no dedicated element; the ghost IS the placeholder */
 
 /* bottom row */
 .cmp-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 9px 9px; }
