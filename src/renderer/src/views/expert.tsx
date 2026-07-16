@@ -9,6 +9,7 @@ import { STUDIO_DATA } from '@/data/studio-data'
 import { useMemory } from '@/stores/memory'
 import { toast } from '@/stores/toast'
 import { useT } from '@/stores/locale'
+import { appLocale } from '@/lib/format'
 import { useChat } from '@/stores/chat'
 import { useCustomRoles } from '@/stores/custom-roles'
 import { useAllExperts } from '@/lib/all-experts'
@@ -40,7 +41,7 @@ function relativeWhen(iso: string): string {
   if (days === 1) return 'yesterday'
   if (days < 7) return `${days}d ago`
   if (days < 30) return `${Math.floor(days / 7)}w ago`
-  return new Date(iso).toLocaleDateString()
+  return new Date(iso).toLocaleDateString(appLocale()) // app language, not the OS locale
 }
 
 interface EquippedItem {

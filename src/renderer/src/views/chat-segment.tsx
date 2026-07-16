@@ -79,7 +79,7 @@ function SegActions({
         </button>
       ) : null}
       {createdAt !== undefined ? (
-        <span className="seg-act-time" title={new Date(createdAt).toLocaleString()}>{relativeTime(createdAt, locale)}</span>
+        <span className="seg-act-time" title={new Date(createdAt).toLocaleString(locale)}>{relativeTime(createdAt, locale)}</span>
       ) : null}
     </div>
   )

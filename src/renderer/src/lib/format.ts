@@ -2,6 +2,17 @@
 // fmtContextTokens (below) and chat-segment.tsx its own fmtElapsed ("3m 12s" vs the dashboard's coarse
 // "3m"); merging those would change visible strings, not just code.
 
+import { useLocale } from '@/stores/locale'
+
+// The locale every date/time formatter must pass to toLocaleString & friends. `undefined` there means
+// the OS locale — a Chinese system rendered "7月16日" inside an app explicitly set to English (dogfood
+// 2026-07-16, the Tasks panel's wakeup card). Read via getState, not a hook: formatters are plain
+// functions; their callers already re-render on language change through useT/useLocale subscriptions,
+// so each render re-reads the current value.
+export function appLocale(): string {
+  return useLocale.getState().resolved
+}
+
 // Dashboard-style token count: 1.2M / 12k / 999 (studio Overview + analytics share this exact shape).
 export function fmtTokens(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'

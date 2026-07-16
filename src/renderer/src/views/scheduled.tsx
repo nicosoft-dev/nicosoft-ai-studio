@@ -16,6 +16,7 @@ import { ConfirmDialog } from '@/components/dialogs/confirm-dialog'
 
 import { toast } from '@/stores/toast'
 import { useT } from '@/stores/locale'
+import { appLocale } from '@/lib/format'
 
 // DTO from the preload bridge — same shape as the scheduler's model (ipc/contracts), no mapping layer.
 type TaskDto = Awaited<ReturnType<typeof window.api.scheduled.list>>[number]
@@ -151,7 +152,8 @@ function triggerLabel(t: TaskDto): string {
 
 function fmtTime(ms?: number): string {
   if (!ms) return '—'
-  return new Date(ms).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' })
+  // appLocale, not undefined: undefined = the OS locale, which leaks into an app set to another language.
+  return new Date(ms).toLocaleString(appLocale(), { weekday: 'short', hour: '2-digit', minute: '2-digit' })
 }
 
 // Compact interval readout for a running monitor: ms → "5s" / "2m" / "1h".
