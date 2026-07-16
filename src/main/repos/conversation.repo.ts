@@ -168,6 +168,21 @@ export function setCwd(id: string, cwd: string): void {
   getDb().prepare('UPDATE conversations SET cwd = ?, updated_at = ? WHERE id = ?').run(cwd, now, id)
 }
 
+// Last measured context breakdown (JSON of token-count.service's ContextBreakdown), written after each
+// turn's probe so the ring panel keeps its category split across app restarts. Deliberately NOT part of
+// mapConversation/list — a per-row JSON blob has exactly one reader (the panel) and one row at a time.
+// No updated_at bump: this is derived bookkeeping, not user activity.
+export function setContextBreakdown(id: string, json: string | null): void {
+  getDb().prepare('UPDATE conversations SET context_breakdown = ? WHERE id = ?').run(json, id)
+}
+
+export function getContextBreakdown(id: string): string | null {
+  const row = getDb().prepare('SELECT context_breakdown FROM conversations WHERE id = ?').get(id) as
+    | { context_breakdown: string | null }
+    | undefined
+  return row?.context_breakdown ?? null
+}
+
 export function getById(id: string): ConversationRow | null {
   const row = getDb().prepare('SELECT * FROM conversations WHERE id = ?').get(id) as unknown as
     | ConversationRaw

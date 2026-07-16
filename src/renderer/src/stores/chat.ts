@@ -768,6 +768,15 @@ export const useChat = create<ChatState>((set, get) => {
 
     openConversation: async (convId) => {
       set({ activeConv: convId })
+      // Ring-panel breakdown: main persists the last measured split per conversation, so a restarted app
+      // still opens the panel with details. Fill-if-absent — a live push (fresher) must never be
+      // overwritten by this snapshot, and the fetch runs before the already-loaded early-return so a
+      // conversation revisited after a restart gets it too.
+      if (!get().breakdown[convId]) {
+        void window.api.conversations.breakdown(convId).then((b) => {
+          if (b) set((s) => (s.breakdown[convId] ? s : { breakdown: { ...s.breakdown, [convId]: b } }))
+        }).catch(() => {})
+      }
       if (get().byConversation[convId]) return // already loaded
       // Load messages + (for agent conversations) rebuild tool cards from the transcript, keyed by run_id.
       const [rows, transcript] = await Promise.all([

@@ -20,6 +20,7 @@ import type {
   ConvAsync,
   ConvSuggestion,
   ConvLens,
+  ContextBreakdown,
   AsyncHandleDto,
   RhythmWakeupDto,
   ServiceInfoDto,
@@ -487,6 +488,8 @@ const api = {
     create: (input: ConversationCreateDto): Promise<ConversationDto> =>
       ipcRenderer.invoke('conversations:create', input),
     messages: (convId: string): Promise<MessageDto[]> => ipcRenderer.invoke('conversations:messages', convId),
+    // Last persisted context breakdown (ring panel's category split) — survives app restarts.
+    breakdown: (convId: string): Promise<ContextBreakdown | null> => ipcRenderer.invoke('conversations:breakdown', convId),
     append: (convId: string, input: MessageAppendDto): Promise<MessageDto> =>
       ipcRenderer.invoke('conversations:append', convId, input),
     rename: (convId: string, title: string): Promise<void> =>

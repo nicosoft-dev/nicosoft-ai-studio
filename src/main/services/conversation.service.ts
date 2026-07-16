@@ -1,5 +1,6 @@
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import type { ContextBreakdown } from './token-count.service'
 import { dataDir } from '../db/connection'
 import * as convRepo from '../repos/conversation.repo'
 import * as assignmentService from './assignment.service'
@@ -87,6 +88,19 @@ export function get(convId: string): ConversationDto | null {
 
 export function messages(convId: string): MessageDto[] {
   return convRepo.listByConversation(convId).map(toMsgDto)
+}
+
+// Last persisted context breakdown (written by agent.service after each turn's probe, cleared on a fold) —
+// the ring panel's category split, served on conversation open so it survives app restarts. A row that
+// somehow holds unparsable JSON reads as "none" rather than throwing at the IPC boundary.
+export function contextBreakdown(convId: string): ContextBreakdown | null {
+  const json = convRepo.getContextBreakdown(convId)
+  if (!json) return null
+  try {
+    return JSON.parse(json) as ContextBreakdown
+  } catch {
+    return null
+  }
 }
 
 export function append(convId: string, input: MessageAppendDto): MessageDto {

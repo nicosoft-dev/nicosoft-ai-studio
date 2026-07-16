@@ -307,7 +307,13 @@ export async function run(
         { baseUrl: ep.baseUrl, apiKey: key, model: input.model, system, messages: seed as { role: string; content: unknown }[], tools: toolSchemas, thinkingBudget: input.thinking?.budgetTokens },
         { systemNoMemory, total: promptTokens, max: contextWindow, anchored: !!anchored },
       )
-      if (b) cb.onBreakdown?.(b)
+      if (b) {
+        // Persist alongside the live push: breakdowns used to be memory-only, so an app restart left every
+        // conversation's ring panel detail-less until its next turn. The stored split is the last measured
+        // one — still true after a restart (history unchanged); a fold clears it (compression.service).
+        convRepo.setContextBreakdown(convId, JSON.stringify(b))
+        cb.onBreakdown?.(b)
+      }
     })().catch(() => {})
   }
 

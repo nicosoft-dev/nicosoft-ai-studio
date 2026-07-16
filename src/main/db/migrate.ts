@@ -48,6 +48,9 @@ export function runMigrations(db: DatabaseSync): void {
   // Per-conversation working dir (replaces the renderer's per-expert cwd for new conversations). NULL on every
   // existing row → the renderer falls back to the legacy per-expert cwd until the conversation gets its own.
   ensureColumn(db, 'conversations', 'cwd', 'TEXT')
+  // Last measured context breakdown (JSON) — keeps the ring panel's category split across app restarts.
+  // NULL until a turn's probe lands; cleared on a fold (the split it described no longer exists).
+  ensureColumn(db, 'conversations', 'context_breakdown', 'TEXT')
   // Memory self-learning upgrades: provenance (which conversation a memory was learned from), decay
   // bookkeeping (when recall last selected it), and the extractor's incremental watermark.
   ensureColumn(db, 'memories', 'source_conv_id', 'TEXT')

@@ -8,6 +8,7 @@ export function registerConversationHandlers(): void {
   ipcMain.handle('conversations:list', () => convService.list())
   ipcMain.handle('conversations:create', (_e, input: ConversationCreateDto) => convService.create(input))
   ipcMain.handle('conversations:messages', (_e, convId: string) => convService.messages(convId))
+  ipcMain.handle('conversations:breakdown', (_e, convId: string) => convService.contextBreakdown(convId))
   ipcMain.handle('conversations:append', (_e, convId: string, input: MessageAppendDto) =>
     convService.append(convId, input)
   )

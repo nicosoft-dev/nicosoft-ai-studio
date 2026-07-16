@@ -255,6 +255,10 @@ export async function maybeCompress(input: CompressInput): Promise<CompactOutcom
       content: summaryText,
       coveredUpTo
     })
+    // The persisted breakdown described the pre-fold prompt (its Messages part counted history that just
+    // got folded away) — drop it so a restarted app shows "details after the next turn" instead of a
+    // confidently wrong split. Mirrors the renderer's own in-memory drop on manual /compact.
+    convRepo.setContextBreakdown(input.convId, null)
     agentEvents.emit({ type: 'compact:post', convId: input.convId, roleId: input.roleId, ts: Date.now() })
     return { status: 'compacted', foldedMessages: fold.length, foldedTokens: estimateMessageTokens(fold), summaryTokens: estimateTextTokens(summaryText) }
   } catch (err) {
