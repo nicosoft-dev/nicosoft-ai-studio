@@ -157,7 +157,9 @@ class SuggestionService {
           .join('')
         const verdict = filterSuggestion(text)
         if (!verdict.ok) {
-          console.log(`[suggestion] rejected conv=${s.convId}: ${verdict.reason}`)
+          // The rejected text rides the log (truncated) — it is the calibration data for the filter's
+          // word/length thresholds (P2), and "rejected: too_many_words" alone says nothing actionable.
+          console.log(`[suggestion] rejected conv=${s.convId}: ${verdict.reason} — "${text.trim().slice(0, 80)}"`)
           return
         }
         console.log(`[suggestion] generated conv=${s.convId}: "${verdict.text}"`)

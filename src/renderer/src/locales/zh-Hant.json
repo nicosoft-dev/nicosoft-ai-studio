@@ -338,6 +338,7 @@
   "conv.ctxFree": "剩餘空間",
   "conv.ctxOver": "超出視窗",
   "conv.ctxFloorNote": "僅系統提示、工具與記憶就已超過壓縮觸發線——壓縮訊息無法騰出空間。請改用上下文視窗更大的模型,或使用工具較少的角色。",
+  "conv.ctxNoBreakdown": "分類明細將在本次工作階段的下一輪對話後顯示。",
   "conv.ctxEstimated": "依分類估算的用量",
   "conv.openSettings": "開啟設定",
   "conv.chooseFolder": "請在上方選擇一個專案資料夾以開始",

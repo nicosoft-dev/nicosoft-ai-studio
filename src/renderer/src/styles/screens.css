@@ -351,6 +351,7 @@
 .ctx-legend-name.over, .ctx-legend-tok.over { color: var(--error); }
 /* the dead-end diagnosis: system prompt + tools alone exceed the compaction trigger — folding can't help */
 .ctx-floor-note { font-size: 10.5px; color: var(--warning); margin-top: 7px; line-height: 1.45; }
+.ctx-pop-note { font-size: 10.5px; color: var(--text-4); margin-top: 7px; line-height: 1.45; }
 
 /* attachment strip */
 .cmp-attach-strip { display: flex; flex-wrap: wrap; gap: 8px; padding: 11px 12px 0; }

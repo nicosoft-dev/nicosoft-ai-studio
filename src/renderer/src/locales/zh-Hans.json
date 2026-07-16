@@ -338,6 +338,7 @@
   "conv.ctxFree": "剩余空间",
   "conv.ctxOver": "超出窗口",
   "conv.ctxFloorNote": "仅系统提示、工具与记忆就已超过压缩触发线——压缩消息无法腾出空间。请换用上下文窗口更大的模型,或使用工具更少的角色。",
+  "conv.ctxNoBreakdown": "分类明细将在本次会话的下一轮对话后显示。",
   "conv.ctxEstimated": "按分类估算的用量",
   "conv.openSettings": "打开设置",
   "conv.chooseFolder": "请在上方选择一个项目文件夹以开始",

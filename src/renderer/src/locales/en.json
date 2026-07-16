@@ -338,6 +338,7 @@
   "conv.ctxFree": "Free space",
   "conv.ctxOver": "Over window",
   "conv.ctxFloorNote": "System prompt, tools and memory alone exceed the compaction trigger — compacting messages cannot free space. Switch to a model with a larger context window, or use a role with fewer tools.",
+  "conv.ctxNoBreakdown": "Category details appear after the next turn in this session.",
   "conv.ctxEstimated": "Estimated usage by category",
   "conv.openSettings": "Open settings",
   "conv.chooseFolder": "Choose a project folder above to start",
