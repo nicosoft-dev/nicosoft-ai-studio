@@ -490,6 +490,9 @@ const api = {
     messages: (convId: string): Promise<MessageDto[]> => ipcRenderer.invoke('conversations:messages', convId),
     // Last persisted context breakdown (ring panel's category split) — survives app restarts.
     breakdown: (convId: string): Promise<ContextBreakdown | null> => ipcRenderer.invoke('conversations:breakdown', convId),
+    // Compute one on demand (free count_tokens probes; CC computes its /context on open too).
+    computeBreakdown: (convId: string, contextWindow: number): Promise<ContextBreakdown | null> =>
+      ipcRenderer.invoke('conversations:computeBreakdown', convId, contextWindow),
     append: (convId: string, input: MessageAppendDto): Promise<MessageDto> =>
       ipcRenderer.invoke('conversations:append', convId, input),
     rename: (convId: string, title: string): Promise<void> =>

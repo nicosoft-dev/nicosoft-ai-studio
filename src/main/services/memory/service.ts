@@ -414,6 +414,14 @@ function broadcastRecalled(ids: string[]): void {
   }
 }
 
+// Side-effect-free recall approximation for token COUNTING (the ring panel's on-demand breakdown):
+// the same pool + budget cap as recall(), but no llmFilter (a paid call), no decay touch, no broadcast —
+// opening a panel must not count as the memories being "used". Above the LLM threshold this over-includes
+// slightly versus a real turn; the panel is labelled an estimate.
+export function recallForCount(roleId: string): MemoryRow[] {
+  return capByBudget(memoryRepo.listForRole(roleId))
+}
+
 function capByBudget(memories: MemoryRow[]): MemoryRow[] {
   // Budget priority: explicit > user > auto first (a user's direct "remember this" must never be
   // squeezed out by auto-extracted chatter), newest first within the same rank (stable sort keeps

@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { saveToFile } from './dialogs'
 import * as convService from '../services/conversation.service'
+import { computeForConversation } from '../services/breakdown-compute'
 import type { ConversationCreateDto, ConversationTitleInput, MessageAppendDto } from './contracts'
 
 // IPC boundary for persisted conversations + messages — parse args, call the service, return. No SQL.
@@ -9,6 +10,11 @@ export function registerConversationHandlers(): void {
   ipcMain.handle('conversations:create', (_e, input: ConversationCreateDto) => convService.create(input))
   ipcMain.handle('conversations:messages', (_e, convId: string) => convService.messages(convId))
   ipcMain.handle('conversations:breakdown', (_e, convId: string) => convService.contextBreakdown(convId))
+  // On-demand computation for conversations with no stored split (CC's /context enumerates on open too).
+  // contextWindow comes from the renderer — the model catalog lives there.
+  ipcMain.handle('conversations:computeBreakdown', (_e, convId: string, contextWindow: number) =>
+    computeForConversation(convId, contextWindow)
+  )
   ipcMain.handle('conversations:append', (_e, convId: string, input: MessageAppendDto) =>
     convService.append(convId, input)
   )

@@ -129,6 +129,21 @@ export function Composer({
   const streaming = activeConv ? (chat.streaming[activeConv] ?? false) : false
   const compacting = activeConv ? (chat.compacting[activeConv] ?? false) : false
   const suggestion = useConvSuggestion((s) => (activeConv ? s.byConv[activeConv] : undefined))
+  // On-demand ring-panel breakdown (CC parity — its /context enumerates the prompt the moment it opens):
+  // a conversation with history but no stored split (last measured before the persistence column, or never)
+  // gets one computed as soon as its composer sits idle. Fill-if-absent both ends; main dedupes per conv.
+  const breakdownMiss = !!activeConv && !streaming && b.contextLength > 0 && !chat.breakdown[activeConv]
+  useEffect(() => {
+    if (!breakdownMiss || !activeConv) return
+    const convId = activeConv
+    void window.api.conversations
+      .computeBreakdown(convId, b.contextLength)
+      .then((bd) => {
+        if (bd) useChat.setState((s) => (s.breakdown[convId] ? s : { breakdown: { ...s.breakdown, [convId]: bd } }))
+      })
+      .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- contextLength changing alone must not re-probe
+  }, [breakdownMiss, activeConv])
   const messages = activeConv ? (chat.byConversation[activeConv] ?? []) : []
   // Exact prompt tokens of the last sent turn (count_tokens, measured server-side) plus the unsent input
   // — far more accurate than chars/4, especially for agent runs where tool schemas dominate. Falls back
