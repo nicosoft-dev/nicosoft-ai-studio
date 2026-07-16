@@ -42,12 +42,21 @@ function hasCacheControl(value: unknown): boolean {
 // so detecting them first prevents conflict while preserving that upstream behavior. Updates are
 // copy-on-write — the messages array may alias the agent loop's live transcript, which must not see
 // cache markers appear on its own blocks.
-export function applyAnthropicCacheControls(body: {
-  system?: string | Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }>
-  messages: Array<{ role: string; content: Array<{ type: string; cache_control?: { type: 'ephemeral' } }> }>
-  tools?: unknown[]
-}): void {
+export function applyAnthropicCacheControls(
+  body: {
+    system?: string | Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }>
+    messages: Array<{ role: string; content: Array<{ type: string; cache_control?: { type: 'ephemeral' } }> }>
+    tools?: unknown[]
+  },
+  // skipTrailingUserMessages: place the message breakpoint N user messages BEFORE the end instead of on the
+  // last one. A fork request (prompt suggestion) appends a one-off instruction as its trailing user turn;
+  // a breakpoint there could never be READ back (reads require breakpoint alignment with what was written),
+  // while the previous user message is exactly where the main conversation's breakpoint sits — aligning
+  // there is what makes the fork's prefix a cache HIT instead of a full-price re-send.
+  opts?: { skipTrailingUserMessages?: number },
+): void {
   if (hasCacheControl(body)) return
+  let skipUsers = opts?.skipTrailingUserMessages ?? 0
   let count = 0
   if (body.tools && body.tools.length > 0) {
     const index = body.tools.length - 1
@@ -62,6 +71,10 @@ export function applyAnthropicCacheControls(body: {
   for (let i = body.messages.length - 1; i >= 0 && count < 3; i--) {
     const msg = body.messages[i]
     if (msg.role !== 'user') continue
+    if (skipUsers > 0) {
+      skipUsers--
+      continue
+    }
     for (let j = msg.content.length - 1; j >= 0; j--) {
       const block = msg.content[j] as { type: string; text?: unknown }
       if (block.type === 'text' && typeof block.text === 'string' && block.text.length > 0) {

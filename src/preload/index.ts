@@ -18,6 +18,7 @@ import type {
   ConvTodos,
   ConvServices,
   ConvAsync,
+  ConvSuggestion,
   ConvLens,
   AsyncHandleDto,
   RhythmWakeupDto,
@@ -186,6 +187,9 @@ const api = {
   // Live per-conversation async handles (launch_async & friends), pushed on every launch/settle/stop — the
   // workspace Tasks panel's Background section.
   onConvAsync: (cb: (d: ConvAsync) => void): (() => void) => agentListen('conv:async', cb),
+
+  // Ghost prompt suggestion for the composer, pushed after a turn settles (empty text clears it).
+  onConvSuggestion: (cb: (d: ConvSuggestion) => void): (() => void) => agentListen('conv:suggestion', cb),
 
   // Live per-conversation studio_lens panel progress (reviewers + verdict), broadcast conv-level so a SOLO async
   // lens (whose caller parked) still reaches the Tasks panel after its turn stream finished. See ipc/lens-broadcast.

@@ -373,7 +373,7 @@ export async function runAgentLoop(
   loop: AgentLoopInput,
   cb: AgentCallbacks,
   signal: AbortSignal,
-): Promise<{ text: string; inTokens: number; contextTokens: number; cacheReadTokens: number; outTokens: number; firstContext: number; reason: AgentResult['reason']; turns: number; attachments: MessageAttachmentDto[]; writtenFiles: WrittenFile[] }> {
+): Promise<{ text: string; inTokens: number; contextTokens: number; cacheReadTokens: number; outTokens: number; firstContext: number; reason: AgentResult['reason']; turns: number; attachments: MessageAttachmentDto[]; writtenFiles: WrittenFile[]; messages: AgentMessage[] }> {
   const sessionDir = join(dataDir(), 'sessions', loop.convId)
   await mkdir(join(sessionDir, 'tool-results'), { recursive: true })
   // No project folder selected (Flynn/Shuri can chat folder-free) → fall back to a per-conversation scratch
@@ -641,6 +641,10 @@ export async function runAgentLoop(
     turns: result.turns,
     attachments: drained.toolImages,
     writtenFiles,
+    // The loop's final in-memory transcript (tool turns included — those never persist to the messages
+    // table). The prompt-suggestion fork forwards it verbatim: same byte prefix as the run's last LLM
+    // request is what makes the fork's prompt a cache read instead of a full-price re-send.
+    messages: result.messages,
   }
 }
 

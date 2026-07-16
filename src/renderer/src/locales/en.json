@@ -8,6 +8,7 @@
   "settings.nav.about": "About",
   "settings.back": "Back to Studio",
   "settings.theme.label": "Theme",
+  "settings.suggestion.label": "Prompt suggestions",
   "settings.theme.auto": "Auto (System)",
   "settings.theme.light": "Light",
   "settings.theme.dark": "Dark",

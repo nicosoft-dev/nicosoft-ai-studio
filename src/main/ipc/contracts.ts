@@ -208,6 +208,11 @@ export interface ConvAsync {
   convId: string
   handles: AsyncHandleDto[]
 }
+// Ghost prompt suggestion for the composer (conv:suggestion push) — empty text clears the conversation's ghost.
+export interface ConvSuggestion {
+  convId: string
+  text: string
+}
 // A pending self-scheduled wakeup (schedule_wakeup / the autonomous loop) — Tasks panel Background section.
 // promptPreview is truncated: the full prompt can be a whole /loop briefing and the panel only labels it.
 export interface RhythmWakeupDto {

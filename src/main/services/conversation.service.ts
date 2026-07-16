@@ -10,6 +10,7 @@ import { disposeSoloAsync } from './solo-async'
 import { resetPipelineTodos } from './pipeline-todos'
 import { monitorService } from './monitor.service'
 import { selfRhythmService } from './self-rhythm.service'
+import { suggestionService } from './suggestion.service'
 import { abortLiveRuns } from '../agent/live-runs'
 import { hookRegistry } from '../agent/hooks/registry'
 import { fileWatchManager } from '../agent/hooks/file-watch'
@@ -185,6 +186,7 @@ export function remove(convId: string): void {
   workspaceTasks.dropLive(convId) // workspace_task_history rows cascade via FK; the in-memory live phase doesn't
   monitorService.disposeForConv(convId) // stop any Monitor watcher armed under this conv (clears its keepalive too)
   selfRhythmService.disposeForConv(convId) // cancel any pending self-wakeup timer for this conv
+  suggestionService.disposeForConv(convId) // abort any prompt-suggestion fork still generating for this conv
   hookRegistry.clearConv(convId) // forget this conv's once-hook firing marks + stop its file watchers
   fileWatchManager.disposeForConv(convId)
   disposeSoloAsync(convId) // 批C2b: tree-kill any still-running launch_async op parked under this conv (its registry outlives runs)

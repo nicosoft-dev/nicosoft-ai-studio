@@ -7,7 +7,8 @@ import type { ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 import { Icons, type IconName } from '@/components/icons'
 import { useAnchoredMenu } from '@/lib/use-anchored-menu'
-import { Avatar, HealthDot } from '@/components/primitives'
+import { Avatar, HealthDot, Switch } from '@/components/primitives'
+import { useConvSuggestion } from '@/stores/conv-suggestion'
 import { STUDIO_DATA } from '@/data/studio-data'
 import { useRoles } from '@/stores/roles'
 import { EndpointDialog } from '@/components/dialogs/endpoint-dialog'
@@ -61,6 +62,32 @@ function ThemeRow(): ReactElement {
       </div>
     </div>
   );
+}
+
+// Ghost prompt-suggestion toggle (General page). Default ON — an absent setting means enabled, mirroring
+// the main-process gate (suggestion.service). Turning it OFF also drops any ghost already on screen.
+function SuggestionRow(): ReactElement {
+  const t = useT()
+  const [on, setOn] = useState(true)
+  useEffect(() => {
+    void window.api.settings.get<boolean>('promptSuggestionEnabled').then((v) => {
+      if (v !== null) setOn(v)
+    })
+  }, [])
+  const toggle = (): void => {
+    const next = !on
+    setOn(next)
+    if (!next) useConvSuggestion.setState({ byConv: {} })
+    void window.api.settings.set('promptSuggestionEnabled', next).catch(() => {})
+  }
+  return (
+    <div className="set-row">
+      <span className="set-row-label">{t('settings.suggestion.label')}</span>
+      <div style={{ marginLeft: 'auto' }}>
+        <Switch on={on} onClick={toggle} ariaLabel={t('settings.suggestion.label')} />
+      </div>
+    </div>
+  )
 }
 
 // Language selector row (General page). Mirrors ThemeRow — switches instantly, no restart.
@@ -478,6 +505,7 @@ function GenericSettingsPage({ id }: { id: string }): ReactElement {
       <div className="set-list">
         <ThemeRow />
         <LanguageRow />
+        <SuggestionRow />
         <AppearanceRows />
       </div>
     </div>

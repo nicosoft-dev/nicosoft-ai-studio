@@ -22,6 +22,7 @@ import { useRoles } from '@/stores/roles'
 import { useWorkspace } from '@/stores/workspace'
 import { useMemoryCloud } from '@/stores/memory-cloud'
 import { useChat, roleHasAgent, roleHasImageGen, roleRunsAgentLoop, roleIsCoordinator } from '@/stores/chat'
+import { useConvSuggestion, clearSuggestion } from '@/stores/conv-suggestion'
 import { WRITE_ROLE_IDS } from '@shared/roles'
 import { useRoleBinding, type RoleBindingControls } from '@/lib/use-role-binding'
 import type { EndpointDto } from '@/lib/api'
@@ -127,6 +128,7 @@ export function Composer({
   const activeConv = chat.activeConv
   const streaming = activeConv ? (chat.streaming[activeConv] ?? false) : false
   const compacting = activeConv ? (chat.compacting[activeConv] ?? false) : false
+  const suggestion = useConvSuggestion((s) => (activeConv ? s.byConv[activeConv] : undefined))
   const messages = activeConv ? (chat.byConversation[activeConv] ?? []) : []
   // Exact prompt tokens of the last sent turn (count_tokens, measured server-side) plus the unsent input
   // — far more accurate than chars/4, especially for agent runs where tool schemas dominate. Falls back
@@ -232,6 +234,7 @@ export function Composer({
   const send = (): void => {
     const text = value.trim()
     if ((!text && attach.length === 0) || !ready || streaming || compacting) return // compacting: the send slot is a Stop button — Enter stays consistent with it
+    if (activeConv) clearSuggestion(activeConv) // a sent message consumes the ghost — the next settle brings a fresh one
     setValue('')
     setCmdOutput(null) // a real message supersedes any lingering /workflow · /schedule help block
     setTimeout(grow, 0)
@@ -614,6 +617,13 @@ export function Composer({
     ? mentionPool.filter((p) => p.name.toLowerCase().startsWith(mentionQuery.toLowerCase()))
     : []
   const mentionOpen = mentionMatches.length > 0
+  // Ghost prompt suggestion (docs/prompt-suggestion-design.md §3.4): shown only in an EMPTY, idle composer
+  // with no palette or help block competing for the space. Typing hides it (value !== '') but the store
+  // entry survives, so clearing the draft brings it back; Tab fills it in, Escape dismisses it for good.
+  const ghost =
+    suggestion && value === '' && !cmdOpen && !mentionOpen && !cmdOutput && !streaming && !compacting && ready
+      ? suggestion
+      : null
   const pickMention = (c: MentionCandidate): void => {
     // A disabled/undispatchable participant can't be routed to — the server drops it from the mention
     // roster (route.ts) and would SILENTLY reroute the turn to another expert. Don't fill a misleading
@@ -693,15 +703,19 @@ export function Composer({
           ) : null}
           {cmdOpen ? <CommandPalette matches={cmdMatches} index={cmdIndex} onPick={runCommand} /> : null}
           {mentionOpen ? <MentionPalette matches={mentionMatches} index={mentionIndex} onPick={pickMention} /> : null}
+          <div className="cmp-ta-wrap">
           <textarea
             ref={taRef}
-            className="cmp-textarea"
+            className={ghost ? 'cmp-textarea has-ghost' : 'cmp-textarea'}
             rows={1}
             value={value}
+            // The ghost suggestion rides the placeholder slot (CC's presentation): it is exactly the faint
+            // in-field text a suggestion should be, wraps like real input, and needs no mirror overlay.
             placeholder={
-              roleIsCoordinator(expert.id)
+              ghost ??
+              (roleIsCoordinator(expert.id)
                 ? t('conv.askCoordinatorPlaceholder', { name: expert.name })
-                : t('conv.askPlaceholder', { name: expert.name })
+                : t('conv.askPlaceholder', { name: expert.name }))
             }
             onChange={(e) => {
               setValue(e.target.value)
@@ -777,6 +791,23 @@ export function Composer({
                   return
                 }
               }
+              // Ghost suggestion: Tab fills it into the composer for editing (caret to the end); Escape
+              // dismisses this one for good. Enter deliberately IGNORES the ghost — an empty composer
+              // keeps its "nothing to send" meaning, so a glanced-past suggestion can never be mis-sent.
+              if (ghost && e.key === 'Tab' && !native.isComposing) {
+                e.preventDefault()
+                setValue(ghost)
+                setTimeout(() => {
+                  grow()
+                  taRef.current?.setSelectionRange(ghost.length, ghost.length)
+                }, 0)
+                return
+              }
+              if (ghost && e.key === 'Escape') {
+                e.preventDefault()
+                if (activeConv) clearSuggestion(activeConv)
+                return
+              }
               // Enter sends, Shift+Enter newlines; never submit mid-IME-composition (CJK candidate
               // selection) — nativeEvent.isComposing / keyCode 229 (older Firefox) flag it.
               if (e.key === 'Enter' && !e.shiftKey && !native.isComposing && native.keyCode !== 229) {
@@ -786,6 +817,8 @@ export function Composer({
             }}
             disabled={!ready}
           />
+          {ghost ? <kbd className="cmp-ghost-kbd">Tab</kbd> : null}
+          </div>
           <div className="cmp-bottom">
             <button className="icon-btn" title={t('conv.attachImage')} disabled={!ready} onClick={() => fileInputRef.current?.click()}>
               <Icons.paperclip size={16} />

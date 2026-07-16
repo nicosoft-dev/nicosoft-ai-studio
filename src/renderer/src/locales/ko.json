@@ -8,6 +8,7 @@
   "settings.nav.about": "정보",
   "settings.back": "스튜디오로 돌아가기",
   "settings.theme.label": "테마",
+  "settings.suggestion.label": "입력 제안",
   "settings.theme.auto": "자동 (시스템 테마)",
   "settings.theme.light": "라이트",
   "settings.theme.dark": "다크",

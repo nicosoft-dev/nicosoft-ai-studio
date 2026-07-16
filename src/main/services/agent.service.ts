@@ -34,6 +34,7 @@ import * as convService from './conversation.service'
 import * as rolesService from './roles.service'
 import * as memoryService from './memory/service'
 import * as compressionService from './compression.service'
+import { suggestionService } from './suggestion.service'
 import { pickSmallModel } from './model-select'
 import { recallText } from './memory/project-map'
 import { indexText as agentMemoryIndexText } from './memory/agent-memory'
@@ -74,6 +75,9 @@ export async function run(
 
   const convId = input.convId
   const runId = ulid()
+  // A fresh run supersedes any prompt-suggestion fork still in flight for this conversation (CC aborts on
+  // query start) — its result would describe a conversation state that no longer exists.
+  suggestionService.abortFor(convId)
   // Tools scoped to this agent role: a CORE subset (doc 16 §5) + MCP + Skill, by roleId + scope.
   const roleId = input.roleId ?? ENGINEER_ROLE_ID
   // A role the user turned OFF must NEVER run — not even its OWN solo/scheduled/workflow conversation. The
@@ -356,6 +360,26 @@ export async function run(
       cacheReadTokens: loopRes.cacheReadTokens, // cache-read share of that last turn — drives the persistent "(+N cached)" note
       outputTokens: loopRes.outTokens,
       sentTokens: loopRes.inTokens, // SETTLE ↑: cumulative billing input across the whole agent loop (total sent this turn)
+    })
+    // Ghost prompt suggestion (docs/prompt-suggestion-design.md): fork this run's FINAL request — same
+    // system, same tool schemas (server tools included, unlike the counting toolSchemas above), the loop's
+    // in-memory transcript — so the fork rides the prompt cache this run just wrote. Inside the persist
+    // branch on purpose: a turn with no prose (tool-only / parked) is no place to suggest a follow-up.
+    suggestionService.onTurnEnd({
+      convId,
+      roleId,
+      protocol,
+      baseUrl: ep.baseUrl,
+      endpointId: input.endpointId,
+      model: input.model,
+      system,
+      tools: buildToolsParam(tools, input.model, serverTools),
+      messages: loopRes.messages,
+      thinking: input.thinking,
+      cacheEnabled: ep.cacheEnabled,
+      expertTurns: history.filter((m) => m.author === 'expert').length + 1,
+      lastContextTokens: loopRes.contextTokens,
+      lastCacheReadTokens: loopRes.cacheReadTokens,
     })
   }
 

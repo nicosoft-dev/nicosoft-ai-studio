@@ -26,7 +26,8 @@
     "test:self-wakeup": "node --experimental-transform-types --import ./e2e/_register.mjs --import ./e2e/_stub-electron.mjs e2e/self-wakeup.mts",
     "test:worktree": "node --experimental-transform-types --import ./e2e/_register.mjs --import ./e2e/_stub-electron.mjs e2e/worktree-cwd.mts",
     "rebuild:native": "electron-rebuild --only node-pty --force",
-    "postinstall": "node scripts/ensure-electron.mjs && node scripts/rebuild-native.mjs"
+    "postinstall": "node scripts/ensure-electron.mjs && node scripts/rebuild-native.mjs",
+    "test:suggestion": "node --experimental-transform-types e2e/suggestion-filter.mts"
   },
   "dependencies": {
     "@fontsource/inter": "^5.1.1",

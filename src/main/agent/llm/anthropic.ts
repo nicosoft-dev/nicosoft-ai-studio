@@ -39,6 +39,10 @@ export interface AgentLlmRequest {
   roleId?: string
   thinking?: ThinkingParam // Anthropic extended thinking (budgetTokens); lifts max_tokens above budget
   signal?: AbortSignal
+  // Fork requests (prompt suggestion) append a one-off trailing user instruction: anchor the Anthropic
+  // message cache breakpoint on the PREVIOUS user turn (where the main conversation's breakpoint sits) so
+  // the shared prefix reads from cache instead of re-sending at full price. No effect on other protocols.
+  cacheSkipTrailingUser?: boolean
 }
 
 // The /v1/messages request body the agent sends (tools + optional extended thinking).
@@ -138,7 +142,7 @@ async function* callWithToolsAnthropic(
     if (directive.type === 'enabled' && req.maxTokens <= directive.budget_tokens) body.max_tokens = directive.budget_tokens + req.maxTokens
   }
   if (req.thinking?.effort) body.output_config = { effort: req.thinking.effort }
-  if (req.cacheEnabled) applyAnthropicCacheControls(body)
+  if (req.cacheEnabled) applyAnthropicCacheControls(body, req.cacheSkipTrailingUser ? { skipTrailingUserMessages: 1 } : undefined)
   wireDump({ dir: 'req', url, body })
   const blocks: (Accum | undefined)[] = []
   let stopReason: StopReason = null
