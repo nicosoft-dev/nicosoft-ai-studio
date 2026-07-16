@@ -14,5 +14,6 @@ The live-work drawer for the current conversation. Open it with ⌘J, or topbar 
 
 ## Notes
 
+- Stopping an expert's background work from here (a service, a monitor, a pending wakeup, an async operation or a launched workflow run) also tells the expert: it receives a system note that the user stopped it, so it won't keep waiting on — or silently restart — something you cancelled.
 - "No task list for this chat." simply means no expert has planned steps yet.
 - Ownership is per conversation: a run launched from another conversation shows in *that* conversation's panel. The Workflows view in the sidebar always shows everything.

@@ -4,7 +4,10 @@
 //     error / step / phase subscriptions match here. A settle always clears the subscription.
 //   • wakeResult(...) — the launch tool's own done-watcher: the RESULT wake carries the script's return
 //     text inline (the settle event doesn't — it can be long), so the role relays it without re-querying.
-// stopped is deliberately NOT a wake: the user stopped it themselves — announcing their own action is noise.
+// stopped DOES wake: the launcher parked on a promise of being woken ("until then you stay parked") — the
+// user stopping the run must reach it, or it waits forever and later reports a long-gone run as running.
+// (The wake goes to the AGENT, not the user — announcing the user's own action to the user would be noise,
+// but the agent has no other way to hear it.)
 // Pure matching lives here; the INJECTOR is bound by the IPC layer (workflow.handler → sessionBus.inject)
 // so this module — and the off-Electron harness — never drags the agent chain.
 
@@ -47,9 +50,12 @@ export function feed(ev: WorkflowRunEvent): void {
   }
   if (ev.kind === 'status' && ev.status !== 'running') {
     // error rides the event (reason+detail are right here); ok's wake is the tool's done-watcher
-    // (wakeResult, with the return text); stopped wakes nobody. Either way the subscription is over.
+    // (wakeResult, with the return text); stopped always wakes — silence would orphan the parked launcher.
+    // Either way the subscription is over.
     if (ev.status === 'failed' && sub.subscribe.includes('error')) {
       wake(`The workflow ${sub.name} you launched (run ${ev.runId}) FAILED${ev.failReason ? ` (${ev.failReason})` : ''}${ev.failDetail ? ` — ${ev.failDetail}` : ''}. Tell the user honestly; the run panel has the full record.`)
+    } else if (ev.status === 'stopped') {
+      wake(`The workflow ${sub.name} you launched (run ${ev.runId}) was STOPPED by the user before it finished. Its remaining steps will not run; do not relaunch it unless the user asks. The run panel keeps the partial record.`)
     }
     subs.delete(ev.runId)
     return

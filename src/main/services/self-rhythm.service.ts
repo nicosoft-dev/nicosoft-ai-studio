@@ -90,12 +90,32 @@ class SelfRhythmService {
     broadcastRhythmChanged()
   }
 
-  cancel(id: string): boolean {
+  // Cancel a pending wakeup. reason='manual' (the Tasks panel's Stop) injects a notice — the model armed this
+  // wake and is pacing itself around it; silence would leave it waiting forever for a fire that can no longer
+  // come. The notice explicitly forbids re-arming so a cancelled autonomous loop stays cancelled. Dispose
+  // paths pass no reason and stay silent (the session itself is going away). Inject FIRST, THEN drop the
+  // keepalive, so the notice is queued before a collaboration can quiesce on the cleared reason.
+  cancel(id: string, opts?: { reason?: 'manual' }): boolean {
     const w = this.wakeups.get(id)
     if (!w) return false
     nodeClearTimeout(w.timer)
     this.wakeups.delete(id)
-    sessionBus.removeKeepalive(w.convId, `wakeup:${id}`)
+    try {
+      if (opts?.reason === 'manual') {
+        const preview = w.prompt.length > 120 ? w.prompt.slice(0, 120) + '…' : w.prompt
+        void sessionBus.inject(w.convId, {
+          text:
+            `Your scheduled${w.recurring ? ' recurring' : ''} wakeup (prompt: "${preview}") was cancelled by ` +
+            'the user from the Tasks panel. It will not fire. Do NOT schedule a replacement unless the user ' +
+            'asks you to.',
+          source: `self-rhythm:${id}`,
+          priority: 'later',
+          roleId: w.roleId,
+        })
+      }
+    } finally {
+      sessionBus.removeKeepalive(w.convId, `wakeup:${id}`)
+    }
     broadcastRhythmChanged()
     return true
   }

@@ -10,7 +10,7 @@ export function registerMonitorHandlers(): void {
   ipcMain.handle('monitor:list', () => monitorService.list())
   ipcMain.handle('monitor:stop', (_e, id: string) => monitorService.stop(id, { reason: 'manual' }))
   ipcMain.handle('rhythm:list', (_e, convId: string) => selfRhythmService.list(convId))
-  ipcMain.handle('rhythm:cancel', (_e, id: string) => selfRhythmService.cancel(id))
+  ipcMain.handle('rhythm:cancel', (_e, id: string) => selfRhythmService.cancel(id, { reason: 'manual' }))
   monitorService.subscribe(() => {
     for (const win of BrowserWindow.getAllWindows()) win.webContents.send('monitor:changed')
   })

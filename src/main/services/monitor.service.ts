@@ -201,19 +201,32 @@ class MonitorService {
     })
   }
 
-  // Stop a watcher. reason='auto-stop' injects a notice into the session (the model asked to be woken on change
-  // and should know its Monitor was throttled off). Returns false if the id is unknown.
-  stop(id: string, opts?: { reason?: 'manual' | 'auto-stop'; noticeText?: string }): boolean {
+  // Stop a watcher. The model asked to be woken on change, so it must hear when the watch ends early:
+  // reason='auto-stop' injects the given notice (throttle / time limit), reason='manual' (the Tasks panel's
+  // Stop) injects a "stopped by the user" notice — silence would leave the owner waiting forever for change
+  // events that can no longer come. reason='self' (the model's own monitor_stop tool) stays silent — the tool
+  // result is its confirmation; a note would echo its own action back and burn a wake. No reason
+  // (conv-dispose / app-exit) also stays silent: the session itself is going away. Returns false if unknown.
+  stop(id: string, opts?: { reason?: 'manual' | 'auto-stop' | 'self'; noticeText?: string }): boolean {
     const w = this.watchers.get(id)
     if (!w) return false
     nodeClearInterval(w.timer)
     if (w.deadlineTimer) clearTimeout(w.deadlineTimer) // clear the one-shot deadline so it can't fire on a stopped watcher
     this.watchers.delete(id)
     try {
+      // Inject the notice FIRST (wakes the owner), THEN drop the keepalive — so the wakeup is queued before a
+      // collaboration can quiesce on the cleared reason.
       if (opts?.reason === 'auto-stop' && opts.noticeText) {
-        // Inject the notice FIRST (wakes the owner), THEN drop the keepalive — so the wakeup is queued before a
-        // collaboration can quiesce on the cleared reason.
         void sessionBus.inject(w.convId, { text: opts.noticeText, source: `monitor:${id}`, priority: 'next', roleId: w.roleId })
+      } else if (opts?.reason === 'manual') {
+        void sessionBus.inject(w.convId, {
+          text:
+            `Monitor "${w.label}" was stopped by the user from the Tasks panel. You will get no more change ` +
+            'notifications from it. Do not restart it unless the user asks you to.',
+          source: `monitor:${id}`,
+          priority: 'later',
+          roleId: w.roleId,
+        })
       }
     } finally {
       // ALWAYS release the keepalive, even if the inject above threw — the watcher is already out of the map, so

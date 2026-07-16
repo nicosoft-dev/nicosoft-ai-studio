@@ -94,7 +94,9 @@ export const monitorStopTool = buildTool({
   isReadOnly: () => false,
   isConcurrencySafe: () => true,
   call: async (input, ctx: AgentContext) => {
-    const stopped = monitorService.stop(input.id, { reason: 'manual' })
+    // 'self': the model is stopping its own watcher — the tool result is the confirmation, so the service
+    // must NOT also inject a "stopped by the user" note (a false echo that would burn an extra wake).
+    const stopped = monitorService.stop(input.id, { reason: 'self' })
     return { data: { stopped, id: input.id, convId: ctx.convId } }
   },
   // Stopping a monitor is idempotent: an id that's already gone (auto-stopped, or the conversation disposed it)
