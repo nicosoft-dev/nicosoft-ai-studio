@@ -6,12 +6,18 @@
 // a full-price context re-send. The result is pushed to the composer as a ghost (conv:suggestion); Tab
 // accepts it. Nothing here persists: no transcript, no usage_events, no DB row — a suggestion lives in
 // memory until the next turn replaces it or the composer consumes it.
+//
+// Two-phase flow (P1): every settling agent loop NOTES a snapshot (solo run, coordinator-dispatched expert
+// — both via runAgentLoop — and each collab expert wake); the conversation-turn settle point then GENERATES
+// from the latest note. In a multi-expert turn the last expert to settle wins — the suggestion speaks from
+// the context of whoever just answered the user. A turn with no note (coordinator 'direct' chat) simply
+// generates nothing.
 import { BrowserWindow } from 'electron'
 import { callWithTools, type AgentLlmRequest } from '../agent/llm/anthropic'
 import type { AgentMessage, AnyToolSchema } from '../agent/types'
 import type { ThinkingParam } from '../llm/types'
 import type { ConvSuggestion } from '../ipc/contracts'
-import { requireApiKey } from './credentials'
+import * as convRepo from '../repos/conversation.repo'
 import * as settingsService from './settings.service'
 import { listPending } from './approval.service'
 import { filterSuggestion } from './suggestion-filter'
@@ -32,14 +38,16 @@ const CACHE_COLD_TOKENS = 10_000
 
 export const SUGGESTION_SETTING_KEY = 'promptSuggestionEnabled'
 
-// Everything the fork needs, snapshotted by the run owner AT settle time (the CC cacheSafeParams
-// equivalent). The API key is deliberately NOT snapshotted — re-resolved at send time.
+// Everything the fork needs, snapshotted where the loop settles (the CC cacheSafeParams equivalent).
+// The key rides the snapshot (its lifetime is note → generate, seconds — the run itself held it longer);
+// endpointId is optional because a collab expert input carries only the resolved key.
 export interface SuggestionSnapshot {
   convId: string
   roleId: string
   protocol: 'anthropic' | 'openai' | 'gemini'
   baseUrl: string
-  endpointId: string
+  apiKey: string
+  endpointId?: string
   model: string
   system: string
   tools: AnyToolSchema[]
@@ -48,7 +56,6 @@ export interface SuggestionSnapshot {
   thinking?: ThinkingParam
   cacheEnabled?: boolean
   threadId?: string
-  expertTurns: number // assistant messages persisted in this conversation, including the one that just settled
   lastContextTokens: number // the settled turn's full prompt size (cache included)
   lastCacheReadTokens: number // cache-read share of that prompt — >0 proves the cache pipeline works
 }
@@ -60,16 +67,25 @@ function broadcast(convId: string, text: string): void {
 
 class SuggestionService {
   private inflight = new Map<string, AbortController>()
+  private snapshots = new Map<string, SuggestionSnapshot>()
 
-  // A new run for the conversation supersedes any suggestion work in flight (CC aborts on query start).
+  // A fresh run supersedes both the fork in flight AND the previous turn's snapshot — a stale snapshot
+  // must never feed a later generate (e.g. a coordinator 'direct' turn that ran no expert loop).
   abortFor(convId: string): void {
     this.inflight.get(convId)?.abort()
     this.inflight.delete(convId)
+    this.snapshots.delete(convId)
   }
 
   // Conversation deleted — stop work; the ghost dies with the composer that showed it.
   disposeForConv(convId: string): void {
     this.abortFor(convId)
+  }
+
+  // Called wherever an agent loop settles. Last write wins — in a multi-expert turn the suggestion forks
+  // the expert who settled last (the one whose reply the user is reading).
+  noteSnapshot(s: SuggestionSnapshot): void {
+    this.snapshots.set(s.convId, s)
   }
 
   // Pre-generation gate, CC's suppress list mapped to Studio signals. Returns the reason (logged) or null.
@@ -79,29 +95,34 @@ class SuggestionService {
     // screen the window is on screen (the ghost should appear) while focus sits in the other app. Only a
     // hidden/minimized app skips generation.
     if (!BrowserWindow.getAllWindows().some((w) => w.isVisible() && !w.isMinimized())) return 'unfocused'
-    if (s.expertTurns < 2) return 'early_conversation'
+    const expertTurns = convRepo.listByConversation(s.convId).filter((m) => m.author === 'expert').length
+    if (expertTurns < 2) return 'early_conversation'
     if (s.lastCacheReadTokens === 0 && s.lastContextTokens > CACHE_COLD_TOKENS) return 'cache_cold'
     if (listPending(s.convId).length > 0) return 'pending_permission'
     return null
   }
 
-  // Fire-and-forget from the run owner's settle path. Never throws.
-  onTurnEnd(s: SuggestionSnapshot): void {
+  // Fire-and-forget from the conversation-turn settle point (solo persist / coordinator side-effects /
+  // collab session end). Consumes the snapshot — one generation per noted turn, never a stale reuse.
+  generateFromLatest(convId: string): void {
+    const s = this.snapshots.get(convId)
+    if (!s) return
+    this.snapshots.delete(convId)
     const reason = this.suppressReason(s)
     if (reason) {
-      console.log(`[suggestion] suppressed conv=${s.convId}: ${reason}`)
+      console.log(`[suggestion] suppressed conv=${convId}: ${reason}`)
       return
     }
-    this.abortFor(s.convId)
+    this.inflight.get(convId)?.abort()
     const ac = new AbortController()
-    this.inflight.set(s.convId, ac)
+    this.inflight.set(convId, ac)
     void this.generate(s, ac.signal)
       .catch((err) => {
         if (ac.signal.aborted) return
-        console.warn(`[suggestion] generate failed conv=${s.convId}:`, err instanceof Error ? err.message : err)
+        console.warn(`[suggestion] generate failed conv=${convId}:`, err instanceof Error ? err.message : err)
       })
       .finally(() => {
-        if (this.inflight.get(s.convId) === ac) this.inflight.delete(s.convId)
+        if (this.inflight.get(convId) === ac) this.inflight.delete(convId)
       })
   }
 
@@ -109,7 +130,7 @@ class SuggestionService {
     const req: AgentLlmRequest = {
       protocol: s.protocol,
       baseUrl: s.baseUrl,
-      apiKey: requireApiKey(s.endpointId),
+      apiKey: s.apiKey,
       model: s.model,
       system: s.system,
       messages: [...s.messages, { role: 'user', content: [{ type: 'text', text: SUGGESTION_INSTRUCTION }] }],

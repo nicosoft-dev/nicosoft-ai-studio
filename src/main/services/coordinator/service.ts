@@ -31,6 +31,7 @@ import { detectE2EIntent, disabledRoleIds, route, routeNeedsPlan } from './route
 import { emitCoordinatorIntro, emitWorkflowLaunchCard, runRoleStep, type RunStepOptions } from './step'
 import * as workflowService from '../workflow/service'
 import { resetPipelineTodos } from '../pipeline-todos'
+import { suggestionService } from '../suggestion.service'
 import { runGatedRoleStep, runGateBFailFollowUp } from './gate-b'
 import { runVerifierStep } from '../lens/verifier'
 import { submitGateC } from './gate-c'
@@ -197,6 +198,9 @@ function planAssignments(decision: RouteDecision, input: CoordinatorRunInput): A
 // turns them into a single `coordinator:error` event.
 export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, signal: AbortSignal): Promise<{ inputTokens: number; outputTokens: number; reason: AgentResult['reason']; target: { roleId: string | null; mentionText: string | null; mentionLen: number | null } }> {
   resetPipelineTodos(input.convId) // a new coordinator turn = a new pipeline → start its shared todo list fresh
+  // A fresh turn supersedes any ghost-suggestion fork in flight AND the previous turn's snapshot — a
+  // 'direct' turn that runs no expert loop must not generate from a stale one.
+  suggestionService.abortFor(input.convId)
   const history = convRepo.listByConversation(input.convId)
   // L1 (coordinator dispatch §3): hand route() the coordinator's project folder + the conv id so it can
   // escalate a project-dependent build task to Danny's delegated investigation (routeAsAgent). Same cwd
@@ -740,6 +744,10 @@ async function facilitate(question: string, positions: { role: string; text: str
 // measured against the expert that actually sets the multi-turn ceiling. Fire-and-forget so they
 // don't delay the IPC done event.
 function fireSideEffects(convId: string, roleId: string, endpointId: string, model: string, inputTokens: number): void {
+  // Ghost prompt suggestion: the turn's expert loops noted their settle snapshots (runAgentLoop / collab
+  // drain) — generate from the LAST one now that the coordinator turn is over. A turn with no expert loop
+  // (direct chat) has no snapshot and generates nothing.
+  suggestionService.generateFromLatest(convId)
   if (!endpointId || !model) return
   // cadence 1: a coordinator turn is heavyweight (a dispatched run can be a multi-expert hour), so
   // extract after EVERY turn — the every-3 chat cadence left whole runs unextracted when the app

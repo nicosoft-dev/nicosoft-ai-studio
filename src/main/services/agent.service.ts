@@ -361,26 +361,11 @@ export async function run(
       outputTokens: loopRes.outTokens,
       sentTokens: loopRes.inTokens, // SETTLE ↑: cumulative billing input across the whole agent loop (total sent this turn)
     })
-    // Ghost prompt suggestion (docs/prompt-suggestion-design.md): fork this run's FINAL request — same
-    // system, same tool schemas (server tools included, unlike the counting toolSchemas above), the loop's
-    // in-memory transcript — so the fork rides the prompt cache this run just wrote. Inside the persist
-    // branch on purpose: a turn with no prose (tool-only / parked) is no place to suggest a follow-up.
-    suggestionService.onTurnEnd({
-      convId,
-      roleId,
-      protocol,
-      baseUrl: ep.baseUrl,
-      endpointId: input.endpointId,
-      model: input.model,
-      system,
-      tools: buildToolsParam(tools, input.model, serverTools),
-      messages: loopRes.messages,
-      thinking: input.thinking,
-      cacheEnabled: ep.cacheEnabled,
-      expertTurns: history.filter((m) => m.author === 'expert').length + 1,
-      lastContextTokens: loopRes.contextTokens,
-      lastCacheReadTokens: loopRes.cacheReadTokens,
-    })
+    // Ghost prompt suggestion (docs/prompt-suggestion-design.md): the loop above already noted its final
+    // request as the fork candidate (runAgentLoop); generate from it now that the reply is persisted.
+    // Inside the persist branch on purpose: a turn with no prose (tool-only / parked) is no place to
+    // suggest a follow-up — its stale note dies at the next run's abortFor.
+    suggestionService.generateFromLatest(convId)
   }
 
   // Record usage — a dev-agent run spans many turns; without this it's invisible to usage stats.

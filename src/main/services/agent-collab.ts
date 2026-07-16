@@ -10,7 +10,8 @@ import { ulid } from '../db/id'
 import { join } from 'node:path'
 import type { AgentContext, PermissionRequest, PermissionDecision } from '../agent/context'
 import type { AgentLlmEvent } from '../agent/llm/anthropic'
-import { MAIN_DISPATCH_STALL_TIMEOUT_MS, runAgent, type AgentEvent, type AgentResult, type CompactCarry } from '../agent/loop'
+import { MAIN_DISPATCH_STALL_TIMEOUT_MS, buildToolsParam, runAgent, type AgentEvent, type AgentResult, type CompactCarry } from '../agent/loop'
+import { suggestionService } from './suggestion.service'
 import { drainAgentRun } from './agent-dispatch'
 import type { ServerToolSchema } from '../agent/types'
 import type { MessageAttachmentDto } from '../ipc/contracts'
@@ -490,6 +491,23 @@ export async function runCollabSession(
           contextByRole.set(x.roleId, drained.contextTokens) // overwrite with this run's last context size (not accumulated)
           cacheReadByRole.set(x.roleId, drained.cacheReadTokens) // overwrite with this run's last cache-read share
           outTokensByRole.set(x.roleId, (outTokensByRole.get(x.roleId) ?? 0) + drained.outTokens)
+          // Ghost prompt suggestion: note this wake's final request as the conversation's fork candidate —
+          // the coordinator's turn-settle (fireSideEffects) generates from the LAST expert to settle. Collab
+          // drives runAgent directly (not runAgentLoop), so it notes here; last write wins across wakes too.
+          suggestionService.noteSnapshot({
+            convId,
+            roleId: x.roleId,
+            protocol: x.protocol,
+            baseUrl: x.baseUrl,
+            apiKey: x.apiKey,
+            model: x.model,
+            system,
+            tools: buildToolsParam(tools, x.model, serverTools),
+            messages: result.messages,
+            thinking: x.thinking,
+            lastContextTokens: drained.contextTokens,
+            lastCacheReadTokens: drained.cacheReadTokens,
+          })
         } finally {
           // Clear the live readout when the turn ends — on a normal park AND on a thrown/aborted turn (gen.next()
           // rejecting). Without the finally, an errored expert's bubble hangs on "Thinking…" until session end.

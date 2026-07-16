@@ -16,7 +16,8 @@ import { ulid } from '../db/id'
 import type { AgentContext, RequestPermission, AskUser, WrittenFile } from '../agent/context'
 import type { ContextBreakdown } from './token-count.service'
 import type { AgentLlmEvent } from '../agent/llm/anthropic'
-import { MAIN_DISPATCH_STALL_TIMEOUT_MS, runAgent, type AgentEvent, type AgentResult } from '../agent/loop'
+import { MAIN_DISPATCH_STALL_TIMEOUT_MS, buildToolsParam, runAgent, type AgentEvent, type AgentResult } from '../agent/loop'
+import { suggestionService } from './suggestion.service'
 import { promptTokensFromUsage } from '../agent/compact'
 import { isContentBlock } from '../agent/types'
 import type { AgentMessage, AnyBlock, ImageBlock, ServerToolSchema, ToolResultBlock } from '../agent/types'
@@ -373,7 +374,7 @@ export async function runAgentLoop(
   loop: AgentLoopInput,
   cb: AgentCallbacks,
   signal: AbortSignal,
-): Promise<{ text: string; inTokens: number; contextTokens: number; cacheReadTokens: number; outTokens: number; firstContext: number; reason: AgentResult['reason']; turns: number; attachments: MessageAttachmentDto[]; writtenFiles: WrittenFile[]; messages: AgentMessage[] }> {
+): Promise<{ text: string; inTokens: number; contextTokens: number; cacheReadTokens: number; outTokens: number; firstContext: number; reason: AgentResult['reason']; turns: number; attachments: MessageAttachmentDto[]; writtenFiles: WrittenFile[] }> {
   const sessionDir = join(dataDir(), 'sessions', loop.convId)
   await mkdir(join(sessionDir, 'tool-results'), { recursive: true })
   // No project folder selected (Flynn/Shuri can chat folder-free) → fall back to a per-conversation scratch
@@ -630,6 +631,28 @@ export async function runAgentLoop(
     .map((abs) => ({ path: relative(realCwd, abs), content: ctx.readFileState.get(abs)?.content }))
     .filter((w): w is WrittenFile => typeof w.content === 'string')
 
+  // Ghost prompt suggestion: note this settled loop as the conversation's fork candidate. Solo runs and
+  // coordinator-dispatched experts both funnel through here; the conversation-turn settle point (solo
+  // persist / coordinator side-effects / collab end) generates from the LAST note, so in a multi-expert
+  // turn the suggestion forks whoever answered last. The snapshot reuses the loop's exact request shape —
+  // same system, same tool schemas (buildToolsParam, server tools included), the final in-memory transcript.
+  suggestionService.noteSnapshot({
+    convId: loop.convId,
+    roleId: loop.roleId,
+    protocol: loop.protocol,
+    baseUrl: loop.baseUrl,
+    apiKey: loop.apiKey,
+    endpointId: loop.endpointId,
+    model: loop.model,
+    system: loop.system,
+    tools: buildToolsParam(loop.tools, loop.model, loop.serverTools),
+    messages: result.messages,
+    thinking: loop.thinking,
+    cacheEnabled: loop.cacheEnabled,
+    lastContextTokens: drained.contextTokens,
+    lastCacheReadTokens: drained.cacheReadTokens,
+  })
+
   return {
     text: finalAssistantText(result.messages),
     inTokens: drained.inTokens,
@@ -641,10 +664,6 @@ export async function runAgentLoop(
     turns: result.turns,
     attachments: drained.toolImages,
     writtenFiles,
-    // The loop's final in-memory transcript (tool turns included — those never persist to the messages
-    // table). The prompt-suggestion fork forwards it verbatim: same byte prefix as the run's last LLM
-    // request is what makes the fork's prompt a cache read instead of a full-price re-send.
-    messages: result.messages,
   }
 }
 
