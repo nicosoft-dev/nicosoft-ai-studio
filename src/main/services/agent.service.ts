@@ -63,7 +63,11 @@ export async function run(
   // extraTools (§7.5): per-RUN closure tools appended to the role kit — the machine-protocol channel for
   // backend-orchestrated turns (e.g. the /workflow launch review submits its decision through one). Main-
   // process callers only (a Tool can't cross IPC); never persisted, gone next turn.
-  opts?: { resumeNote?: string; extraTools?: Tool[] },
+  // steerSeed (mid-turn steering R4): steered user messages the previous run's finally drained after its
+  // loop's last fold point — ALREADY persisted (possibly before that run's assistant row: the enqueue/finally
+  // race), so this run skips the persist and re-seats them as the trailing user turn instead. Mutually
+  // exclusive with resumeNote (different continuation entry points).
+  opts?: { resumeNote?: string; extraTools?: Tool[]; steerSeed?: { text: string; msgId: string }[] },
 ): Promise<{ reason: AgentResult['reason']; turns: number; convId: string; runId: string; text: string; promptTokens: number; contextTokens: number; outputTokens: number; sentTokens: number }> {
   const ep = endpointRepo.getById(input.endpointId)
   if (!ep) throw new LlmError('bad_request', 'endpoint not found')
@@ -102,7 +106,9 @@ export async function run(
   // ① Persist the user turn (tagged with run_id) so context assembly + extraction read it from the DB. SKIP on a
   // resume (批C2b): the completion note isn't the user's words — persisting it would inject a robotic user bubble.
   // The note is seeded only into this run's in-memory seed below; the assistant's reply still persists.
-  if (opts?.resumeNote == null) {
+  // SKIP on a steerSeed continuation too: those user turns were persisted by agent:steer when they arrived
+  // (their UserPromptSubmit hook ran there as well) — this run only consumes them.
+  if (opts?.resumeNote == null && !opts?.steerSeed?.length) {
     if (hookRegistry.hasAny('UserPromptSubmit')) {
       const hookCtx: AgentContext = {
         cwd: input.cwd,
@@ -147,8 +153,14 @@ export async function run(
   })
   const history = convRepo.listByConversation(convId)
   let summary = summaryRepo.getLatest(convId)
-  const afterBoundary = (rows: typeof history, s: typeof summary): typeof history =>
-    s?.coveredUpTo != null ? rows.filter((m) => m.id > s.coveredUpTo!) : rows
+  // steerSeed rows are re-seated as the trailing in-memory user turn (buildSeed below) — drop them from the
+  // replayed history or they'd appear twice, and (worse) possibly BEFORE the previous assistant row they
+  // actually followed (the enqueue/finally persistence race left their order undefined).
+  const steerIds = opts?.steerSeed?.length ? new Set(opts.steerSeed.map((s) => s.msgId)) : null
+  const afterBoundary = (rows: typeof history, s: typeof summary): typeof history => {
+    const cut = s?.coveredUpTo != null ? rows.filter((m) => m.id > s.coveredUpTo!) : rows
+    return steerIds ? cut.filter((m) => !steerIds.has(m.id)) : cut
+  }
   let recent = afterBoundary(history, summary)
 
   // ③ Agent system = ENGINEER prompt + injected memories + summary; seed = history → AgentMessage (Anthropic
@@ -171,17 +183,20 @@ export async function run(
     // (The leading-assistant slice just above is harmless by contrast: it only drops from the FRONT, before any
     // watermark, and the server's price already reflects the drop.)
     let seedIsRecent = true
-    if (opts?.resumeNote != null) {
-      // 批C2b resume: deliver the completion note as the trailing user turn (in-memory only — not persisted). The
-      // parked turn USUALLY left an assistant reply ("launched X, awaiting…"), so history ends on assistant and we
+    // Two continuation flavors share the trailing-turn discipline: resumeNote (批C2b — a completion note,
+    // in-memory only, never persisted) and steerSeed (mid-turn steering R4 — real user messages, persisted
+    // by agent:steer but filtered out of the replay above, re-seated here at the seed's true end).
+    const trailing = opts?.resumeNote ?? (opts?.steerSeed?.length ? opts.steerSeed.map((s) => s.text).join('\n\n') : undefined)
+    if (trailing != null) {
+      // The parked turn USUALLY left an assistant reply ("launched X, awaiting…"), so history ends on assistant and we
       // append a fresh user turn. But if that turn was a pure tool-call with NO prose, nothing persisted and history
       // ends on the user's ORIGINAL turn — appending another user turn would put two in a row (some upstreams 400).
-      // Fold the note into that trailing user turn instead so the seed stays well-formed (user/assistant alternation).
+      // Fold the text into that trailing user turn instead so the seed stays well-formed (user/assistant alternation).
       const last = seed[seed.length - 1]
       if (last && last.role === 'user') {
-        seed = [...seed.slice(0, -1), { role: 'user', content: [...last.content, { type: 'text', text: `\n\n${opts.resumeNote}` }] }]
+        seed = [...seed.slice(0, -1), { role: 'user', content: [...last.content, { type: 'text', text: `\n\n${trailing}` }] }]
       } else {
-        seed = [...seed, { role: 'user', content: [{ type: 'text', text: opts.resumeNote }] }]
+        seed = [...seed, { role: 'user', content: [{ type: 'text', text: trailing }] }]
       }
       seedIsRecent = false
     } else if (seed.length && seed[seed.length - 1].role === 'assistant') {

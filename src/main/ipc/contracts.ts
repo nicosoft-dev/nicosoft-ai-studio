@@ -119,6 +119,18 @@ export interface AgentRunInput {
   imageModel?: string
 }
 
+// Mid-turn steering (docs/mid-turn-steering-design.md): a user message sent while this conversation's run
+// is still streaming. Main persists it as a normal user turn and folds it into the running loop at its next
+// request edge ('steered'); if no run is active by the time it arrives (the boundary race) nothing is
+// persisted and the renderer falls back to the ordinary send path ('boundary'). 'denied' = a
+// UserPromptSubmit hook rejected it (message carries the reason; nothing persisted).
+export interface AgentSteerInput {
+  convId: string
+  roleId: string
+  text: string
+}
+export type AgentSteerResult = { mode: 'steered' } | { mode: 'boundary' } | { mode: 'denied'; message: string }
+
 // 批C2b: a SOLO run resumed itself after a parked async op completed (solo-async). The backend started a fresh
 // streamId the renderer isn't subscribed to yet; this event tells the renderer to bind it to the conv (same as
 // agent.run's returned streamId for a user-initiated run) so the resumed turn streams into the conversation.

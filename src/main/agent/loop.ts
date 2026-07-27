@@ -24,6 +24,7 @@ import { AsyncSubAgentPool, type RunChild } from './sub-agent-pool'
 import { StreamingToolExecutor } from './execution'
 import { abortableDelay, isRetryableLlmError, retryBackoffMs } from './retry'
 import { bashRanClean, isVerifyCommand, ThrashTracker, thrashSteerText, thrashStopText, THRASH_STOP_AT, VERIFY_NUDGE } from './loop-guards'
+import { foldUserText, steerQueue } from './steer-queue'
 import { callWithTools, type AgentLlmEvent } from './llm/anthropic'
 import type { Tool } from './tool'
 import { runHooks, STOP_HOOK_BLOCK_CAP } from './hooks/engine'
@@ -618,6 +619,14 @@ export async function* runAgent(
   let stopHookBlockCount = 0
 
   while (true) {
+    // Mid-turn steering (docs/mid-turn-steering-design.md R2/R5): user messages sent while this run streams
+    // fold in at the request-assembly edge as plain user turns — the in-flight request was never aborted;
+    // this is the next one being built. MAIN conversation loop only: a Task / async sub-agent reuses this
+    // loop but must never see user prompts (both flags checked — belt and suspenders). Placed BEFORE
+    // microcompact/estimate so the folded turns are counted by both compaction layers.
+    if (!params.isSubAgentLoop && !ctx.isSubAgent && ctx.convId) {
+      for (const s of steerQueue.drain(ctx.convId)) messages = foldUserText(messages, s.text)
+    }
     // Layer 2: microcompact every turn (clear old tool-result content, keep the recent 5) — cheap,
     // structure-preserving, runs before the expensive autocompact so it can keep it from firing.
     const mc = microcompact(messages)

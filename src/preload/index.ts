@@ -10,6 +10,8 @@ import type {
   ChatDone,
   ChatErrorDto,
   AgentRunInput,
+  AgentSteerInput,
+  AgentSteerResult,
   AgentResumeStream,
   ConvUsage,
   ConvBreakdown,
@@ -341,6 +343,9 @@ const api = {
   agent: {
     run: (input: AgentRunInput): Promise<{ streamId: string }> => ipcRenderer.invoke('agent:run', input),
     stop: (streamId: string): Promise<void> => ipcRenderer.invoke('agent:stop', streamId),
+    // Mid-turn steering: send a user message into a conversation whose run is still streaming — the loop
+    // folds it in at its next request edge. 'boundary' = no active run after all; caller falls back to send.
+    steer: (req: AgentSteerInput): Promise<AgentSteerResult> => ipcRenderer.invoke('agent:steer', req),
     compact: (convId: string): Promise<CompactOutcome> => ipcRenderer.invoke('agent:compact', convId),
     compactCancel: (convId: string): Promise<boolean> => ipcRenderer.invoke('agent:compact:cancel', convId),
     respondPermission: (resp: AgentPermissionResponse): Promise<void> =>

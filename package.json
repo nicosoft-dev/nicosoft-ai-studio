@@ -28,7 +28,8 @@
     "rebuild:native": "electron-rebuild --only node-pty --force",
     "postinstall": "node scripts/ensure-electron.mjs && node scripts/rebuild-native.mjs",
     "test:suggestion": "node --experimental-transform-types e2e/suggestion-filter.mts",
-    "test:win-shell": "node --experimental-transform-types --import ./e2e/_register.mjs e2e/win-shell.mts"
+    "test:win-shell": "node --experimental-transform-types --import ./e2e/_register.mjs e2e/win-shell.mts",
+    "test:steer": "node --experimental-transform-types --import ./e2e/_register.mjs e2e/steer.mts"
   },
   "dependencies": {
     "@fontsource/inter": "^5.1.1",

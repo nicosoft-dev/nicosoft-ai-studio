@@ -248,7 +248,30 @@ export function Composer({
 
   const send = (): void => {
     const text = value.trim()
-    if ((!text && attach.length === 0) || !ready || streaming || compacting) return // compacting: the send slot is a Stop button — Enter stays consistent with it
+    if ((!text && attach.length === 0) || !ready || compacting) return // compacting: the send slot is a Stop button — Enter stays consistent with it
+    if (streaming) {
+      // Mid-turn steering (P0 — solo agent runs only): Enter while the run streams sends the message into
+      // the RUNNING loop, which folds it in at its next request edge; no Stop, no restart. Text-only, and
+      // never for coordinator/collab conversations (P1) or plain-chat roles (single-request turns have no
+      // fold edge) — those keep the old behavior: the composer holds the draft until the turn ends. Slash
+      // commands never reach here (the palette's keydown handler intercepts Enter while cmdOpen).
+      if (!text || attach.length > 0 || !agent || roleIsCoordinator(expert.id)) return
+      if (activeConv) clearSuggestion(activeConv)
+      setValue('')
+      setCmdOutput(null)
+      setTimeout(grow, 0)
+      void chat.steer({ expertId: expert.id, text }).then((r) => {
+        if (r.outcome === 'boundary') dispatchSend(text) // the run ended first — ordinary new turn
+        else if (r.outcome === 'denied') {
+          setValue(text) // keep the user's words; nothing was persisted
+          toast.error(r.message)
+        } else if (r.outcome === 'error') {
+          setValue(text)
+          toast.error('Message failed to send — try again.')
+        }
+      })
+      return
+    }
     if (activeConv) clearSuggestion(activeConv) // a sent message consumes the ghost — the next settle brings a fresh one
     setValue('')
     setCmdOutput(null) // a real message supersedes any lingering /workflow · /schedule help block

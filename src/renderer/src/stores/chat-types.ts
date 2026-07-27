@@ -171,6 +171,11 @@ export interface ChatState {
   adoptConversation: (conv: ConversationDto) => void // §7.5: adopt a conversation minted outside send() (greeting /workflow) as the active thread
   insertUserLine: (convId: string, line: { id: string; text: string }) => void // §7.5: the user's persisted /workflow command line → their bubble
   send: (opts: SendOpts) => Promise<void>
+  // Mid-turn steering (solo agent runs): send while streaming — main persists the message and the running
+  // loop folds it in at its next request edge. 'steered' = delivered (bubble inserted before the streaming
+  // reply, matching persisted order); 'boundary' = the run ended first, caller falls back to send();
+  // 'denied' = a UserPromptSubmit hook rejected it (message = reason); 'error' = IPC failed, nothing sent.
+  steer: (opts: { expertId: string; text: string }) => Promise<{ outcome: 'steered' | 'boundary' | 'error' } | { outcome: 'denied'; message: string }>
   stop: () => void
   compactNow: (convId: string) => Promise<void> // manual /compact — awaits the fold, shows the receipt/skip reason
   cancelCompact: (convId: string) => void // Stop button while compacting — aborts the fold (nothing written)

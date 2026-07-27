@@ -1,4 +1,5 @@
 import { ipcMain, type WebContents } from 'electron'
+import { join } from 'node:path'
 import { ulid } from '../db/id'
 import { LlmError } from '../llm/types'
 import { broadcastBreakdown, broadcastConvImage, broadcastConvTodos, broadcastUsage } from './usage-broadcast'
@@ -13,10 +14,18 @@ import * as compressionService from '../services/compression.service'
 import * as workspaceTasks from '../services/workspace/tasks'
 import { sessionBus, type InjectionOutcome } from '../agent/session-bus'
 import { registerLiveRun } from '../agent/live-runs'
+import { steerQueue, type SteerMessage } from '../agent/steer-queue'
 import { drainSoloResume } from '../services/solo-async'
 import { ENGINEER_ROLE_ID } from '../services/agent-tools'
 import { isSoloPreviewWriteTool } from '../agent/tools/preview'
-import type { AgentPermissionResponse, AgentQuestionResponse, AgentRunInput } from './contracts'
+import * as convService from '../services/conversation.service'
+import * as convRepo from '../repos/conversation.repo'
+import { dataDir } from '../db/connection'
+import { hookRegistry } from '../agent/hooks/registry'
+import { runHooks } from '../agent/hooks/engine'
+import { baseHookPayload, hookContextFromAgent } from '../agent/hooks/adapter'
+import type { AgentContext } from '../agent/context'
+import type { AgentPermissionResponse, AgentQuestionResponse, AgentRunInput, AgentSteerInput, AgentSteerResult } from './contracts'
 import type { Tool } from '../agent/tool'
 
 // Streaming agent over IPC. CONTROL stays on agent:* (`agent:run` starts a run and returns its streamId;
@@ -64,7 +73,7 @@ function sweepStream(streamId: string): void {
 // terminal, including an in-run error the conversation itself surfaces, resolves 'settled'. The session-bus
 // delivery closure returns it so an injector (the scheduler's live chain) can await the resumed run; the
 // IPC boundary strips it (a Promise doesn't survive structured clone).
-export function startAgentRun(input: AgentRunInput, sender: WebContents, opts?: { resumeNote?: string; extraTools?: Tool[] }): { streamId: string; settled: Promise<InjectionOutcome> } {
+export function startAgentRun(input: AgentRunInput, sender: WebContents, opts?: { resumeNote?: string; extraTools?: Tool[]; steerSeed?: SteerMessage[] }): { streamId: string; settled: Promise<InjectionOutcome> } {
   const streamId = ulid()
   const roleId = input.roleId ?? ENGINEER_ROLE_ID
   const { controller, send, finish } = streams.open(streamId, sender)
@@ -77,8 +86,9 @@ export function startAgentRun(input: AgentRunInput, sender: WebContents, opts?: 
 
   // A RESUME pushes a brand-new stream the renderer isn't subscribed to yet (the parked run's streamId already
   // closed on coordinator:done). Bind this streamId to the conv BEFORE any delta arrives so the resumed turn
-  // streams into the same conversation. A user-initiated run is bound renderer-side from agent.run's returned streamId.
-  if (opts?.resumeNote != null) {
+  // streams into the same conversation. A user-initiated run is bound renderer-side from agent.run's returned
+  // streamId. A steerSeed auto-continuation (R4) is the same shape: backend-started, unbound until this event.
+  if (opts?.resumeNote != null || opts?.steerSeed?.length) {
     send('agent:resume-stream', {
       streamId,
       convId: input.convId,
@@ -98,11 +108,12 @@ export function startAgentRun(input: AgentRunInput, sender: WebContents, opts?: 
   // Assignments (docs/assignments-design.md §2b): a FRESH user-initiated solo run classifies its message at
   // receipt — a parallel small-model call (never blocking the run) that opens this role's work row the moment
   // it resolves isWork (a "continue" follow-up reopens the latest one instead). Not a new user ask → never
-  // classify: a solo-async RESUME (resumeNote) continues the same parked turn, and a backend-orchestrated
-  // turn (workflow launch review — extraTools) is machinery, not the user handing over work. The settle
-  // calls in then/catch await this promise, so a run that finishes before classification still closes its row.
+  // classify: a solo-async RESUME (resumeNote) continues the same parked turn, a backend-orchestrated
+  // turn (workflow launch review — extraTools) is machinery, not the user handing over work, and a steerSeed
+  // continuation (R4) consumes messages that steered the turn just ended — the same conversation thread.
+  // The settle calls in then/catch await this promise, so a run that finishes before classification still closes its row.
   const pendingAssignment: Promise<string | null> =
-    opts?.resumeNote != null || opts?.extraTools
+    opts?.resumeNote != null || opts?.extraTools || opts?.steerSeed?.length
       ? Promise.resolve(null)
       : assignmentService.beginSoloRun({
           convId: input.convId,
@@ -133,6 +144,9 @@ export function startAgentRun(input: AgentRunInput, sender: WebContents, opts?: 
   const lanes = new CoalescerGroup()
   // The per-verb sink this run's stream events flow through — the SAME wire shape (coordinator:*) and the
   // SAME forwardLlmEvent mapping a dispatched step / collab expert uses; solo is the single-role case.
+  // R4 (mid-turn steering): whether this run ended CLEANLY — the only terminal a leftover steered batch
+  // auto-continues on. Set in .then below, read by the finally; abort/error/max_turns leave it false.
+  let cleanFinish = false
   const sink: RunStreamSink = {
     onDelta: (roleId, text) => { ensureOpen(); lanes.lane(`t:${roleId}`, (t) => send('coordinator:delta', { streamId, roleId, text: t })).push(text) },
     onReasoning: (roleId, text) => { ensureOpen(); lanes.lane(`r:${roleId}`, (t) => send('coordinator:reasoning', { streamId, roleId, text: t })).push(text) },
@@ -208,9 +222,10 @@ export function startAgentRun(input: AgentRunInput, sender: WebContents, opts?: 
             }),
         },
         controller.signal,
-        { resumeNote: opts?.resumeNote, extraTools: opts?.extraTools },
+        { resumeNote: opts?.resumeNote, extraTools: opts?.extraTools, steerSeed: opts?.steerSeed },
       )
       .then((r): InjectionOutcome => {
+        cleanFinish = r.reason === 'completed'
         // step:done settles the segment (authoritative text — mirrors the persisted row), then the terminal
         // done closes the stream: the exact two-beat every dispatched step ends with. ensureOpen covers a
         // degenerate zero-event run so the settle still has a segment to land on.
@@ -247,6 +262,24 @@ export function startAgentRun(input: AgentRunInput, sender: WebContents, opts?: 
         // if this turn parked (or a Monitor/hook/schedule injection landed mid-run), this is where the resume
         // fires — a fresh run on a new stream, now that no run streams for the conv. The bus drains its queue here.
         drainSoloResume(input.convId)
+        // R4 (mid-turn steering): steered messages that arrived after the loop's last fold point auto-continue
+        // as a fresh run — this finally is the queue's LAST consumer, closing the enqueue-vs-drain race (the
+        // agent:steer handler enqueues in the same tick as its isActive check, so nothing can slip between
+        // this drain and markIdle). Only a CLEAN finish continues: an explicit Stop must stay stopped and an
+        // error must not auto-retry into a failing endpoint — the discarded batch is already persisted, so
+        // those messages simply ride the next user-initiated run as history. The continuation's own
+        // markActive re-claims the conv, so markIdle is NOT called here — calling it would flush queued
+        // session notes into a second concurrent run while the continuation streams; the continuation's own
+        // finally releases the conv instead (user turns outrank notes, design §4.4).
+        const leftovers = steerQueue.drain(input.convId)
+        if (cleanFinish && leftovers.length) {
+          try {
+            startAgentRun(input, sender, { steerSeed: leftovers })
+            return
+          } catch (err) {
+            console.warn(`[agent] steer auto-continue for conv ${input.convId} failed to start:`, err)
+          }
+        }
         sessionBus.markIdle(input.convId)
       })
 
@@ -259,6 +292,50 @@ export function registerAgentHandlers(): void {
 
   ipcMain.handle('agent:stop', (_e, streamId: string) => {
     streams.abort(streamId)
+  })
+
+  // Mid-turn steering (docs/mid-turn-steering-design.md §4.3): a user message for a conversation whose solo
+  // run is still streaming. Persist it as a REAL user turn (running its UserPromptSubmit hook exactly like
+  // the ordinary send path does), then queue it for the loop's next request-edge fold. No active run →
+  // 'boundary': nothing persisted, the renderer falls back to the ordinary send path. The isActive check and
+  // the persist+enqueue commit run in one synchronous stretch, so the run's finally (the queue's last
+  // consumer) can never slip between them — an enqueued message is ALWAYS either folded mid-run or drained
+  // at the boundary. NEVER wrapped in the session-bus notification shell: that shell says "NOT USER INPUT",
+  // the exact opposite of what this is.
+  ipcMain.handle('agent:steer', async (_e, req: AgentSteerInput): Promise<AgentSteerResult> => {
+    if (!sessionBus.isActive(req.convId)) return { mode: 'boundary' }
+    let text = req.text
+    if (hookRegistry.hasAny('UserPromptSubmit')) {
+      const conv = convRepo.getById(req.convId)
+      const hookCtx: AgentContext = {
+        cwd: conv?.cwd ?? '',
+        signal: new AbortController().signal,
+        roleId: req.roleId,
+        convId: req.convId,
+        permissionMode: 'default',
+        sessionDir: join(dataDir(), 'sessions', req.convId),
+        readFileState: new Map(),
+        requestPermission: async () => ({ allow: false, message: 'Hooks cannot request tool permissions during prompt submission.' }),
+        todos: [],
+      }
+      const promptHook = await runHooks(
+        'UserPromptSubmit',
+        { ...baseHookPayload('UserPromptSubmit', hookCtx), prompt: text, session_title: conv?.title ?? undefined },
+        hookContextFromAgent(hookCtx),
+      )
+      if (promptHook.permissionBehavior === 'deny') return { mode: 'denied', message: promptHook.permissionReason ?? (promptHook.blockingErrors.join('; ') || 'User prompt blocked by hook') }
+      const rewritten = typeof promptHook.updatedInput?.prompt === 'string' ? promptHook.updatedInput.prompt : undefined
+      if (promptHook.suppressOriginalPrompt) text = rewritten ?? (promptHook.additionalContexts.join('\n\n') || '[original prompt suppressed by hook]')
+      else text = [rewritten ?? text, ...promptHook.additionalContexts].filter(Boolean).join('\n\n')
+      if (promptHook.sessionTitle) convRepo.rename(req.convId, promptHook.sessionTitle)
+      // The hook awaited — the run may have ended meanwhile. Recheck before committing: enqueueing now with
+      // no consumer left would strand the message in the queue AND double it into the next run's history.
+      // (The boundary fallback re-runs the hook on the ordinary send path; hooks are expected idempotent.)
+      if (!sessionBus.isActive(req.convId)) return { mode: 'boundary' }
+    }
+    const row = convService.append(req.convId, { author: 'user', expertId: req.roleId, content: text })
+    steerQueue.enqueue(req.convId, { text, msgId: row.id })
+    return { mode: 'steered' }
   })
 
   ipcMain.handle('agent:permission:respond', (_e, resp: AgentPermissionResponse) => {
