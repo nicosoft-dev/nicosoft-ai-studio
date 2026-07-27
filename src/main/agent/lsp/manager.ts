@@ -9,6 +9,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { delimiter, extname, join } from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { dataDir } from '../../db/connection'
+import { planShellSpawn } from '../shell-invocation'
 import type { AskUser, PermissionMode, RequestPermission } from '../context'
 
 // Anchor module resolution at this file in BOTH runtimes: the packaged main bundle is CJS (__dirname
@@ -242,6 +243,7 @@ class LspServer {
       cwd: this.cwd,
       env: { ...process.env, ELECTRON_RUN_AS_NODE: this.entry.bundled ? '1' : process.env.ELECTRON_RUN_AS_NODE },
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true, // language servers are console apps — no window over the GUI
     })
     this.proc.stdout?.on('data', (d: Buffer) => this.onData(d))
     this.proc.stderr?.on('data', () => {})
@@ -475,7 +477,7 @@ function findExecutable(command: string): string | null {
 
 function readVersion(command: string, args: string[]): Promise<string | undefined> {
   return new Promise((resolve) => {
-    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
     let out = ''
     const done = (): void => resolve(out.trim().split('\n')[0]?.slice(0, 200) || undefined)
     child.stdout?.on('data', (d: Buffer) => { out += d.toString('utf8') })
@@ -491,7 +493,10 @@ function readVersion(command: string, args: string[]): Promise<string | undefine
 
 function runInstall(command: string, cwd: string, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, { cwd, shell: true, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] })
+    // Shell semantics via the shared plan: POSIX keeps shell:true, win32 runs git-bash (cmd.exe would
+    // mis-parse) with windowsHide — no console flash during installs.
+    const plan = planShellSpawn(command)
+    const child = spawn(plan.file, plan.args, { ...plan.options, cwd, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] })
     let output = ''
     const onAbort = (): void => {
       try { child.kill('SIGTERM') } catch { /* ignore */ }

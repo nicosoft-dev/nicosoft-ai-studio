@@ -15,7 +15,7 @@ const MEDIUM_TIMEOUT = 15_000
 const LONG_TIMEOUT = 60_000
 
 async function git(cwd: string, args: string[], timeout = MEDIUM_TIMEOUT, maxBuffer = 10 * 1024 * 1024): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, { cwd, timeout, maxBuffer })
+  const { stdout } = await execFileAsync('git', args, { cwd, timeout, maxBuffer, windowsHide: true })
   return stdout
 }
 

@@ -8,6 +8,7 @@
 // on exit code 2 (a blocking error) WAKE the model by injecting the script's message via the session bus.
 
 import { spawn } from 'node:child_process'
+import { killTree, planShellSpawn } from '../../shell-invocation'
 import { sessionBus } from '../../session-bus'
 import { createHookEnvFile } from '../env-file'
 import type { CommandHookConfig, HookExecContext, HookOutcome } from '../types'
@@ -60,17 +61,9 @@ export async function executeCommandHook(config: CommandHookConfig, payload: Hoo
     let settled = false
     let killTimer: ReturnType<typeof setTimeout> | undefined
     let child: ReturnType<typeof spawn> | undefined
-    const killTree = (sig: NodeJS.Signals): void => {
+    const killChildTree = (sig: NodeJS.Signals): void => {
       if (child?.pid == null) return
-      try {
-        process.kill(-child.pid, sig)
-      } catch {
-        try {
-          child.kill(sig)
-        } catch {
-          /* already gone */
-        }
-      }
+      killTree(child.pid, sig)
     }
     const cleanup = (): void => {
       opts.signal.removeEventListener('abort', onAbort)
@@ -84,7 +77,15 @@ export async function executeCommandHook(config: CommandHookConfig, payload: Hoo
     }
 
     try {
-      child = useShell ? spawn(command, { cwd: opts.cwd, env, shell: true, windowsHide: true, detached: true }) : spawn(command, args, { cwd: opts.cwd, env, windowsHide: true, detached: true })
+      // Shell hooks run bash syntax — planShellSpawn keeps POSIX shell:true and routes win32 through
+      // git-bash (cmd.exe would mis-parse; missing git-bash throws → non_blocking_error with guidance).
+      // detached only off-Windows: there it means "own console window", and killTree uses taskkill anyway.
+      if (useShell) {
+        const plan = planShellSpawn(command)
+        child = spawn(plan.file, plan.args, { ...plan.options, cwd: opts.cwd, env })
+      } else {
+        child = spawn(command, args, { cwd: opts.cwd, env, windowsHide: true, detached: process.platform !== 'win32' })
+      }
     } catch (err) {
       done({ outcome: 'non_blocking_error', systemMessage: `Failed to spawn hook command: ${err instanceof Error ? err.message : String(err)}` })
       return
@@ -95,9 +96,9 @@ export async function executeCommandHook(config: CommandHookConfig, payload: Hoo
     let aborted = false
     const onAbort = (): void => {
       aborted = true
-      killTree('SIGTERM')
+      killChildTree('SIGTERM')
       // Escalate to SIGKILL if the script ignores SIGTERM, so an uncooperative hook can't linger.
-      killTimer = setTimeout(() => killTree('SIGKILL'), SIGKILL_GRACE_MS)
+      killTimer = setTimeout(() => killChildTree('SIGKILL'), SIGKILL_GRACE_MS)
     }
     if (opts.signal.aborted) onAbort()
     else opts.signal.addEventListener('abort', onAbort, { once: true })

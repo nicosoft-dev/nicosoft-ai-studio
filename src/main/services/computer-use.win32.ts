@@ -90,7 +90,7 @@ async function launch(exePath: string): Promise<void> {
 
 async function quit(): Promise<void> {
   try {
-    await execFileAsync('taskkill', ['/f', '/im', HELPER_EXE_NAME])
+    await execFileAsync('taskkill', ['/f', '/im', HELPER_EXE_NAME], { windowsHide: true })
   } catch {
     // taskkill exits non-zero when no matching process — already not running.
   }
@@ -101,7 +101,7 @@ async function quit(): Promise<void> {
 // timeout so a quit can never hang on it.
 function quitSync(): void {
   try {
-    execFileSync('taskkill', ['/f', '/im', HELPER_EXE_NAME], { timeout: 3_000 })
+    execFileSync('taskkill', ['/f', '/im', HELPER_EXE_NAME], { timeout: 3_000, windowsHide: true })
   } catch {
     // taskkill exits non-zero when no matching process — already not running.
   }

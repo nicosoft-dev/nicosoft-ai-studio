@@ -14,7 +14,7 @@ import { execFile } from 'node:child_process'
 
 function git(cwd: string, args: string[]): Promise<string> {
   return new Promise((resolve) => {
-    execFile('git', args, { cwd, timeout: 10_000 }, (err, stdout) => resolve(err ? '' : String(stdout).trim()))
+    execFile('git', args, { cwd, timeout: 10_000, windowsHide: true }, (err, stdout) => resolve(err ? '' : String(stdout).trim()))
   })
 }
 

@@ -39,6 +39,10 @@ Switch any time with the picker or `/mode`, `/plan`, `/default`.
 
 Experts can run sub-tasks in temporary git worktrees so parallel edits don't collide; the sub-task card shows when this is used. Unchanged worktrees clean themselves up.
 
+## Windows prerequisite
+
+On Windows, experts run shell commands through Git Bash (bash syntax; cmd.exe is never used). Install Git for Windows from git-scm.com/download/win — Studio finds it automatically. If Git lives in a non-standard location, set the NSAI_GIT_BASH_PATH environment variable to the full path of bash.exe and restart Studio. Without Git Bash, shell-based tools return install instructions instead of running.
+
 ## Notes
 
 - Panels need a working directory ("This conversation has no working directory." otherwise); Diff additionally needs the folder to be a git repository ("This folder isn't a git repository.").
