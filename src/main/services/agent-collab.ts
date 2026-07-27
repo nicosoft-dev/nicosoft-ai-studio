@@ -23,6 +23,7 @@ import { hookRegistry } from '../agent/hooks/registry'
 import { baseHookPayload, hookContextFromAgent } from '../agent/hooks/adapter'
 import { AsyncRegistry, formatAsyncHandle } from '../agent/async-registry'
 import { sessionBus } from '../agent/session-bus'
+import { steerQueue } from '../agent/steer-queue'
 import { awaitAsyncTool } from '../agent/tools/await-async'
 import { launchAsyncTool } from '../agent/tools/launch-async'
 import { ServiceRegistry, type ServiceInfo } from '../agent/service-registry'
@@ -187,6 +188,24 @@ function buildCollabSystem(roleId: string, teammates: { id: string; name: string
 // Run a set of experts as a collaboration (consult). Each runs a persistent, mailbox-driven agent loop;
 // CollabSession schedules them concurrently and they coordinate via send_message/assign_task/wait. Returns
 // each expert's final text for the coordinator to synthesize. Does NOT persist — the coordinator owns that.
+// ── Mid-turn steering (P1 — docs/mid-turn-steering-design.md §5) ────────────────────────────────────────
+// A live collaboration's steer surface, registered per convId for the duration of runCollabSession. The
+// user's message routes by @mention (a specific expert) or — with no mention — to the WHOLE team ("default
+// to the coordinator": Danny has no live loop during a collaboration, so his relay-to-the-team role is
+// realized as a broadcast to every live expert). A RUNNING target gets the message on its request-edge
+// fold lane (steer-queue → loop.ts drains (convId, roleId)); a PARKED one is woken via injectExternal —
+// both as plain user-authored turns, never the session-bus notification shell. The user-facing prefix
+// names the sender so an expert can tell it apart from teammate mail and system notes.
+export interface CollabSteerHandle {
+  roster(): string[] // collab member roleIds (for @mention resolution)
+  hasTarget(targetRoleId?: string): boolean // any live recipient? (same-tick precheck before persisting)
+  steer(text: string, msgId: string, targetRoleId?: string): 'delivered' | 'no-target'
+}
+const liveCollabs = new Map<string, CollabSteerHandle>()
+export function getLiveCollab(convId: string): CollabSteerHandle | undefined {
+  return liveCollabs.get(convId)
+}
+
 export async function runCollabSession(
   convId: string,
   experts: CollabExpertInput[],
@@ -293,6 +312,9 @@ export async function runCollabSession(
   // Auto-memory: the shared # Memory section (CC template + index snapshot) — one project, one index,
   // snapshotted ONCE for the whole collaboration (per-run semantics; mid-collab writes appear next run).
   const memoryIndexText = await agentMemoryIndexText(experts[0]?.cwd)
+  // Forward ref for the runTurn closures below: the CollabSession is constructed AFTER the specs, but a
+  // turn only ever runs once session.run() started, so the ref is always set by the time it is read.
+  let sessionRef: CollabSession | undefined
   const specs: ExpertSpec[] = experts.map((x) => {
     // Per-expert state shared across its turns: the read-file cache + todo list persist as it loops, so it
     // doesn't forget what it read between being woken.
@@ -519,6 +541,12 @@ export async function runCollabSession(
           cwdRoot = ctx.cwdRoot
           activeWorktree = ctx.activeWorktree
           isWorktreeIsolated = ctx.isWorktreeIsolated ?? false
+          // Mid-turn steering terminal drain (mirrors the solo run's finally): a message steered to this
+          // expert while it was RUNNING but after its loop's last fold point would strand in the lane once
+          // the expert parks (and a fully-parked session then quiesces). Re-route leftovers through the
+          // mailbox — injectExternal pushes pendingResults, and the pre-park drain right after this finally
+          // consumes them as the expert's next turn (or wakes it if the park already happened).
+          for (const s of steerQueue.drain(convId, x.roleId)) void sessionRef?.injectExternal(s.text, x.roleId)
         }
         reasonByRole.set(x.roleId, result.reason)
         compactCarry = result.compact // §4a — hand the anchor to the next wake
@@ -541,6 +569,31 @@ export async function runCollabSession(
     // hasKeepalive lets the session block its own quiescence while a session-level keepalive reason holds (an
     // armed Monitor) — the collaboration stays open for injected wakeups until the reason clears.
     const session = new CollabSession(specs, onEvent, nowMs, () => sessionBus.hasKeepalive(convId))
+    sessionRef = session
+    // Mid-turn steering surface (P1): route a user message sent while this collaboration runs. No mention →
+    // the whole team (the "default to coordinator" decision realized as Danny's relay); @expert → that one.
+    // RUNNING target → its request-edge fold lane; PARKED target → mailbox wake. Registered for exactly the
+    // session's lifetime (deleted in the finally below).
+    const userTag = (text: string, broadcast: boolean): string =>
+      `${broadcast ? '[Message from the user to the whole team]' : '[Message from the user]'}\n\n${text}`
+    const pickTargets = (targetRoleId?: string): { roleId: string; status: 'running' | 'parked' }[] => {
+      const live = session.expertStatuses().filter((s) => !s.exited)
+      return targetRoleId ? live.filter((s) => s.roleId === targetRoleId) : live
+    }
+    liveCollabs.set(convId, {
+      roster: () => experts.map((x) => x.roleId),
+      hasTarget: (targetRoleId) => pickTargets(targetRoleId).length > 0,
+      steer: (text, msgId, targetRoleId) => {
+        const targets = pickTargets(targetRoleId)
+        if (!targets.length) return 'no-target'
+        const tagged = userTag(text, !targetRoleId)
+        for (const t of targets) {
+          if (t.status === 'running') steerQueue.enqueue(convId, t.roleId, { text: tagged, msgId })
+          else void session.injectExternal(tagged, t.roleId)
+        }
+        return 'delivered'
+      },
+    })
     // C3 §6.5 (批8): route async-handle completions into the session so it wakes the parked expert + injects the
     // result (notifyHandleComplete → runExpert T1). Set before run() so a fast handle can't fire before it's wired.
     asyncRegistry.onComplete = (h) => session.notifyHandleComplete(h.id, formatAsyncHandle(h))
@@ -573,6 +626,10 @@ export async function runCollabSession(
     // collaboration on this conv (hasKeepalive stays true → it never quiesces → run() never resolves) and grow the
     // bus queue unbounded. disposeForConv is idempotent and clears each watcher's timer + keepalive (manual stop,
     // no inject), so it is safe even when nothing was armed.
+    // Mid-turn steering teardown: unregister the steer surface, then discard any lane leftovers — the rows
+    // are persisted, so an undelivered message simply rides the next turn's history (boundary semantics).
+    liveCollabs.delete(convId)
+    for (const x of experts) steerQueue.drain(convId, x.roleId)
     sessionBus.armDelivery(convId, undefined)
     sessionBus.armIdleCheck(convId, undefined)
     monitorService.disposeForConv(convId)

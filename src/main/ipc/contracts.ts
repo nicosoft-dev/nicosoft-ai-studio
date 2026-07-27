@@ -121,15 +121,23 @@ export interface AgentRunInput {
 
 // Mid-turn steering (docs/mid-turn-steering-design.md): a user message sent while this conversation's run
 // is still streaming. Main persists it as a normal user turn and folds it into the running loop at its next
-// request edge ('steered'); if no run is active by the time it arrives (the boundary race) nothing is
-// persisted and the renderer falls back to the ordinary send path ('boundary'). 'denied' = a
-// UserPromptSubmit hook rejected it (message carries the reason; nothing persisted).
+// request edge ('steered' — solo, or a live collab's targets by @mention / team broadcast; the collab reply
+// echoes the resolved mention so the optimistic bubble can render its chip immediately); if no run is
+// active by the time it arrives (the boundary race) nothing is persisted and the renderer falls back to the
+// ordinary send path ('boundary'). 'busy' = the conversation IS running but has no steerable loop right now
+// (a coordinator dispatch pipeline / the collab just tore down mid-flight) — nothing persisted, and the
+// renderer must NOT fall back to send (that would start a second concurrent turn); it keeps the draft.
+// 'denied' = a UserPromptSubmit hook rejected it (message carries the reason; nothing persisted).
 export interface AgentSteerInput {
   convId: string
   roleId: string
   text: string
 }
-export type AgentSteerResult = { mode: 'steered' } | { mode: 'boundary' } | { mode: 'denied'; message: string }
+export type AgentSteerResult =
+  | { mode: 'steered'; targetRoleId?: string; targetMentionText?: string; targetMentionLen?: number }
+  | { mode: 'boundary' }
+  | { mode: 'busy' }
+  | { mode: 'denied'; message: string }
 
 // 批C2b: a SOLO run resumed itself after a parked async op completed (solo-async). The backend started a fresh
 // streamId the renderer isn't subscribed to yet; this event tells the renderer to bind it to the conv (same as

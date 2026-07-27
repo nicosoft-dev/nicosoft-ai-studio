@@ -1078,29 +1078,40 @@ export const useChat = create<ChatState>((set, get) => {
       }
     },
 
-    // Mid-turn steering (docs/mid-turn-steering-design.md §4.5): the composer sends while the conversation
-    // is still streaming. Main persists the message and folds it into the running loop at its next request
-    // edge — so on 'steered' the user bubble is inserted BEFORE the streaming assistant placeholder: that
-    // matches the persisted row order (the steered user row lands before the run's final assistant row), so
-    // a reload renders the same transcript the live view showed. No new placeholder — the already-streaming
-    // reply is the turn that answers this message.
+    // Mid-turn steering (docs/mid-turn-steering-design.md §4.5/§5): the composer sends while the
+    // conversation is still streaming. Main persists the message and delivers it into the running loop(s)
+    // at their next request edge — so on 'steered' the user bubble is inserted BEFORE the EARLIEST streaming
+    // assistant bubble: that matches the persisted row order (the steered user row lands before every reply
+    // row this turn will persist — solo's single reply and a collab's per-expert steps alike), so a reload
+    // renders the same transcript the live view showed. No new placeholder — the already-streaming reply is
+    // the turn that answers this message. A resolved collab @mention rides back on the reply so the bubble's
+    // chip renders immediately (main already persisted the audit target — R5.1 stays main-authored).
     steer: async ({ expertId, text }) => {
       const cid = get().activeConv
       if (!cid) return { outcome: 'error' as const }
       try {
         const res = await window.api.agent.steer({ convId: cid, roleId: expertId, text })
         if (res.mode === 'denied') return { outcome: 'denied' as const, message: res.message }
+        if (res.mode === 'busy') return { outcome: 'busy' as const }
         if (res.mode !== 'steered') return { outcome: 'boundary' as const }
         set((s) => {
           const msgs = [...(s.byConversation[cid] ?? [])]
           let at = msgs.length
-          for (let i = msgs.length - 1; i >= 0; i--) {
+          for (let i = 0; i < msgs.length; i++) {
             if (msgs[i].role === 'assistant' && msgs[i].streaming) {
               at = i
               break
             }
           }
-          msgs.splice(at, 0, { id: uid(), createdAt: Date.now(), role: 'user', text })
+          msgs.splice(at, 0, {
+            id: uid(),
+            createdAt: Date.now(),
+            role: 'user',
+            text,
+            targetRoleId: res.targetRoleId ?? null,
+            targetMentionText: res.targetMentionText ?? null,
+            targetMentionLen: res.targetMentionLen ?? null,
+          })
           return { byConversation: { ...s.byConversation, [cid]: msgs } }
         })
         return { outcome: 'steered' as const }

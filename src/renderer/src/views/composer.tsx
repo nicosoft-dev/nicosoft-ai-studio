@@ -250,18 +250,22 @@ export function Composer({
     const text = value.trim()
     if ((!text && attach.length === 0) || !ready || compacting) return // compacting: the send slot is a Stop button — Enter stays consistent with it
     if (streaming) {
-      // Mid-turn steering (P0 — solo agent runs only): Enter while the run streams sends the message into
-      // the RUNNING loop, which folds it in at its next request edge; no Stop, no restart. Text-only, and
-      // never for coordinator/collab conversations (P1) or plain-chat roles (single-request turns have no
-      // fold edge) — those keep the old behavior: the composer holds the draft until the turn ends. Slash
-      // commands never reach here (the palette's keydown handler intercepts Enter while cmdOpen).
-      if (!text || attach.length > 0 || !agent || roleIsCoordinator(expert.id)) return
+      // Mid-turn steering: Enter while the run streams sends the message into the RUNNING loop(s), which
+      // fold it in at their next request edge; no Stop, no restart. Solo agent runs (P0) and coordinator
+      // conversations with a live collab (P1 — @expert routes to that member, no mention broadcasts to the
+      // team) both steer; plain-chat roles keep the old behavior (single-request turns have no fold edge).
+      // Text-only — images wait for the turn boundary. Slash commands never reach here (the palette's
+      // keydown handler intercepts Enter while cmdOpen); an @mention that matched the palette was already
+      // filled by pickMention, so the text arriving here is final. 'busy' (a dispatch pipeline turn — no
+      // steerable loop, and a send fallback would start a second concurrent turn) keeps the draft.
+      if (!text || attach.length > 0 || (!agent && !roleIsCoordinator(expert.id))) return
       if (activeConv) clearSuggestion(activeConv)
       setValue('')
       setCmdOutput(null)
       setTimeout(grow, 0)
       void chat.steer({ expertId: expert.id, text }).then((r) => {
-        if (r.outcome === 'boundary') dispatchSend(text) // the run ended first — ordinary new turn
+        if (r.outcome === 'boundary') dispatchSend(text) // nothing running after all — ordinary new turn
+        else if (r.outcome === 'busy') setValue(text) // running but not steerable now — keep the draft
         else if (r.outcome === 'denied') {
           setValue(text) // keep the user's words; nothing was persisted
           toast.error(r.message)

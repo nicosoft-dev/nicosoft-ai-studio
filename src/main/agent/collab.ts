@@ -487,6 +487,12 @@ export class CollabSession {
     return new Promise<InjectionOutcome>((resolve) => this.routeNote({ text: note, settled: resolve }, roleId))
   }
 
+  // Mid-turn steering (P1): the live roster snapshot the steer router picks targets from — a RUNNING expert
+  // gets its message on the request-edge fold lane (steer-queue), a PARKED one is woken via injectExternal.
+  expertStatuses(): { roleId: string; status: 'running' | 'parked'; exited: boolean }[] {
+    return [...this.experts.values()].map((e) => ({ roleId: e.spec.roleId, status: e.status, exited: e.exited }))
+  }
+
   private routeNote(entry: PendingNote, roleId?: string): void {
     const isLive = (x: ExpertRunner): boolean => !x.exited
     const byRole = roleId ? this.experts.get(roleId) : undefined

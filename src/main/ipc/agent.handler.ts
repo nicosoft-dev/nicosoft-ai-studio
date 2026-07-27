@@ -13,8 +13,10 @@ import { forwardLlmEvent, type RunStreamSink } from '../services/agent-dispatch'
 import * as compressionService from '../services/compression.service'
 import * as workspaceTasks from '../services/workspace/tasks'
 import { sessionBus, type InjectionOutcome } from '../agent/session-bus'
-import { registerLiveRun } from '../agent/live-runs'
+import { registerLiveRun, liveRunCount } from '../agent/live-runs'
 import { steerQueue, type SteerMessage } from '../agent/steer-queue'
+import { getLiveCollab } from '../services/agent-collab'
+import { matchMention } from '../services/coordinator/route'
 import { drainSoloResume } from '../services/solo-async'
 import { ENGINEER_ROLE_ID } from '../services/agent-tools'
 import { isSoloPreviewWriteTool } from '../agent/tools/preview'
@@ -271,7 +273,7 @@ export function startAgentRun(input: AgentRunInput, sender: WebContents, opts?: 
         // markActive re-claims the conv, so markIdle is NOT called here — calling it would flush queued
         // session notes into a second concurrent run while the continuation streams; the continuation's own
         // finally releases the conv instead (user turns outrank notes, design §4.4).
-        const leftovers = steerQueue.drain(input.convId)
+        const leftovers = steerQueue.drain(input.convId, roleId)
         if (cleanFinish && leftovers.length) {
           try {
             startAgentRun(input, sender, { steerSeed: leftovers })
@@ -294,18 +296,23 @@ export function registerAgentHandlers(): void {
     streams.abort(streamId)
   })
 
-  // Mid-turn steering (docs/mid-turn-steering-design.md §4.3): a user message for a conversation whose solo
+  // Mid-turn steering (docs/mid-turn-steering-design.md §4.3/§5): a user message for a conversation whose
   // run is still streaming. Persist it as a REAL user turn (running its UserPromptSubmit hook exactly like
-  // the ordinary send path does), then queue it for the loop's next request-edge fold. No active run →
-  // 'boundary': nothing persisted, the renderer falls back to the ordinary send path. The isActive check and
-  // the persist+enqueue commit run in one synchronous stretch, so the run's finally (the queue's last
-  // consumer) can never slip between them — an enqueued message is ALWAYS either folded mid-run or drained
-  // at the boundary. NEVER wrapped in the session-bus notification shell: that shell says "NOT USER INPUT",
-  // the exact opposite of what this is.
+  // the ordinary send path does), then deliver mid-run:
+  //   • SOLO (sessionBus active) — queue on the run's fold lane; the loop drains at its next request edge.
+  //   • LIVE COLLAB — route by @mention (that expert) or, with no mention, broadcast to the whole team (the
+  //     "default to coordinator" decision: Danny has no live loop mid-collab, so his relay is the broadcast).
+  //     Running targets fold at their request edge; parked ones wake via the mailbox.
+  //   • Neither, but runs are live (a dispatch pipeline / teardown race) — 'busy': NOT steerable and NOT safe
+  //     to fall back to send (a second concurrent turn); the renderer keeps the draft.
+  //   • Fully idle — 'boundary': the renderer falls back to the ordinary send path.
+  // The active checks and the persist+enqueue commit run in one synchronous stretch, so a terminal drain can
+  // never slip between them — an enqueued message is ALWAYS either folded mid-run or drained at a boundary.
+  // NEVER wrapped in the session-bus notification shell: that shell says "NOT USER INPUT", the exact
+  // opposite of what this is.
   ipcMain.handle('agent:steer', async (_e, req: AgentSteerInput): Promise<AgentSteerResult> => {
-    if (!sessionBus.isActive(req.convId)) return { mode: 'boundary' }
-    let text = req.text
-    if (hookRegistry.hasAny('UserPromptSubmit')) {
+    const applyPromptHook = async (text: string): Promise<{ text: string } | { denied: string }> => {
+      if (!hookRegistry.hasAny('UserPromptSubmit')) return { text }
       const conv = convRepo.getById(req.convId)
       const hookCtx: AgentContext = {
         cwd: conv?.cwd ?? '',
@@ -323,19 +330,50 @@ export function registerAgentHandlers(): void {
         { ...baseHookPayload('UserPromptSubmit', hookCtx), prompt: text, session_title: conv?.title ?? undefined },
         hookContextFromAgent(hookCtx),
       )
-      if (promptHook.permissionBehavior === 'deny') return { mode: 'denied', message: promptHook.permissionReason ?? (promptHook.blockingErrors.join('; ') || 'User prompt blocked by hook') }
+      if (promptHook.permissionBehavior === 'deny') return { denied: promptHook.permissionReason ?? (promptHook.blockingErrors.join('; ') || 'User prompt blocked by hook') }
       const rewritten = typeof promptHook.updatedInput?.prompt === 'string' ? promptHook.updatedInput.prompt : undefined
-      if (promptHook.suppressOriginalPrompt) text = rewritten ?? (promptHook.additionalContexts.join('\n\n') || '[original prompt suppressed by hook]')
-      else text = [rewritten ?? text, ...promptHook.additionalContexts].filter(Boolean).join('\n\n')
+      let out: string
+      if (promptHook.suppressOriginalPrompt) out = rewritten ?? (promptHook.additionalContexts.join('\n\n') || '[original prompt suppressed by hook]')
+      else out = [rewritten ?? text, ...promptHook.additionalContexts].filter(Boolean).join('\n\n')
       if (promptHook.sessionTitle) convRepo.rename(req.convId, promptHook.sessionTitle)
+      return { text: out }
+    }
+
+    // ── SOLO branch ──
+    if (sessionBus.isActive(req.convId)) {
+      const hooked = await applyPromptHook(req.text)
+      if ('denied' in hooked) return { mode: 'denied', message: hooked.denied }
       // The hook awaited — the run may have ended meanwhile. Recheck before committing: enqueueing now with
       // no consumer left would strand the message in the queue AND double it into the next run's history.
       // (The boundary fallback re-runs the hook on the ordinary send path; hooks are expected idempotent.)
       if (!sessionBus.isActive(req.convId)) return { mode: 'boundary' }
+      const row = convService.append(req.convId, { author: 'user', expertId: req.roleId, content: hooked.text })
+      steerQueue.enqueue(req.convId, req.roleId, { text: hooked.text, msgId: row.id })
+      return { mode: 'steered' }
     }
-    const row = convService.append(req.convId, { author: 'user', expertId: req.roleId, content: text })
-    steerQueue.enqueue(req.convId, { text, msgId: row.id })
-    return { mode: 'steered' }
+
+    // ── LIVE COLLAB branch ──
+    if (getLiveCollab(req.convId)) {
+      const hooked = await applyPromptHook(req.text)
+      if ('denied' in hooked) return { mode: 'denied', message: hooked.denied }
+      const collab = getLiveCollab(req.convId) // re-resolve: the hook awaited, the session may have torn down
+      if (!collab) return liveRunCount(req.convId) > 0 ? { mode: 'busy' } : { mode: 'boundary' }
+      // Leading @mention → that collab member; anything else (including a mention of a non-member) → the team.
+      const m = matchMention(hooked.text, collab.roster())
+      if (!collab.hasTarget(m?.id)) return { mode: 'busy' } // nobody live to receive it — don't persist a dead letter
+      // Same-tick commit: persist (with the R5.1 audit target for a resolved mention) then route. hasTarget →
+      // steer cannot race a teardown in between (single-threaded stretch, no await).
+      const row = convService.append(req.convId, { author: 'user', expertId: req.roleId, content: hooked.text })
+      const mentionText = m ? hooked.text.slice(0, m.matchedLen) : null
+      if (m) convRepo.setMessageTarget(row.id, m.id, mentionText, m.matchedLen)
+      collab.steer(hooked.text, row.id, m?.id)
+      return m
+        ? { mode: 'steered', targetRoleId: m.id, targetMentionText: mentionText ?? undefined, targetMentionLen: m.matchedLen }
+        : { mode: 'steered' }
+    }
+
+    // ── no steerable loop ──
+    return liveRunCount(req.convId) > 0 ? { mode: 'busy' } : { mode: 'boundary' }
   })
 
   ipcMain.handle('agent:permission:respond', (_e, resp: AgentPermissionResponse) => {

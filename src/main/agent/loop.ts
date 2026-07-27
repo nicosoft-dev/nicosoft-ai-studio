@@ -621,11 +621,13 @@ export async function* runAgent(
   while (true) {
     // Mid-turn steering (docs/mid-turn-steering-design.md R2/R5): user messages sent while this run streams
     // fold in at the request-assembly edge as plain user turns — the in-flight request was never aborted;
-    // this is the next one being built. MAIN conversation loop only: a Task / async sub-agent reuses this
-    // loop but must never see user prompts (both flags checked — belt and suspenders). Placed BEFORE
-    // microcompact/estimate so the folded turns are counted by both compaction layers.
-    if (!params.isSubAgentLoop && !ctx.isSubAgent && ctx.convId) {
-      for (const s of steerQueue.drain(ctx.convId)) messages = foldUserText(messages, s.text)
+    // this is the next one being built. MAIN conversation loops only: a Task / async sub-agent reuses this
+    // loop but must never see user prompts (both flags checked — belt and suspenders). Each loop drains ONLY
+    // its own (convId, roleId) lane — in a collab several experts share the convId, and a message addressed
+    // to one teammate must never be swallowed by another's request edge. Placed BEFORE microcompact/estimate
+    // so the folded turns are counted by both compaction layers.
+    if (!params.isSubAgentLoop && !ctx.isSubAgent && ctx.convId && ctx.roleId) {
+      for (const s of steerQueue.drain(ctx.convId, ctx.roleId)) messages = foldUserText(messages, s.text)
     }
     // Layer 2: microcompact every turn (clear old tool-result content, keep the recent 5) — cheap,
     // structure-preserving, runs before the expensive autocompact so it can keep it from firing.

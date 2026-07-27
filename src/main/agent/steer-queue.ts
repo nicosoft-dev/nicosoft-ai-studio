@@ -1,8 +1,13 @@
-// steer-queue.ts — mid-turn steering (docs/mid-turn-steering-design.md): user messages sent while a solo
-// run is still streaming, keyed by convId. agent:steer persists the message FIRST (it is a real user turn
-// the moment it hits the transcript) and enqueues it here; the agent loop drains at every request-assembly
-// edge and folds the batch into its in-memory messages (CC 2.x fold semantics — the in-flight request is
-// never aborted), and the run's finally drains leftovers to auto-continue as a fresh turn (R4).
+// steer-queue.ts — mid-turn steering (docs/mid-turn-steering-design.md): user messages sent while a run
+// is still streaming, keyed by (convId, lane) where lane = the TARGET role's id. agent:steer persists the
+// message FIRST (it is a real user turn the moment it hits the transcript) and enqueues it here; the agent
+// loop drains ITS OWN lane at every request-assembly edge and folds the batch into its in-memory messages
+// (CC 2.x fold semantics — the in-flight request is never aborted), and the consumer's terminal (solo run's
+// finally / a collab expert's turn end) drains leftovers so nothing strands.
+//
+// The lane matters because a collab conversation runs SEVERAL loops on ONE convId (each expert, ctx.roleId
+// apart) — a convId-only queue would let whichever expert reaches its request edge first swallow a message
+// addressed to a teammate. Solo is the single-lane case (lane = the conversation's role).
 //
 // Deliberately NOT session-bus: the bus wraps every note in the "[SYSTEM NOTIFICATION — NOT USER INPUT]"
 // shell, which is the exact opposite of what these are — real user input the model must treat as such.
@@ -14,21 +19,27 @@ export interface SteerMessage {
 }
 
 const queues = new Map<string, SteerMessage[]>()
+// NUL separator: no convId (ulid) or roleId can contain it, so distinct (convId, lane) pairs can never
+// concatenate to the same key.
+const laneKey = (convId: string, lane: string): string => convId + '\u0000' + lane
 
 export const steerQueue = {
-  enqueue(convId: string, msg: SteerMessage): void {
-    const q = queues.get(convId)
+  enqueue(convId: string, lane: string, msg: SteerMessage): void {
+    const k = laneKey(convId, lane)
+    const q = queues.get(k)
     if (q) q.push(msg)
-    else queues.set(convId, [msg])
+    else queues.set(k, [msg])
   },
   // Atomic take-all (one tick of the single-threaded main process): the caller owns the returned batch; an
-  // enqueue after this call lands in a fresh queue for the next drain point. The run's finally is the LAST
-  // consumer — anything it drains either auto-continues (clean finish) or is discarded from the queue only
-  // (the rows stay persisted and ride the next run's history), so no message is ever lost or double-read.
-  drain(convId: string): SteerMessage[] {
-    const q = queues.get(convId)
+  // enqueue after this call lands in a fresh queue for the next drain point. The lane's terminal consumer
+  // (solo finally / collab turn end) is LAST — anything it drains either continues into a fresh turn or is
+  // discarded from the queue only (the rows stay persisted and ride the next run's history), so no message
+  // is ever lost or double-read.
+  drain(convId: string, lane: string): SteerMessage[] {
+    const k = laneKey(convId, lane)
+    const q = queues.get(k)
     if (!q || q.length === 0) return []
-    queues.delete(convId)
+    queues.delete(k)
     return q
   },
 }
