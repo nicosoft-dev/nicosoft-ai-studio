@@ -7,6 +7,7 @@
 import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
 import type { TaskStep } from '../../ipc/contracts'
+import { killTree } from '../shell-invocation'
 
 const DEFAULT_TIMEOUT_SEC = 600
 const STREAM_CAP = 64 * 1024 // per-stream rolling tail — enough for prior piping without unbounded memory
@@ -47,31 +48,6 @@ function shellInvocation(step: TaskStep): { cmd: string; argv: string[] } {
     step.shell === 'zsh' ? '/bin/zsh' : step.shell === 'bash' ? '/bin/bash' : step.shell === 'sh' ? '/bin/sh' : undefined
   const cmd = explicit ?? process.env.SHELL ?? (process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash')
   return { cmd, argv: ['-lc', command] }
-}
-
-// Kill the whole process tree. Posix: the child is its own group leader (detached), so signalling -pid
-// reaches every descendant. Windows: taskkill /T walks the tree — its spawn failures surface as an async
-// 'error' event, so we attach a no-op listener (a bare spawn with no listener would crash the main process
-// on ENOENT/EPERM).
-function killTree(pid: number): void {
-  if (process.platform === 'win32') {
-    try {
-      const tk = spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
-      tk.on('error', () => {}) // best-effort: an unspawnable taskkill must not throw out of the event loop
-    } catch {
-      /* already gone */
-    }
-    return
-  }
-  try {
-    process.kill(-pid, 'SIGKILL')
-  } catch {
-    try {
-      process.kill(pid, 'SIGKILL')
-    } catch {
-      /* already gone */
-    }
-  }
 }
 
 export function runCommandStep(step: TaskStep, taskCwd: string | undefined, signal?: AbortSignal): Promise<CommandResult> {
@@ -134,11 +110,11 @@ export function runCommandStep(step: TaskStep, taskCwd: string | undefined, sign
     }
     const timer = setTimeout(() => {
       timedOut = true
-      if (child.pid) killTree(child.pid)
+      if (child.pid) killTree(child.pid, 'SIGKILL')
       armGrace(`[timed out after ${Math.round(timeoutMs / 1000)}s — process did not exit]`)
     }, timeoutMs)
     const onAbort = (): void => {
-      if (child.pid) killTree(child.pid)
+      if (child.pid) killTree(child.pid, 'SIGKILL')
       armGrace('[stopped — process did not exit]')
     }
     signal?.addEventListener('abort', onAbort, { once: true })

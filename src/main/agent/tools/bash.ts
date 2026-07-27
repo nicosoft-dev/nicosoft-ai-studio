@@ -19,6 +19,15 @@ import { clearHookEnvFiles, hasHookEnvSource, shellSourceHookEnvSnippet } from '
 import { fileWatchManager } from '../hooks/file-watch'
 import { hookRegistry } from '../hooks/registry'
 import { isReadOnlyCommand } from './bash-classifier'
+import {
+  GIT_BASH_GUIDANCE,
+  findGitBashPath,
+  killTree,
+  planShellSpawn,
+  posixPathToWindowsPath,
+  shellPathsEqual,
+  windowsPathToPosixPath,
+} from '../shell-invocation'
 import { assertBgIsolationWriteAllowed, bgIsolationWriteBlock } from './write-guard'
 
 const inputSchema = z.object({
@@ -94,17 +103,31 @@ export const bashTool = buildTool<typeof inputSchema, BashOutput>({
   maxResultSizeChars: 30_000,
   async call(input, ctx) {
     if (!isReadOnlyCommand(input.command)) assertBgIsolationWriteAllowed(ctx)
+    // Windows without git-bash: a guided tool error (127 = command not found), not a crash — the model
+    // relays the install instructions and the turn survives. Mirrors the Claude Desktop preflight.
+    if (process.platform === 'win32' && !findGitBashPath()) {
+      return { data: { stdout: '', stderr: GIT_BASH_GUIDANCE, code: 127, timedOut: false, signal: null } }
+    }
     const markerDir = await mkdtemp(join(tmpdir(), `studio-cwd-${process.pid}-`))
     const markerPath = join(markerDir, `${randomUUID()}.pwd`)
+    // git-bash's pwd/trap live in POSIX-path land — hand the marker over as /c/… on Windows.
+    const markerPathForShell = process.platform === 'win32' ? windowsPathToPosixPath(markerPath) : markerPath
     const envPrelude = shellSourceHookEnvSnippet(ctx.sessionDir)
-    const wrappedCommand = `STUDIO_CWD_MARKER=${shellQuote(markerPath)}; trap 'pwd > "$STUDIO_CWD_MARKER"' EXIT; ${envPrelude} ${input.command}`
+    const wrappedCommand = `STUDIO_CWD_MARKER=${shellQuote(markerPathForShell)}; trap 'pwd > "$STUDIO_CWD_MARKER"' EXIT; ${envPrelude} ${input.command}`
     return new Promise<{ data: BashOutput }>((resolve, reject) => {
-      // detached: the child becomes its own process-group leader, so a timeout/abort can kill the WHOLE
-      // tree (the shell + every grandchild it forked) via process.kill(-pgid). Plain child.kill() signals
-      // only the shell — a command that forks (globs, pipes, a background server) leaves the real worker
-      // orphaned and still running. That is exactly how `find /` survived the 120s timeout and hung a
-      // build for 17min: the timeout killed the shell while the find kept scanning the whole disk.
-      const child = spawn(wrappedCommand, { shell: true, cwd: ctx.cwd, signal: ctx.signal, detached: true })
+      // POSIX: shell:true + detached — the child leads its own process group, so a timeout/abort can kill
+      // the WHOLE tree (the shell + every grandchild it forked) via killTree(-pgid). Plain child.kill()
+      // signals only the shell — that is exactly how `find /` once survived the 120s timeout and hung a
+      // build for 17min. win32: explicit git-bash `bash.exe -c` (cmd.exe cannot parse bash syntax) with
+      // windowsHide so no console window pops over the GUI, and NO detached (on Windows detached means
+      // "give the child its own console window"; the tree is reaped by taskkill /T, not process groups).
+      const plan = planShellSpawn(wrappedCommand)
+      const child = spawn(plan.file, plan.args, {
+        ...plan.options,
+        cwd: ctx.cwd,
+        signal: ctx.signal,
+        env: process.platform === 'win32' ? { ...process.env, SHELL: plan.file } : process.env,
+      })
       let stdout = ''
       let stderr = ''
       let truncated = false
@@ -117,19 +140,11 @@ export const bashTool = buildTool<typeof inputSchema, BashOutput>({
         }
         return (buf + chunk.toString()).slice(0, MAX_OUTPUT)
       }
-      // Kill the whole process group (negative pid). Fall back to the single child if the group send
-      // fails (already-exited, or a platform without process groups).
+      // Kill the whole tree: POSIX group signal (negative pid) with single-pid fallback; Windows
+      // taskkill /T /F. Shared with the scheduler's command steps.
       const killGroup = (sig: NodeJS.Signals): void => {
         if (child.pid == null) return
-        try {
-          process.kill(-child.pid, sig)
-        } catch {
-          try {
-            child.kill(sig)
-          } catch {
-            /* already gone */
-          }
-        }
+        killTree(child.pid, sig)
       }
       const timeout = Math.min(input.timeout_ms ?? input.timeout ?? DEFAULT_TIMEOUT, MAX_TIMEOUT)
       const termTimer = setTimeout(() => {
@@ -162,9 +177,11 @@ export const bashTool = buildTool<typeof inputSchema, BashOutput>({
       child.on('close', async (code, signal) => {
         cleanup()
         try {
-          const finalCwd = (await readFile(markerPath, 'utf-8').catch(() => '')).trim()
+          const rawFinalCwd = (await readFile(markerPath, 'utf-8').catch(() => '')).trim()
+          // git-bash's pwd emits /c/Users/… — convert back before comparing/realpathing as a native path.
+          const finalCwd = rawFinalCwd && process.platform === 'win32' ? posixPathToWindowsPath(rawFinalCwd) : rawFinalCwd
           const completed = !timedOut && signal == null
-          if (completed && finalCwd && finalCwd !== ctx.cwd) {
+          if (completed && finalCwd && !shellPathsEqual(finalCwd, ctx.cwd)) {
             const warning = await fireCwdChanged(ctx, ctx.cwd, finalCwd).catch((err) => `Studio could not persist Bash cwd: ${err instanceof Error ? err.message : String(err)}`)
             if (warning) stderr += `${stderr ? '\n' : ''}${warning}`
           }
