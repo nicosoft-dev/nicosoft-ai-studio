@@ -15,6 +15,7 @@ import { spawn } from 'node:child_process'
 import { z } from 'zod'
 import { buildTool } from '../tool'
 import type { ToolResultBlock } from '../types'
+import { killTree, planShellSpawn, type ShellSpawnPlan } from '../shell-invocation'
 import { isReadOnlyCommand } from './bash-classifier'
 
 const inputSchema = z.strictObject({
@@ -44,17 +45,25 @@ export const launchAsyncTool = buildTool({
     const label = input.description?.trim() || input.command.slice(0, 60)
     const handle = ctx.async.launch('process', label, (signal) =>
       new Promise<string>((resolve) => {
-        // detached: the child leads its own process GROUP so abort tree-kills the WHOLE tree (the bash -lc wrapper
-        // + every grandchild it forked) via process.kill(-pgid). The plain { signal } option (or child.kill())
-        // reaps ONLY the wrapper and orphans the real worker — the same lesson as bash.ts / service-registry.
-        // SIGTERM, then SIGKILL after a grace so a SIGTERM-trapping child still dies.
-        const child = spawn('bash', ['-lc', input.command], { cwd, detached: true })
+        // POSIX: `bash -lc` detached — the child leads its own process GROUP so abort tree-kills the WHOLE
+        // tree (wrapper + every grandchild) via killTree(-pgid); { signal } alone (or child.kill()) reaps
+        // ONLY the wrapper — the same lesson as bash.ts / service-registry. win32: explicit git-bash -lc
+        // (a bare 'bash' would resolve to WSL's System32\bash.exe) + windowsHide; taskkill /T reaps the
+        // tree. SIGTERM, then SIGKILL after a grace so a SIGTERM-trapping child still dies.
+        let plan: ShellSpawnPlan
+        try {
+          plan = planShellSpawn(input.command, { login: true })
+        } catch (e) {
+          resolve(`[spawn error] ${e instanceof Error ? e.message : String(e)}`)
+          return
+        }
+        const child = spawn(plan.file, plan.args, { ...plan.options, cwd })
         let out = ''
         let settled = false
         const cap = (d: Buffer): void => { if (out.length < MAX_CAP) out += d.toString() }
         const killGroup = (sig: NodeJS.Signals): void => {
           if (child.pid == null) return
-          try { process.kill(-child.pid, sig) } catch { try { child.kill(sig) } catch { /* already gone */ } }
+          killTree(child.pid, sig)
         }
         const done = (text: string): void => { if (settled) return; settled = true; signal.removeEventListener('abort', onAbort); resolve(text) }
         const onAbort = (): void => {

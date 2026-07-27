@@ -15,6 +15,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process'
 import { ulid } from '../db/id'
+import { killTree, planShellSpawn } from './shell-invocation'
 
 const MAX_SERVICES = 64
 const HEAD_MAX = 4000
@@ -127,7 +128,11 @@ export class ServiceRegistry implements ServiceHandle {
     }
     this.evictIfFull()
 
-    const child = spawn(input.command, { shell: true, cwd: input.cwd, detached: true })
+    // POSIX: shell:true + detached (own group for treeKill). win32: explicit git-bash + windowsHide — a
+    // service without windowsHide keeps a visible console window open for its whole lifetime. Missing
+    // git-bash throws GitBashMissingError, whose message is the install guidance the model relays.
+    const plan = planShellSpawn(input.command)
+    const child = spawn(plan.file, plan.args, { ...plan.options, cwd: input.cwd })
     if (!child.pid) throw new Error('failed to spawn service (no pid)')
 
     const rec: ServiceRecord = {
@@ -214,26 +219,13 @@ export class ServiceRegistry implements ServiceHandle {
   }
 }
 
-// Kill the whole process group (detached child is its own group leader). Negative pid targets the group, so
-// a server's forked children die too. SIGTERM then SIGKILL after a grace period for anything that ignores it.
+// Kill the whole process tree (POSIX group signal / Windows taskkill /T via the shared killTree).
+// SIGTERM then SIGKILL after a grace period for anything that ignores it; on Windows both tiers
+// hard-kill (/F) and the second call lands on an already-dead pid, which killTree absorbs.
 function treeKill(rec: ServiceRecord): void {
   const pid = rec.pid
-  try {
-    process.kill(-pid, 'SIGTERM')
-  } catch {
-    try {
-      rec.child.kill('SIGTERM')
-    } catch {
-      /* already gone */
-    }
-  }
-  setTimeout(() => {
-    try {
-      process.kill(-pid, 'SIGKILL')
-    } catch {
-      /* already gone */
-    }
-  }, 2000)
+  killTree(pid, 'SIGTERM')
+  setTimeout(() => killTree(pid, 'SIGKILL'), 2000)
 }
 
 // Probe an OS-assigned port from a server's startup log line. Handles the common shapes

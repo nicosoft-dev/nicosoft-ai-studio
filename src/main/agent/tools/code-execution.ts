@@ -49,7 +49,8 @@ function resolvePython(cwd: string | undefined): { bin: string; venvDir?: string
       for (const bin of bins) if (existsSync(bin)) return { bin, venvDir: dir }
     }
   }
-  return { bin: 'python3' }
+  // Global fallback: Windows installs expose `python`, not `python3` (which is often a Store stub).
+  return { bin: process.platform === 'win32' ? 'python' : 'python3' }
 }
 
 export const codeExecutionTool = buildTool<typeof inputSchema, CodeOutput>({
@@ -82,6 +83,8 @@ export const codeExecutionTool = buildTool<typeof inputSchema, CodeOutput>({
       const child = spawn(pythonBin, [scriptPath], {
         cwd: ctx.cwd || outDir, // data lives in the role's cwd; fall back to the temp dir if unset
         signal: ctx.signal,
+        windowsHide: true, // no console window over the GUI app
+
         env: {
           ...process.env,
           NSAI_CODE_OUTPUT: outDir,
