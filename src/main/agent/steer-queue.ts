@@ -44,6 +44,30 @@ export const steerQueue = {
   },
 }
 
+// ── Mid-collab context for the closeout (P1) ────────────────────────────────────────────────────────────
+// What the user said WHILE a collaboration ran must reach the coordinator's closeout — the synthesis and
+// the independent final audit judge "did the team deliver what was asked", and without these sections a
+// user-steered stop reads as a phantom order that "was never in your instructions" (observed live: honest
+// work called abandoned). Pure string builders, pinned by e2e/steer.mts — the synthesize call rides the
+// tool-less llmChat layer that no wire log covers, so the contract lives here, not in a dogfood assertion.
+
+// The synthesis-prompt section: spliced between the original question and the expert panel.
+export function midCollabSection(messages: string[]): string[] {
+  if (!messages.length) return []
+  return [
+    '',
+    'While the team worked, the user sent additional MID-COLLABORATION instructions (each expert already received them live). Where they conflict with the original ask, the LATEST instruction defines what "done" means:',
+    ...messages.flatMap((m) => ['', `> ${m.replace(/\n/g, '\n> ')}`]),
+  ]
+}
+
+// The audit flavor: the verifier's "original prompt" extended with the user's mid-collab updates, so a
+// legitimately steered stop is judged against the user's latest word instead of failing the audit.
+export function withMidCollabInstructions(prompt: string, messages: string[]): string {
+  if (!messages.length) return prompt
+  return `${prompt}\n\n[The user sent these additional instructions MID-COLLABORATION — where they conflict with the ask above, the LATEST instruction defines what "done" means:]\n${messages.map((m) => `- ${m}`).join('\n')}`
+}
+
 // Fold one steered user text into the loop's in-memory messages. Mid-loop the trailing message is usually
 // the user-role tool_results turn — append a text block to it rather than pushing a second consecutive
 // user message (some upstreams 400 on non-alternating roles; same discipline as agent.service's

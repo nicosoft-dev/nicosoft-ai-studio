@@ -3,6 +3,7 @@
 // these build the per-turn USER message content.
 
 import { displayName } from '../../agent/roles/prompts'
+import { midCollabSection } from '../../agent/steer-queue'
 
 // Pipeline step N+1 hand-off: the next role sees the user's original request + every prior step's
 // output + a one-line directive. Without this, the next role sees just the previous output and may
@@ -28,8 +29,14 @@ export function buildPanelPrompt(question: string, roleId: string): string {
   return `${question}\n\n---\nYou are one of several experts answering this independently. Give YOUR own substantive take from your specialty as ${displayName(roleId)} — don't route it, don't defer to other experts, don't ask who should handle it. Coordinator compares everyone's answers afterward.`
 }
 
-export function buildParallelSynthesisInput(originalQuery: string, outputs: { role: string; text: string }[], reviewNote?: string): string {
-  const sections = [`Original user question:\n${originalQuery}`, '', 'Each expert answered INDEPENDENTLY (a panel, not a pipeline):']
+export function buildParallelSynthesisInput(originalQuery: string, outputs: { role: string; text: string }[], reviewNote?: string, midTurnUserMessages?: string[]): string {
+  const sections = [`Original user question:\n${originalQuery}`]
+  // Mid-turn steering (P1): the user spoke WHILE the team worked — the experts already received those
+  // messages live, so the synthesis must judge the outcome against the user's LATEST instructions, not the
+  // original ask alone (or a user-steered stop reads as a phantom order). Section shape pinned by
+  // e2e/steer.mts via the pure builder.
+  sections.push(...midCollabSection(midTurnUserMessages ?? []))
+  sections.push('', 'Each expert answered INDEPENDENTLY (a panel, not a pipeline):')
   for (const o of outputs) sections.push('', `## ${displayName(o.role)}`, o.text)
   // Collaborate closeout: an independent reviewer verified the combined build (Gate-B doesn't run in collaborate,
   // so this is the one verification gate). Surface its verdict so the synthesis CLOSES on the real state — never

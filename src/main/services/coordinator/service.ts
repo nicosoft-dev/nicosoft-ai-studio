@@ -36,6 +36,7 @@ import { runGatedRoleStep, runGateBFailFollowUp } from './gate-b'
 import { runVerifierStep } from '../lens/verifier'
 import { submitGateC } from './gate-c'
 import { runCollaboration } from './collab'
+import { withMidCollabInstructions } from '../../agent/steer-queue'
 import {
   buildCouncilSynthesisInput,
   buildCritiquePrompt,
@@ -75,7 +76,11 @@ async function runCollabReview(
   fullChain: string[],
   outputs: { role: string; text: string }[],
   cb: CoordinatorCallbacks,
-  signal: AbortSignal
+  signal: AbortSignal,
+  // Mid-turn steering (P1): what the user said WHILE the team worked. The verifier judges "did the team
+  // deliver what was asked" — against the user's LATEST instructions, or a legitimately user-steered stop
+  // reads as an abandoned task and fails the audit.
+  midTurnUser?: string[]
 ): Promise<{ note: string; inputTokens: number; outputTokens: number }> {
   // When verification can't run, we still return a note — an UNVERIFIED marker — so the synthesis closes HONESTLY
   // instead of presenting unchecked work as done (matching single/pipeline's explicit unverified beat).
@@ -94,7 +99,7 @@ async function runCollabReview(
     cb,
     signal
   }
-  const gate = { originalPrompt: input.prompt, acceptance: [] as string[] }
+  const gate = { originalPrompt: withMidCollabInstructions(input.prompt, midTurnUser ?? []), acceptance: [] as string[] }
   try {
     // The independent final audit: a reviewer INDEPENDENT of every collaborator runs the project's own
     // build/typecheck on the combined delta. R5.2: attribution comes from the verdict's OWN reviewerRoleId (the
@@ -548,6 +553,11 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
     // reused when the chat was opened inside one), with a task per collaborating expert + the conversation
     // linked. Each expert that produces output marks its task done; the phase advances to done when all are.
     const project = await collabProject.ensureProjectForCollab(input.convId, input.prompt, decision.roles, input.cwd)
+    // Mid-turn steering (P1): watermark the transcript before the session so anything the user sends WHILE
+    // the team works (agent:steer persists those as ordinary user rows) can be picked out afterwards — the
+    // final audit and the synthesis must judge against the user's latest instructions, not the original ask.
+    const preCollabRows = convRepo.listByConversation(input.convId)
+    const steerWatermark = preCollabRows.length ? preCollabRows[preCollabRows.length - 1].id : ''
     // Assignments open INSIDE runCollaboration (per expert, after its binding/protocol checks pass — a skipped
     // role never opens a row) and settle per expert on its CollabEvent 'done'; ensureProjectForCollab already
     // linked the conversation, so each row snapshots the fresh project id.
@@ -555,6 +565,10 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
     if (signal.aborted) throw new LlmError('network', 'aborted mid-collaboration')
     if (outputs.length === 0) throw new LlmError('upstream', 'collaboration produced no output')
     collabProject.completeCollabTasks(project, outputs.map((o) => o.role))
+    const midTurnUser = convRepo
+      .listByConversation(input.convId)
+      .filter((m) => m.id > steerWatermark && m.author === 'user' && m.content)
+      .map((m) => m.content)
     // Independent FINAL audit (collab-review-flow): the team already self-checked during the build (the elected
     // driver drove studio_lens with the team as reviewer, owners fixed one round). Collaborate skips Gate-B, so the
     // combined build still needs ONE independent pass — dispatch the bound verifier role (independent of EVERY
@@ -562,8 +576,8 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
     // streams as its own "<verifier> · Verifier" segment; Danny then closes WITH the verdict in hand (honest
     // closeout — a FAIL is reported, never silently reworked; no auto-fix loop). Best-effort: no independent role
     // bound / no project cwd / infra fault → skip cleanly.
-    const review = await runCollabReview(input, decision.roles, fullChain, outputs, cb, signal)
-    const synthInput = buildParallelSynthesisInput(input.prompt, outputs, review.note)
+    const review = await runCollabReview(input, decision.roles, fullChain, outputs, cb, signal, midTurnUser)
+    const synthInput = buildParallelSynthesisInput(input.prompt, outputs, review.note, midTurnUser)
     const synth = await runRoleStep({
       convId: input.convId,
       roleId: 'coordinator',
