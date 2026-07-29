@@ -256,8 +256,8 @@ export function Composer({
       // team) both steer; plain-chat roles keep the old behavior (single-request turns have no fold edge).
       // Text-only — images wait for the turn boundary. Slash commands never reach here (the palette's
       // keydown handler intercepts Enter while cmdOpen); an @mention that matched the palette was already
-      // filled by pickMention, so the text arriving here is final. 'busy' (a dispatch pipeline turn — no
-      // steerable loop, and a send fallback would start a second concurrent turn) keeps the draft.
+      // filled by pickMention, so the text arriving here is final. A turn with no fold edge (Danny routing
+      // / dispatching) answers 'queued' — delivered all the same, just at the turn boundary.
       if (!text || attach.length > 0 || (!agent && !roleIsCoordinator(expert.id))) return
       if (activeConv) clearSuggestion(activeConv)
       setValue('')
@@ -265,7 +265,6 @@ export function Composer({
       setTimeout(grow, 0)
       void chat.steer({ expertId: expert.id, text }).then((r) => {
         if (r.outcome === 'boundary') dispatchSend(text) // nothing running after all — ordinary new turn
-        else if (r.outcome === 'busy') setValue(text) // running but not steerable now — keep the draft
         else if (r.outcome === 'denied') {
           setValue(text) // keep the user's words; nothing was persisted
           toast.error(r.message)

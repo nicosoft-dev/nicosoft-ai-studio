@@ -311,6 +311,19 @@ export function registerAgentHandlers(): void {
   // NEVER wrapped in the session-bus notification shell: that shell says "NOT USER INPUT", the exact
   // opposite of what this is.
   ipcMain.handle('agent:steer', async (_e, req: AgentSteerInput): Promise<AgentSteerResult> => {
+    // Persist + park on the conversation's role lane. The lane's LAST consumer starts the next turn with it
+    // (coordinator.handler's terminal, agent.handler's finally) — and a role that happens to be running a
+    // real agent loop on the same lane (Danny answering DIRECTLY) folds it at its next request edge instead,
+    // whichever comes first. Either way Enter always lands: the bubble is on screen and the message runs.
+    // Never enqueue without a live consumer: no run left → 'boundary' and the renderer sends normally. The
+    // check and the commit are one synchronous stretch, and a run's terminal drain is likewise atomic, so
+    // the two can't interleave — a queued message is ALWAYS drained by someone.
+    const queueForBoundary = (r: AgentSteerInput, text: string): AgentSteerResult => {
+      if (liveRunCount(r.convId) === 0) return { mode: 'boundary' }
+      const row = convService.append(r.convId, { author: 'user', expertId: r.roleId, content: text })
+      steerQueue.enqueue(r.convId, r.roleId, { text, msgId: row.id })
+      return { mode: 'queued' }
+    }
     const applyPromptHook = async (text: string): Promise<{ text: string } | { denied: string }> => {
       if (!hookRegistry.hasAny('UserPromptSubmit')) return { text }
       const conv = convRepo.getById(req.convId)
@@ -357,10 +370,10 @@ export function registerAgentHandlers(): void {
       const hooked = await applyPromptHook(req.text)
       if ('denied' in hooked) return { mode: 'denied', message: hooked.denied }
       const collab = getLiveCollab(req.convId) // re-resolve: the hook awaited, the session may have torn down
-      if (!collab) return liveRunCount(req.convId) > 0 ? { mode: 'busy' } : { mode: 'boundary' }
+      if (!collab) return queueForBoundary(req, hooked.text)
       // Leading @mention → that collab member; anything else (including a mention of a non-member) → the team.
       const m = matchMention(hooked.text, collab.roster())
-      if (!collab.hasTarget(m?.id)) return { mode: 'busy' } // nobody live to receive it — don't persist a dead letter
+      if (!collab.hasTarget(m?.id)) return queueForBoundary(req, hooked.text) // no live recipient → let it run as the next turn
       // Same-tick commit: persist (with the R5.1 audit target for a resolved mention) then route. hasTarget →
       // steer cannot race a teardown in between (single-threaded stretch, no await).
       const row = convService.append(req.convId, { author: 'user', expertId: req.roleId, content: hooked.text })
@@ -372,8 +385,12 @@ export function registerAgentHandlers(): void {
         : { mode: 'steered' }
     }
 
-    // ── no steerable loop ──
-    return liveRunCount(req.convId) > 0 ? { mode: 'busy' } : { mode: 'boundary' }
+    // ── a live turn with no request edge to fold into (Danny's route/dispatch/synthesis are single llmChat
+    // calls) → queue it for the turn boundary; nothing live at all → boundary (renderer sends normally).
+    if (liveRunCount(req.convId) === 0) return { mode: 'boundary' }
+    const hooked = await applyPromptHook(req.text)
+    if ('denied' in hooked) return { mode: 'denied', message: hooked.denied }
+    return queueForBoundary(req, hooked.text) // re-checks liveness (the hook awaited — the turn may have ended)
   })
 
   ipcMain.handle('agent:permission:respond', (_e, resp: AgentPermissionResponse) => {

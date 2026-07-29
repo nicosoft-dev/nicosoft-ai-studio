@@ -4,7 +4,7 @@
 // terminal `coordinator:done` or `coordinator:error`. `coordinator:stop` aborts. This handler owns stream lifecycle
 // (id + AbortController + sender lifetime cleanup); the service does the orchestration.
 
-import { ipcMain } from 'electron'
+import { ipcMain, type WebContents } from 'electron'
 import { readFile } from 'node:fs/promises'
 import { dataDir } from '../db/connection'
 import { join, resolve, sep } from 'node:path'
@@ -15,6 +15,8 @@ import { broadcastConvImage, broadcastConvTodos, broadcastUsage } from './usage-
 import { broadcastRunEvent } from './workflow.handler'
 import { StreamRegistry } from './stream-lifecycle'
 import { abortLiveRuns, registerLiveRun } from '../agent/live-runs'
+import { queuedContinuationPrompt, steerQueue, type SteerMessage } from '../agent/steer-queue'
+import * as rolesService from '../services/roles.service'
 import { CoalescerGroup } from './stream-coalesce'
 import { PermissionBridge } from './permission-bridge'
 import { serializeAssistantBlocks, serializeToolResults } from './agent-serialize'
@@ -64,10 +66,28 @@ function sweepStream(streamId: string): void {
 }
 
 export function registerCoordinatorHandlers(): void {
-  ipcMain.handle('coordinator:run', (e, input: CoordinatorRunInputDto): { streamId: string } => {
+  // Start (or CONTINUE) a coordinator turn. Factored out of the coordinator:run handler so the turn's own
+  // terminal can start the next one: mid-turn steering (docs/mid-turn-steering-design.md) queues a message
+  // sent while Danny's turn runs, and this drives it as a fresh turn the moment that turn ends — the SAME
+  // R4 auto-continue solo has, so both modes share one mechanism instead of growing a second queue.
+  // opts.queuedSeed marks that continuation: its messages are ALREADY persisted (agent:steer wrote them),
+  // so the run only consumes them, and the renderer is told up front to bind this backend-started stream.
+  function startCoordinatorRun(input: CoordinatorRunInputDto, sender: WebContents, opts?: { queuedSeed?: SteerMessage[] }): { streamId: string } {
     const streamId = ulid()
-    const sender = e.sender
     const { controller, send, finish } = streams.open(streamId, sender)
+    // A continuation streams on a streamId the renderer never saw (it wasn't returned by any invoke) — bind
+    // it to the conv BEFORE any event arrives, exactly like solo's resumed run does.
+    if (opts?.queuedSeed?.length) {
+      const binding = rolesService.getBinding('coordinator')
+      send('agent:resume-stream', {
+        streamId,
+        convId: input.convId,
+        roleId: 'coordinator',
+        endpointId: binding?.endpointId ?? '',
+        model: binding?.model ?? '',
+        kind: 'coordinator',
+      })
+    }
     // Abort + sweep together: an aborted run's pending approval dialogs must clear with it.
     const offLive = registerLiveRun(input.convId, () => {
       streams.abort(streamId)
@@ -79,6 +99,8 @@ export function registerCoordinatorHandlers(): void {
     // into one payload. Every structural event that lands in the message stream flushes the lanes first
     // (ordering barrier); high-rate sub_tool_delta stays direct and is NOT a flush point.
     const lanes = new CoalescerGroup()
+    // R4: whether this turn ended CLEANLY — the only terminal a queued message continues on (see the finally).
+    let cleanFinish = false
 
     void coordinatorService
       .run(
@@ -220,6 +242,7 @@ export function registerCoordinatorHandlers(): void {
         controller.signal
       )
       .then((r) => {
+        cleanFinish = true
         // #6a: carry MAIN's persisted @mention target so the renderer backfills the optimistic user row (no reload).
         const ev: CoordinatorDoneDto = { streamId, inputTokens: r.inputTokens, outputTokens: r.outputTokens, reason: r.reason, targetRoleId: r.target.roleId, targetMentionText: r.target.mentionText, targetMentionLen: r.target.mentionLen }
         lanes.flushAll()
@@ -238,10 +261,26 @@ export function registerCoordinatorHandlers(): void {
         sweepStream(streamId) // deny any approval the renderer never answered before the turn ended
         offLive() // the run is over — conv deletion must not "abort" it later
         finish()
+        // Mid-turn steering R4: messages the user sent WHILE this turn ran (agent:steer queued them on the
+        // coordinator lane — Danny's route/dispatch/synthesis steps are single llmChat calls with no request
+        // edge to fold into) become the next turn now that the conversation is free. This drain is the lane's
+        // LAST consumer for a coordinator conv: a DIRECT turn runs a real agent loop on the same lane and may
+        // already have folded them mid-turn, in which case there is nothing left here. Only a CLEAN finish
+        // continues — an explicit Stop must stay stopped, and an error must not auto-retry into a dead
+        // endpoint; those messages are already persisted, so they simply ride the next turn's history.
+        const leftovers = steerQueue.drain(input.convId, 'coordinator')
+        if (cleanFinish && leftovers.length) {
+          try {
+            startCoordinatorRun({ ...input, prompt: queuedContinuationPrompt(leftovers.map((m) => m.text)) }, sender, { queuedSeed: leftovers })
+          } catch (err) {
+            console.warn(`[coordinator] queued-message continuation for conv ${input.convId} failed to start:`, err)
+          }
+        }
       })
 
     return { streamId }
-  })
+  }
+  ipcMain.handle('coordinator:run', (e, input: CoordinatorRunInputDto): { streamId: string } => startCoordinatorRun(input, e.sender))
 
   ipcMain.handle('coordinator:stop', (_e, streamId: string) => {
     streams.abort(streamId)

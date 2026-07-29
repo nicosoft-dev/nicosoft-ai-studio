@@ -61,6 +61,22 @@ export function midCollabSection(messages: string[]): string[] {
   ]
 }
 
+// The boundary-continuation flavor: a message the user sent DURING a turn that had no request edge to fold
+// into (Danny routing / dispatching) runs as the next turn — but the router only sees a fresh prompt over a
+// history whose dominant thread is the job that just ran, and re-dispatches that whole job again (observed
+// live: a "by the way…" follow-up re-ran the entire task). State the timing so it is read as a follow-up.
+// In-memory only: the raw text is what agent:steer persisted, and the transcript must keep the user's words.
+export function queuedContinuationPrompt(messages: string[]): string {
+  const body = messages.join('\n\n')
+  return (
+    '[Timing note from the system: the user sent this WHILE your previous turn was still running, so you ' +
+    'had not read it yet; that turn has since finished and its result is in the conversation above. Answer ' +
+    'it as a follow-up in that context — start or dispatch new work only if the message actually asks for ' +
+    'it, and never redo the work that just completed.]\n\n' +
+    body
+  )
+}
+
 // The audit flavor: the verifier's "original prompt" extended with the user's mid-collab updates, so a
 // legitimately steered stop is judged against the user's latest word instead of failing the audit.
 export function withMidCollabInstructions(prompt: string, messages: string[]): string {

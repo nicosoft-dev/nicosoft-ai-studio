@@ -124,9 +124,9 @@ export interface AgentRunInput {
 // request edge ('steered' — solo, or a live collab's targets by @mention / team broadcast; the collab reply
 // echoes the resolved mention so the optimistic bubble can render its chip immediately); if no run is
 // active by the time it arrives (the boundary race) nothing is persisted and the renderer falls back to the
-// ordinary send path ('boundary'). 'busy' = the conversation IS running but has no steerable loop right now
-// (a coordinator dispatch pipeline / the collab just tore down mid-flight) — nothing persisted, and the
-// renderer must NOT fall back to send (that would start a second concurrent turn); it keeps the draft.
+// ordinary send path ('boundary'). 'queued' = the conversation IS running but the turn has no request edge
+// to fold into (Danny's route/dispatch/synthesis steps are single llmChat calls) — the message is persisted
+// and runs as the next turn the moment this one ends, so Enter is never silently swallowed.
 // 'denied' = a UserPromptSubmit hook rejected it (message carries the reason; nothing persisted).
 export interface AgentSteerInput {
   convId: string
@@ -136,7 +136,7 @@ export interface AgentSteerInput {
 export type AgentSteerResult =
   | { mode: 'steered'; targetRoleId?: string; targetMentionText?: string; targetMentionLen?: number }
   | { mode: 'boundary' }
-  | { mode: 'busy' }
+  | { mode: 'queued' }
   | { mode: 'denied'; message: string }
 
 // 批C2b: a SOLO run resumed itself after a parked async op completed (solo-async). The backend started a fresh
@@ -148,6 +148,10 @@ export interface AgentResumeStream {
   roleId: string
   endpointId: string
   model: string
+  // Which reducer owns the stream. Absent/'agent' = a solo run (the original 批C2b case); 'coordinator' =
+  // a coordinator turn started by the backend (mid-turn steering's queued-message continuation), whose
+  // events ride the same coordinator:* channels a user-initiated Danny turn does.
+  kind?: 'agent' | 'coordinator'
 }
 // Unified live usage for ANY in-flight turn (chat / agent / coordinator / image), keyed by convId.
 //

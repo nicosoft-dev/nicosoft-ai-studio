@@ -216,7 +216,7 @@ export const useChat = create<ChatState>((set, get) => {
     // conv streaming so the composer shows the live working state; onDone clears it. The backend opens the
     // resumed segment with its own coordinator:step:start, so a fresh bubble appears exactly like a new step.
     ag.onResumeStream((d) => {
-      runMeta.set(d.streamId, { convId: d.convId, kind: 'agent', endpointId: d.endpointId, model: d.model })
+      runMeta.set(d.streamId, { convId: d.convId, kind: d.kind ?? 'agent', endpointId: d.endpointId, model: d.model })
       set((s) => ({ streaming: { ...s.streaming, [d.convId]: true } }))
     })
     ag.onQuestion((d) => {
@@ -1092,8 +1092,9 @@ export const useChat = create<ChatState>((set, get) => {
       try {
         const res = await window.api.agent.steer({ convId: cid, roleId: expertId, text })
         if (res.mode === 'denied') return { outcome: 'denied' as const, message: res.message }
-        if (res.mode === 'busy') return { outcome: 'busy' as const }
-        if (res.mode !== 'steered') return { outcome: 'boundary' as const }
+        if (res.mode === 'boundary') return { outcome: 'boundary' as const }
+        // 'steered' (folded into the running loop) and 'queued' (runs the moment this turn ends) both mean
+        // DELIVERED and both persisted the row — the bubble goes up identically; only the wait differs.
         set((s) => {
           const msgs = [...(s.byConversation[cid] ?? [])]
           let at = msgs.length
@@ -1108,13 +1109,13 @@ export const useChat = create<ChatState>((set, get) => {
             createdAt: Date.now(),
             role: 'user',
             text,
-            targetRoleId: res.targetRoleId ?? null,
-            targetMentionText: res.targetMentionText ?? null,
-            targetMentionLen: res.targetMentionLen ?? null,
+            targetRoleId: res.mode === 'steered' ? (res.targetRoleId ?? null) : null,
+            targetMentionText: res.mode === 'steered' ? (res.targetMentionText ?? null) : null,
+            targetMentionLen: res.mode === 'steered' ? (res.targetMentionLen ?? null) : null,
           })
           return { byConversation: { ...s.byConversation, [cid]: msgs } }
         })
-        return { outcome: 'steered' as const }
+        return { outcome: res.mode }
       } catch {
         return { outcome: 'error' as const }
       }
