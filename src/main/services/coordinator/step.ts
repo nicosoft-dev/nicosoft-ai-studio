@@ -107,6 +107,12 @@ export interface RunStepOptions {
   // role can answer multi-turn requests with continuity. False for pipeline step 2+ and synthesis —
   // those steps' "user input" is a constructed prompt, not a free-form user turn.
   includeHistory?: boolean
+  // TRUE only on a step whose task IS the user's own words, routed here by the coordinator (single dispatch,
+  // pipeline step 0). The expert then gets a line saying so in its system prompt — without it, a request
+  // phrased at the coordinator ("have an engineer run these") reads as an order to delegate and the assigned
+  // engineer spawns a sub-agent to do the job itself. NEVER set on a constructed-prompt step (hand-off,
+  // synthesis, verifier, panel): there the task is machinery's words, not the user's.
+  assignedFromUser?: boolean
   // isSynthesis=true → skip memory recall (the prompt itself is a synthesis directive — Coordinator's own
   // memories would only blur the merge) and use the Coordinator synthesis system prompt.
   isSynthesis?: boolean
@@ -174,7 +180,7 @@ export function withCoordinatorContext(base: string, memories: MemoryRow[], summ
 }
 
 export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string; reason: AgentResult['reason']; inputTokens: number; outputTokens: number; endpointId: string; model: string; writtenFiles: WrittenFile[] }> {
-  const { convId, roleId, prompt, dispatch, cb, signal, cwd, includeHistory = false, isSynthesis = false, isDirect = false, isParallelSynthesis = false, isCouncilSynthesis = false, quiet = false, ephemeral = false, segmentKind, progressCard } = opts
+  const { convId, roleId, prompt, dispatch, cb, signal, cwd, includeHistory = false, assignedFromUser = false, isSynthesis = false, isDirect = false, isParallelSynthesis = false, isCouncilSynthesis = false, quiet = false, ephemeral = false, segmentKind, progressCard } = opts
   // A disabled role must NEVER run a step — the SAME centralized precondition every entry point calls
   // (rolesService.assertRoleExecutable), so the invariant has one definition. The only path that reaches
   // HERE for a disabled role is an explicit @mention (route.ts routes it here for a loud, actionable
@@ -299,6 +305,7 @@ export async function runRoleStep(opts: RunStepOptions): Promise<{ text: string;
         contextWindow: ep.availableModels.find((m) => m.slug === binding.model)?.contextLength || undefined,
         cacheEnabled: ep.cacheEnabled,
         includeHistory,
+        assignedFromUser,
         memories,
         summary: summaryContent,
         permissionMode: opts.permissionMode,

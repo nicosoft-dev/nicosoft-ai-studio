@@ -352,6 +352,12 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
       prompt: input.prompt,
       dispatch: null,
       includeHistory: true,
+      // The expert replays the user's OWN words (includeHistory) — words addressed to the coordinator.
+      // Without saying so, "请派一位工程师做 X" reads as an order to delegate and the assigned engineer
+      // spawns a sub-agent for a five-command job (user-reported). Frames it in the system prompt, which
+      // is the only place that survives: step-0's `prompt` is dropped whenever the replayed history
+      // already ends on the user's turn (agent-dispatch's seed builder).
+      assignedFromUser: true,
       cwd: input.cwd || undefined,
       permissionMode: input.modeByRole?.[decision.role],
       cb,
@@ -623,6 +629,7 @@ export async function run(input: CoordinatorRunInput, cb: CoordinatorCallbacks, 
       prompt: stepPrompt,
       dispatch: fullChain,
       includeHistory: i === 0,
+      assignedFromUser: i === 0, // step 0 carries the user's own words (see the single-dispatch note above)
       cwd: input.cwd || undefined,
       permissionMode: input.modeByRole?.[roleId],
       cb,

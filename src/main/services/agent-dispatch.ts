@@ -694,6 +694,9 @@ export interface DispatchedAgentInput {
   // Mirrors runRoleStep: true for single / first-pipeline-step (replay history; the trailing user turn IS
   // the request) — false for pipeline step 2+ / panel (seed = the constructed `prompt`, not a user turn).
   includeHistory: boolean
+  // The task IS the user's own words, routed here by the coordinator (single dispatch / pipeline step 0) —
+  // append ASSIGNMENT_NOTE so the expert reads them as ITS assignment. See the constant for why.
+  assignedFromUser?: boolean
   expectsFileChanges?: boolean // implementation-gated dispatch → loop nudges once on a zero-edit quiesce
   maxTurns?: number // hard cap on agent-loop turns (lens sub-agents pass 50); undefined → unbounded
   stallTimeoutMs?: number // content-level stream stall watchdog; defaults to the main-dispatch budget
@@ -726,6 +729,16 @@ export interface DispatchedAgentInput {
   onTodosChange?: (roleId: string, todos: AgentContext['todos']) => void // TodoWrite writes back → shared conv-level list + per-role live push (roleId injected at ctx.setTodos)
   hookAgentId?: string // agent-hook sub-query id (anti-recursion); threaded into ctx.hookAgentId
 }
+
+// Appended to a dispatched expert's system prompt when the turn's task is the USER's own words (see
+// DispatchedAgentInput.assignedFromUser). States the one fact the replayed history cannot: those words were
+// spoken to the coordinator, and this role is who it picked.
+const ASSIGNMENT_NOTE =
+  'Assignment context: the user messages in this conversation were addressed to the COORDINATOR, which ' +
+  'routed this turn to you because you are the specialist it calls for. You are the assignee — do the work ' +
+  'yourself. Wording like "have an engineer do X", "get someone to handle X" or "派一位工程师做 X" is the user ' +
+  'asking the coordinator FOR you; it is not an instruction to hand the job on. Spawn a sub-agent only when ' +
+  'the work genuinely needs parallel workers or an isolated context, never merely to delegate your own task.'
 
 export async function runDispatchedAgent(
   d: DispatchedAgentInput,
@@ -762,7 +775,14 @@ export async function runDispatchedAgent(
   const [projectMapText, memoryIndexText] = d.systemPromptOverride
     ? [undefined, undefined]
     : await Promise.all([recallText(d.cwd), agentMemoryIndexText(d.cwd)])
-  const system = d.systemPromptOverride ?? buildAgentSystem(d.roleId, d.memories, d.summary, skillManager.listingForRole(d.roleId), d.cwd, false, projectMapText, memoryIndexText)
+  const baseSystem = d.systemPromptOverride ?? buildAgentSystem(d.roleId, d.memories, d.summary, skillManager.listingForRole(d.roleId), d.cwd, false, projectMapText, memoryIndexText)
+  // The expert replays the user's own turns (includeHistory) — words the user addressed to the COORDINATOR,
+  // which routed them here. Saying so is the difference between doing the job and re-delegating it: raw,
+  // "请派一位工程师做 X" / "have an engineer run these" reads as an order to delegate, and the assigned
+  // engineer spawned a sub-agent for a five-command job (user-reported 2026-07-29). This lives in the system
+  // prompt rather than the step's prompt because step-0's prompt is DROPPED whenever the replayed history
+  // already ends on the user's turn (the seed builder below only appends it after an assistant turn).
+  const system = d.assignedFromUser ? `${baseSystem}\n\n${ASSIGNMENT_NOTE}` : baseSystem
 
   let seed: AgentMessage[]
   if (d.includeHistory) {
